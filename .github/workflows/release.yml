@@ -77,7 +77,7 @@ jobs:
 
           # Write multiline output without breaking markdown formatting
           {
-            echo "CHANGELOG<<'EOF'"
+            echo "CHANGELOG<<EOF"
             echo "${CHANGELOG}"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
@@ -87,7 +87,7 @@ jobs:
         run: |
           ACTION_LIST=$(./scripts/generate-action-list.sh)
           {
-            echo "ACTION_LIST<<'EOF'"
+            echo "ACTION_LIST<<EOF"
             echo "${ACTION_LIST}"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
