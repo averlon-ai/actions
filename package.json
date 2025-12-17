@@ -1,0 +1,52 @@
+{
+  "name": "actions",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "iac-risk-analysis",
+    "container-analysis",
+    "k8s-analysis",
+    "iac-misconfig-analysis"
+  ],
+  "scripts": {
+    "prepare": "husky",
+    "test": "bun test",
+    "build": "bash scripts/build-all-actions.sh",
+    "build:iac-risk-analysis": "bash scripts/build-action.sh iac-risk-analysis",
+    "build:container-analysis": "bash scripts/build-action.sh container-analysis",
+    "public:export": "bun scripts/export-public-repo.ts",
+    "build:k8s-analysis": "bash scripts/build-action.sh k8s-analysis",
+    "build:iac-misconfig-analysis": "bash scripts/build-action.sh iac-misconfig-analysis",
+    "lint": "eslint \"**/*.{ts,js,tsx,jsx}\"",
+    "lint:fix": "eslint \"**/*.{ts,js,tsx,jsx}\" --fix",
+    "format": "prettier --write \"**/*.{ts,js,tsx,jsx}\"",
+    "create-action": "bash scripts/create-action.sh",
+    "create-package": "bash scripts/create-package.sh"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.17",
+    "@types/node": "^25.0.1",
+    "@typescript-eslint/eslint-plugin": "^8.48.1",
+    "@typescript-eslint/parser": "^8.48.1",
+    "eslint": "^9.39.1",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-prettier": "^5.0.1",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.2.7",
+    "prettier": "^3.1.0",
+    "typescript": "^5.3.0"
+  },
+  "lint-staged": {
+    "*.{ts,tsx}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,md,yml,yaml}": [
+      "prettier --write"
+    ],
+    "*.{js,jsx}": [
+      "eslint --fix",
+      "prettier --write"
+    ]
+  }
+}

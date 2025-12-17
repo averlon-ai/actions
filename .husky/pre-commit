@@ -1,0 +1,10 @@
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+# Keep Available Actions table in sync before linting/formatting
+./scripts/sync-action-list.sh README.md
+git add README.md
+
+# Use npx for lint-staged due to Bun workspace directory issue
+# TODO: Switch back to bun when the CouldntReadCurrentDirectory bug is fixed
+npx lint-staged

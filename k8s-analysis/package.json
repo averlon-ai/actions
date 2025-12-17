@@ -1,0 +1,26 @@
+{
+  "name": "@averlon/k8s-analysis-action",
+  "version": "1.0.0",
+  "description": "Averlon Misconfiguration Remediation Agent for Kubernetes GitHub Action",
+  "main": "src/main.ts",
+  "scripts": {
+    "test": "bun test",
+    "build": "bun run --bun tsc --noEmit",
+    "lint": "eslint . --ext .ts",
+    "lint:fix": "eslint . --ext .ts --fix",
+    "format": "prettier --write \"**/*.ts\""
+  },
+  "dependencies": {
+    "@actions/core": "^2.0.1",
+    "@actions/exec": "^2.0.0",
+    "@actions/github": "^6.0.0",
+    "@averlon/shared": "workspace:*",
+    "@averlon/github-actions-utils": "workspace:*",
+    "@averlon/github-copilot-utils": "workspace:*",
+    "js-yaml": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/js-yaml": "^4.0.5"
+  }
+}

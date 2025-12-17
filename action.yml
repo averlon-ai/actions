@@ -1,0 +1,5 @@
+name: Averlon Actions
+description: Placeholder root-level action for the public Averlon Actions repository. This file satisfies the GitHub Action requirement at the repo root and intentionally does nothing.
+runs:
+  using: "composite"
+  steps: []

@@ -1,0 +1,85 @@
+name: Kubernetes Misconfiguration Analysis with Averlon
+
+on:
+  pull_request:
+    paths:
+      - 'charts/**'
+      - 'helm/**'
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  analyze-k8s-manifests:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: 'v3.12.0'
+
+      - name: Install yq (YAML processor)
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
+      - name: Generate Helm manifests as JSON
+        run: |
+          # Option 1: Using helm template (recommended for CI/CD)
+          helm template my-release ./charts/my-app \
+            --namespace production \
+            --values charts/my-app/values.yaml \
+            --output-dir /tmp/manifests || true
+          
+          # Convert YAML manifests to JSON array
+          yq eval -o=json '.' /tmp/manifests/**/*.yaml | jq -s '.' > manifests.json
+
+      - name: Analyze with Averlon Misconfiguration Remediation Agent for Kubernetes
+        uses: averlon-org/actions/k8s-analysis@v1
+        with:
+          # Required: Averlon API credentials
+          api-key: ${{ secrets.AVERLON_API_KEY }}
+          api-secret: ${{ secrets.AVERLON_API_SECRET }}
+          base-url: https://wfe.dev.averlon.io/
+          
+          # Required: GitHub token for issue creation
+          # Use a PAT with Copilot access to enable auto-assignment
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          
+          # Required: Path to JSON file containing Kubernetes resources
+          manifest-file: manifests.json
+          
+          # Optional: Cloud ID for issue lookup (auto-detected if omitted)
+          # cloud-id: ${{ secrets.AWS_ACCOUNT_ID }}
+          
+          # Optional: Filters (Critical,High,Medium,Low)
+          filters: 'Critical,High,Medium'
+          
+          # Optional: Release name and namespace (auto-detected from manifests)
+          # release-name: 'my-release'
+          # namespace: 'production'
+          
+          # Optional: Filter by resource types
+          # resource-type-filter: 'Deployment,StatefulSet,Service'
+          
+          # Optional: Filter by namespaces
+          # namespace-filter: 'production,staging'
+          
+          # Optional: Enable verbose logging
+          # verbose: 'true'
+
+      - name: Upload analysis results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: k8s-analysis-results
+          path: |
+            k8s-analysis-output.json
+            consolidated-issues.json
+          retention-days: 30
+

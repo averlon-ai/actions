@@ -1,0 +1,80 @@
+name: 'Averlon Misconfiguration Remediation Agent for Kubernetes'
+description: 'Kubernetes Helm chart misconfiguration detection and remediation'
+author: 'Averlon'
+
+inputs:
+  api-key:
+    description: "API key for authentication with Averlon"
+    required: true
+  api-secret:
+    description: "API secret for authentication with Averlon"
+    required: true
+  manifest-file:
+    description: |
+      Path to JSON file containing Kubernetes resources from helm template or helm install --dry-run.
+      Generate with:
+        helm install <release> <chart> --dry-run | yq eval -o=json | jq -s '.' > manifests.json
+      Must be a JSON array of Kubernetes resources with 'kind' and 'apiVersion' fields.
+    required: true
+  base-url:
+    description: "Base URL for the Averlon API service"
+    required: false
+    default: "https://wfe.prod.averlon.io/"
+  cloud-id:
+    description: "secdi Cloud ID for issue lookup. Leave blank to auto-detect."
+    required: false
+  region:
+    description: "AWS region for ARN generation (e.g., us-west-2). If not provided, will be auto-detected from manifest metadata."
+    required: false
+  cluster:
+    description: "Cluster name for ARN generation (e.g., my-cluster). If not provided, will be auto-detected from manifest metadata."
+    required: false
+  namespace:
+    description: "Kubernetes namespace used for the Helm release (overrides autodetected value from dry run output)"
+    required: false
+  release-name:
+    description: "Release name used for the Helm release (overrides autodetected value from dry run output)"
+    required: false
+  github-token:
+    description: |
+      GitHub token for creating issues / pull requests.
+      Defaults to the workflow GITHUB_TOKEN when omitted (Copilot assignment disabled).
+      Provide a PAT with Copilot access to automatically assign Copilot.
+    required: false
+  filters:
+    description: |
+      Severity filters (comma-separated). Supported values: Critical, High, Medium, Low.
+      Example: "Critical,High"
+    required: false
+    default: "Critical,High"
+  resource-type-filter:
+    description: |
+      Filter by specific Kubernetes resource types (comma-separated). 
+      Example: "Deployment,StatefulSet,DaemonSet"
+      If not specified, all resource types are included.
+    required: false
+  namespace-filter:
+    description: |
+      Filter by specific namespaces (comma-separated).
+      Example: "default,production,staging"
+      If not specified, all namespaces are included.
+    required: false
+  verbose:
+    description: "If true, log full helm output for debugging"
+    required: false
+    default: "false"
+  
+
+runs:
+  using: 'node20'
+  main: 'dist/main.js'
+
+outputs:
+  analysis-json:
+    description: "Compact JSON summary (chart, release, namespace, totals)"
+  analysis-json-path:
+    description: "Path to the JSON file written to disk"
+
+branding:
+  icon: 'package'
+  color: 'purple'
