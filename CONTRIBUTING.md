@@ -39,7 +39,7 @@ actions/
 2. Clone your fork:
 
    ```bash
-   git clone https://github.com/averlon-security/actions.git
+   git clone https://github.com/averlon-ai/actions.git
    cd actions
    ```
 
