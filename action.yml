@@ -1,5 +1,11 @@
 name: Averlon Actions
-description: Placeholder root-level action for the public Averlon Actions repository. This file satisfies the GitHub Action requirement at the repo root and intentionally does nothing.
+description: Collection of Github Actions from Averlon to enable remediation for various software and cloud vulnerabilities
+author: Averlon
+
+branding:
+  icon: "align-center"
+  color: "purple"
+
 runs:
   using: "composite"
   steps: []
