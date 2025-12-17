@@ -54,7 +54,7 @@ jobs:
           terraform show -json tfplan > plan.json
 
       - name: Run Terraform Misconfiguration Scan
-        uses: averlon-security/averlon-terraform-action/iac-misconfig-analysis@v1
+        uses: averlon-ai/actions/iac-misconfig-analysis@v1
         with:
           api-key: ${{ secrets.AVERLON_API_KEY }}
           api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -73,7 +73,7 @@ Process scan results programmatically using the `scan-result` output:
 ```yaml
 - name: Run Terraform Misconfiguration Scan
   id: scan
-  uses: averlon-security/averlon-terraform-action/iac-misconfig-analysis@v1
+  uses: averlon-ai/actions/iac-misconfig-analysis@v1
   with:
     api-key: ${{ secrets.AVERLON_API_KEY }}
     api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -119,7 +119,7 @@ Skip GitHub issue creation if you only need the output:
 ```yaml
 - name: Run Terraform Misconfiguration Scan
   id: scan
-  uses: averlon-security/averlon-terraform-action/iac-misconfig-analysis@v1
+  uses: averlon-ai/actions/iac-misconfig-analysis@v1
   with:
     api-key: ${{ secrets.AVERLON_API_KEY }}
     api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -138,7 +138,7 @@ Skip GitHub issue creation if you only need the output:
 
 ```yaml
 - name: Run Terraform Misconfiguration Scan
-  uses: averlon-security/averlon-terraform-action/iac-misconfig-analysis@v1
+  uses: averlon-ai/actions/iac-misconfig-analysis@v1
   with:
     # Required inputs
     api-key: ${{ secrets.AVERLON_API_KEY }}
@@ -195,7 +195,7 @@ Skip GitHub issue creation if you only need the output:
 ```yaml
 - name: Run Terraform Misconfiguration Scan
   id: scan
-  uses: averlon-security/averlon-terraform-action/iac-misconfig-analysis@v1
+  uses: averlon-ai/actions/iac-misconfig-analysis@v1
   # ... inputs
 
 - name: Use output
@@ -333,7 +333,7 @@ Enable debug logging for troubleshooting:
 
 ```yaml
 - name: Run Terraform Misconfiguration Scan
-  uses: averlon-security/averlon-terraform-action/iac-misconfig-analysis@v1
+  uses: averlon-ai/actions/iac-misconfig-analysis@v1
   env:
     ACTIONS_STEP_DEBUG: true
   with:
