@@ -1,0 +1,59 @@
+version: 2
+updates:
+  # Root package.json for monorepo setup
+  - package-ecosystem: 'npm'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+      day: 'monday'
+      time: '09:00'
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: 'deps'
+      include: 'scope'
+    groups:
+      dev-dependencies:
+        applies-to: version-updates
+        patterns:
+          - '@types/*'
+          - 'prettier'
+          - 'typescript'
+        update-types:
+          - 'minor'
+          - 'patch'
+
+  # Terraform Risk Analysis action
+  - package-ecosystem: 'npm'
+    directory: '/iac-risk-analysis'
+    schedule:
+      interval: 'weekly'
+      day: 'monday'
+      time: '09:00'
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: 'deps'
+      include: 'scope'
+
+  # Shared package
+  - package-ecosystem: 'npm'
+    directory: '/packages/averlon-shared'
+    schedule:
+      interval: 'weekly'
+      day: 'monday'
+      time: '09:00'
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: 'deps'
+      include: 'scope'
+
+  # Enable version updates for GitHub Actions
+  - package-ecosystem: 'github-actions'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+      day: 'monday'
+      time: '09:00'
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: 'ci'
+      include: 'scope'

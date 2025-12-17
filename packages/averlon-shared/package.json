@@ -1,0 +1,21 @@
+{
+  "name": "@averlon/shared",
+  "version": "1.0.0",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "test": "bun test",
+    "build": "bun run --bun tsc --noEmit",
+    "lint": "eslint . --ext .ts",
+    "lint:fix": "eslint . --ext .ts --fix",
+    "format": "prettier --write \"**/*.ts\""
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@actions/core": "^2.0.1"
+  },
+  "peerDependencies": {
+    "@actions/core": "^2.0.1",
+    "typescript": "^5.0.0"
+  }
+}

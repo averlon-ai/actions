@@ -1,0 +1,41 @@
+name: 'Averlon Vulnerability Remediation Agent for Containers'
+description: 'Docker and container security analysis with vulnerability detection and remediation'
+author: 'Averlon'
+
+inputs:
+  api-key:
+    description: "API key for authentication"
+    required: true
+  api-secret:
+    description: "API secret for authentication"
+    required: true
+  github-token:
+    description: |
+      GitHub token for creating issues / pull request.
+      For auto-assign-copilot, this MUST be a Personal Access Token (PAT) with Copilot access. The default GITHUB_TOKEN does not support Copilot assignment.
+    required: true
+  filters:
+    description: |
+      Recommendation Filters (comma-separated). Choose from: RecommendedOrExploited, Critical, High, HighRCE, MediumApplication.
+      Example: "RecommendedOrExploited,Critical,High"
+    required: false
+    default: "RecommendedOrExploited,Critical,HighRCE"
+  image-map:
+    description: "Multiline path=repo pairs for Dockerfile→image mapping. While Averlon attempts automatic mapping, explicit mapping is recommended for accuracy. Format: 'path/to/Dockerfile=registry.io/org/repo-name'"
+    required: false 
+  auto-assign-copilot:
+    description: "Auto-assign issues to GitHub Copilot agent for automatic fixes (requires github-token to be a PAT with GitHub Copilot access, not GITHUB_TOKEN)"
+    required: false
+    default: "false"
+  base-url:
+    description: "Base URL for the API service"
+    required: false
+    default: "https://wfe.prod.averlon.io/"
+
+runs:
+  using: 'node20'
+  main: 'dist/main.js'
+
+branding:
+  icon: 'git-branch'
+  color: 'blue'

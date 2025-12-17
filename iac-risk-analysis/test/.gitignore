@@ -1,0 +1,14 @@
+# Terraform
+.terraform/
+.terraform.lock.hcl
+*.tfplan
+*.tfstate
+*.tfstate.*
+
+# Test outputs
+test-results/
+*.log
+
+# Temporary directories
+temp_*
+

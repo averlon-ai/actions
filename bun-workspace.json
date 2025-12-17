@@ -1,0 +1,10 @@
+{
+  "name": "actions",
+  "workspaces": [
+    "packages/*",
+    "iac-risk-analysis",
+    "container-analysis",
+    "k8s-analysis",
+    "iac-misconfig-analysis"
+  ]
+}

@@ -1,0 +1,47 @@
+name: 'Averlon Misconfiguration Remediation Agent for IaC'
+description: 'Security analysis for Terraform infrastructure changes with misconfiguration detection and remediation'
+author: 'Averlon'
+inputs:
+  api-key:
+    description: 'Averlon API key'
+    required: true
+  api-secret:
+    description: 'Averlon API secret'
+    required: true
+  commit:
+    description: 'Commit SHA to scan'
+    required: true
+  plan-path:
+    description: 'Path to the Terraform plan file'
+    required: true
+  base-url:
+    description: 'Averlon API base URL'
+    required: false
+    default: 'https://wfe.prod.averlon.io/'
+  scan-poll-interval:
+    description: 'Polling interval (seconds) for scan status'
+    required: false
+    default: '5'
+  scan-timeout:
+    description: 'Timeout (seconds) for scan completion'
+    required: false
+    default: '300'
+  github-token:
+    description: 'GitHub token for creating issues and assigning Copilot'
+    required: false
+  auto-assign-copilot:
+    description: "Auto-assign issues to GitHub Copilot agent for automatic fixes (requires github-token to be a PAT with GitHub Copilot access, not GITHUB_TOKEN)"
+    required: false
+    default: "false"
+  resource-type-filter:
+    description: |
+      Filter by specific Terraform resource types (comma-separated). 
+      Example: "aws_s3_bucket,aws_lambda_function"
+      If not specified, all resource types are included.
+    required: false
+runs:
+  using: 'node20'
+  main: 'dist/main.js'
+branding:
+  icon: 'git-branch'
+  color: 'blue'

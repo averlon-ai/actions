@@ -1,0 +1,23 @@
+{
+  "name": "@averlon/github-actions-utils",
+  "version": "1.0.0",
+  "description": "Averlon github-actions-utils shared package",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "test": "bun test",
+    "build": "bun run --bun tsc --noEmit",
+    "lint": "eslint . --ext .ts",
+    "lint:fix": "eslint . --ext .ts --fix",
+    "format": "prettier --write \"**/*.ts\""
+  },
+  "dependencies": {
+    "@actions/core": "^2.0.1"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

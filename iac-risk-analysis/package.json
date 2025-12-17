@@ -1,0 +1,21 @@
+{
+  "name": "@averlon/iac-risk-analysis-action",
+  "version": "1.0.0",
+  "main": "src/main.ts",
+  "scripts": {
+    "test": "bun test",
+    "build": "bun run --bun tsc --noEmit",
+    "lint": "eslint . --ext .ts",
+    "lint:fix": "eslint . --ext .ts --fix",
+    "format": "prettier --write \"**/*.ts\""
+  },
+  "dependencies": {
+    "@actions/core": "^2.0.1",
+    "@actions/github": "^6.0.1",
+    "@averlon/shared": "workspace:*",
+    "@averlon/github-actions-utils": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}

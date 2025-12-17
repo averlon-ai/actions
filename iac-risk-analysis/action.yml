@@ -1,0 +1,68 @@
+name: 'Averlon Infrastructure Risk PreCog Agent'
+description: 'Proactive infrastructure risk prediction and security guardrails for IaC deployments'
+author: 'Averlon'
+
+inputs:
+  repo-name:
+    description: 'Name of the repository'
+    required: true
+  base-commit-hash:
+    description: 'Base commit hash for comparison'
+    required: true
+  head-commit-hash:
+    description: 'Head commit hash for comparison'
+    required: true
+  base-plan-path:
+    description: 'Terraform plan file for the base state'
+    required: true
+  head-plan-path:
+    description: 'Terraform plan file for the head state'
+    required: true
+  base-graph-path:
+    description: 'Terraform graph file for the base state'
+    required: true
+  head-graph-path:
+    description: 'Terraform graph file for the head state'
+    required: true
+  scan-poll-interval:
+    description: 'Polling interval in seconds for scan result checking'
+    required: false
+    default: '30'
+  scan-timeout:
+    description: 'Maximum timeout in seconds to wait for scan completion'
+    required: false
+    default: '1800'
+  comment-on-pr:
+    description: 'Whether to automatically comment the analysis results on the pull request'
+    required: false
+    default: 'true'
+  github-token:
+    description: 'GitHub token for posting PR comments (required if comment-on-pr is true)'
+    required: false
+    default: ''
+  comment-mode:
+    description: "Comment mode: 'always' (create new comment each time), 'update' (update existing comment), or 'on-security-risks' (only comment if risks found)"
+    required: false
+    default: 'update'
+  api-key:
+    description: 'API key for authentication'
+    required: true
+  api-secret:
+    description: 'API secret for authentication'
+    required: true
+  base-url:
+    description: 'Base URL for the API service'
+    required: false
+    default: 'https://wfe.prod.averlon.io/'
+
+outputs:
+  scan-result:
+    description: 'Complete JSON scan result with comprehensive security analysis (reachability, access control, and IAM risks)'
+
+runs:
+  using: 'node20'
+  main: 'dist/main.js'
+
+branding:
+  icon: 'shield'
+  color: 'blue'
