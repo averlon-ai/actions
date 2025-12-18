@@ -24,116 +24,30 @@ Before using this action, ensure you have:
    - For Copilot auto-assignment: **Required** - Use a Personal Access Token (PAT) with Copilot access (the default `GITHUB_TOKEN` does not support Copilot assignment)
 4. **Dockerfiles**: At least one Dockerfile in your repository
 
-## 🔐 Create Averlon API Keys and Save as GitHub Secrets
+## 🔐 Create Averlon API Keys and MCP Setup
 
-Follow these steps to generate the required Averlon API keys and store them securely as GitHub Secrets.
+For detailed instructions on creating API keys, please refer to our [API Key Setup Documentation](../docs/actions-api-setup.md).
 
-### 1) Create a GitActions-scoped API key pair (required)
-
-Use this key pair for the GitHub Action to authenticate with Averlon and fetch recommendations.
-
-1. Sign in to the Averlon Console
-2. Navigate to API Keys → Create New Key
-3. Select scope: `GitActions`
-4. Create the key pair and copy both values:
-   - `Key ID`
-   - `Key Secret`
-
-Store these in your repository or organization secrets:
-
-- Go to GitHub → Settings → Secrets and variables → Actions
-- Add new repository (or organization) secrets:
-  - `AVERLON_API_KEY` → paste `Key ID`
-  - `AVERLON_API_SECRET` → paste `Key Secret`
-
-Your workflow should reference these secrets:
-
-```yaml
-with:
-  api-key: ${{ secrets.AVERLON_API_KEY }}
-  api-secret: ${{ secrets.AVERLON_API_SECRET }}
-```
-
-### 2) Create Copilot environment and add MCP secrets (required for MCP)
-
-Use this key pair for the Github Copilot MCP Client.
-
-1. Create a Copilot environment in your repo
-   - GitHub → Settings → Environments → New environment
-   - Name it `copilot` (this name is required by Copilot coding agent)
-
-2. Add required environment secrets (must start with `COPILOT_MCP_`)
-   - In the `copilot` environment, add:
-     - `COPILOT_MCP_AVERLON_API_KEY`
-     - `COPILOT_MCP_AVERLON_API_SECRET`
-
-3. Create an MCPClient-scoped key pair in Averlon
-   - Averlon Console → API Keys → Create New Key → scope `MCPClient`
-   - Copy the Key ID and Key Secret
-   - Use them as the values for `COPILOT_MCP_AVERLON_API_KEY` and `COPILOT_MCP_AVERLON_API_SECRET`
-
-Notes:
-
-- Keep the GitActions and MCPClient key pairs separate for least-privilege isolation.
-- Rotate keys periodically and remove unused keys in the Averlon Console.
-
-## 🤝 Set Up Averlon MCP Server for Copilot
-
-Configure the Averlon MCP server in Copilot coding agent
-
-- GitHub → Settings → Copilot → Coding agent → MCP configuration
-- Add the following configuration:
-
-```json
-{
-  "mcpServers": {
-    "averlon-mcp": {
-      "type": "local",
-      "command": "docker",
-      "args": [
-        "run",
-        "--rm",
-        "-i",
-        "-e",
-        "AVERLON_API_KEY=$AVERLON_API_KEY",
-        "-e",
-        "AVERLON_API_SECRET=$AVERLON_API_SECRET",
-        "ghcr.io/averlon-security/averlon-mcp:sha-a8e5b91"
-      ],
-      "env": {
-        "AVERLON_API_KEY": "COPILOT_MCP_AVERLON_API_KEY",
-        "AVERLON_API_SECRET": "COPILOT_MCP_AVERLON_API_SECRET"
-      },
-      "tools": ["*"]
-    }
-  }
-}
-```
-
-Reference: [Configure MCP for Copilot coding agent in the GitHub](https://docs.github.com/en/copilot/how-tos/use-copilot-agents/coding-agent/extend-coding-agent-with-mcp).
-
-Notes:
-
-- Copilot auto-assignment in this action still requires a GitHub Personal Access Token (PAT) with Copilot access for `github-token`.
-- The MCP setup augments Copilot’s capabilities; it does not replace the need for the PAT in workflows.
+For setting up the MCP server, please refer to our [MCP Setup Documentation](../docs/mcp-setup.md).
 
 ## 🛠️ Usage
 
 ### Basic Workflow
 
 ```yaml
-name: Security Scanning
+name: Averlon Container Security Remediation
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch: {}
   schedule:
     # Run daily at 2 AM UTC
     - cron: '0 2 * * *'
 
 jobs:
-  security-scan:
+  container-security-remediation:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -142,8 +56,8 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      - name: Run Averlon Security Scan
-        uses: averlon-ai/actions/container-analysis@v1
+      - name: Run Averlon Remediation Agent for Containers
+        uses: averlon-ai/actions/container-analysis@v1.0.1
         with:
           api-key: ${{ secrets.AVERLON_API_KEY }}
           api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -155,8 +69,19 @@ jobs:
 While Averlon automatically attempts to map Dockerfiles to image repositories, **explicitly providing the mapping via `image-map` is recommended** for better accuracy and reliability.
 
 ```yaml
+name: Averlon Container Security Remediation
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
+
 jobs:
-  security-scan:
+  container-security-remediation:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -165,8 +90,8 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      - name: Run Averlon Security Scan with Image Mapping
-        uses: averlon-ai/actions/container-analysis@v1
+      - name: Run Averlon Remediation Agent for Containers
+        uses: averlon-ai/actions/container-analysis@v1.0.1
         with:
           api-key: ${{ secrets.AVERLON_API_KEY }}
           api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -192,22 +117,26 @@ To enable automatic assignment of security issues to GitHub Copilot, you **must 
 3. Add the token as a repository secret (e.g., `COPILOT_PAT`)
 
 ```yaml
-name: Security Scanning with Copilot
+name: Averlon Container Security Remediation with Copilot
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
   schedule:
+    # Run daily at 2 AM UTC
     - cron: '0 2 * * *'
 
 jobs:
-  security-scan:
+  container-security-remediation:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      - name: Run Averlon Security Scan with Copilot
-        uses: averlon-ai/actions/container-analysis@v1
+      - name: Run Averlon Remediation Agent for Containers
+        uses: averlon-ai/actions/container-analysis@v1.0.1
         with:
           api-key: ${{ secrets.AVERLON_API_KEY }}
           api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -232,7 +161,7 @@ jobs:
 This action provides outputs through GitHub's job summary feature:
 
 - **Summary Table**: Lists all discovered Dockerfiles and their mapped image repositories
-- **Security Issues**: Creates/updates GitHub issues labeled with `averlon` containing:
+- **Security Issues**: Creates/updates GitHub issues labeled with `averlon-created` and `averlon-container-analysis` containing:
   - Dockerfile path
   - Image repository name
   - Detailed security recommendations
@@ -264,8 +193,8 @@ While Averlon attempts to automatically map Dockerfiles to image repositories, t
 
 ```yaml
 # Solution: Provide explicit image mapping (recommended)
-- name: Run Security Scan
-  uses: averlon-ai/actions/container-analysis@v1
+- name: Run Averlon Remediation Agent for Containers
+  uses: averlon-ai/actions/container-analysis@v1.0.1
   with:
     api-key: ${{ secrets.AVERLON_API_KEY }}
     api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -284,14 +213,14 @@ Copilot auto-assignment requires a Personal Access Token (PAT) with Copilot acce
 ```yaml
 # Solution: Use a PAT with Copilot access
 jobs:
-  security-scan:
+  container-security-remediation:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      - name: Run Security Scan
-        uses: averlon-ai/actions/container-analysis@v1
+      - name: Run Averlon Remediation Agent for Containers
+        uses: averlon-ai/actions/container-analysis@v1.0.1
         with:
           api-key: ${{ secrets.AVERLON_API_KEY }}
           api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -311,8 +240,8 @@ Adjust the filters to focus on critical vulnerabilities.
 
 ```yaml
 # Solution: Use stricter filters
-- name: Run Security Scan
-  uses: averlon-ai/actions/container-analysis@v1
+- name: Run Averlon Remediation Agent for Containers
+  uses: averlon-ai/actions/container-analysis@v1.0.1
   with:
     api-key: ${{ secrets.AVERLON_API_KEY }}
     api-secret: ${{ secrets.AVERLON_API_SECRET }}

@@ -175,6 +175,20 @@ async function main(): Promise<void> {
     throw error; // Fail the entire action as requested
   }
 
+  // Fail the action if all Dockerfiles could not be mapped to an image repository
+  if (dockerfiles.length > 0) {
+    const mappedCount = dockerfiles.filter(path => {
+      const rec = recByPath.get(path);
+      return rec?.ImageRepository?.RepositoryName;
+    }).length;
+    if (mappedCount === 0) {
+      throw new Error(
+        `Found ${dockerfiles.length} Dockerfile(s) in the repository but could not map any of them to an image repository. ` +
+          'Please provide an image-map input or ensure your images are scanned by Averlon.'
+      );
+    }
+  }
+
   await core.summary.write();
 }
 

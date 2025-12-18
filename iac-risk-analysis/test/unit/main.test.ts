@@ -1,13 +1,9 @@
 import { describe, it, expect, spyOn, beforeEach, afterEach, mock } from 'bun:test';
 import * as core from '@actions/core';
-import { run, _runTerraformScan } from '../../src/main.ts';
-import type {
-  ApiClient,
-  JobStatusNotification,
-  AnalyzeTerraformResult,
-} from '@averlon/shared/api-client';
+import { run, _runTerraformScan } from '../../src/main';
+import type { ApiClient, JobStatusNotification, AnalyzeTerraformResult } from '@averlon/shared';
 import { createTestApiConfig } from '../test-utils';
-import { TerraformReachabilityAnalysis } from '@averlon/shared/src/types.ts';
+import { TerraformReachabilityAnalysis } from '@averlon/shared';
 
 // Define ActionInputs interface for testing
 interface ActionInputs {
@@ -126,8 +122,9 @@ describe('main.ts', () => {
     process.env.INPUT_HEAD_PLAN_PATH = './test/head-plan.json';
     process.env.INPUT_BASE_GRAPH_PATH = './test/base-graph.dot';
     process.env.INPUT_HEAD_GRAPH_PATH = './test/head-graph.dot';
-    process.env.INPUT_SCAN_POLL_INTERVAL = '30';
-    process.env.INPUT_SCAN_TIMEOUT = '1800';
+    // Keep polling fast in tests to avoid hitting the default 30s delay
+    process.env.INPUT_SCAN_POLL_INTERVAL = '1';
+    process.env.INPUT_SCAN_TIMEOUT = '15';
     process.env.INPUT_GITHUB_TOKEN = 'test-github-token';
     process.env.INPUT_COMMENT_ON_PR = 'true';
     // Removed verbose parameter - now using core.isDebug() instead
@@ -297,7 +294,7 @@ describe('main.ts', () => {
       expect(calls[0][0].baseUrl).toBe('https://test.example.com');
       expect(calls[0][0].apiKey).toBe('test-api-key');
       expect(calls[0][0].apiSecret).toBe('test-api-secret');
-    });
+    }, 10000);
 
     it('should handle environment variable name transformation correctly', async () => {
       getInputSpy.mockReturnValue('');

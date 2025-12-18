@@ -2,7 +2,7 @@
  * Resource Parser - Unified resource processing module
  *
  * This module handles:
- * - Parsing JSON input from helm (parseHelmDryRunOutput)
+ * - Parsing Helm-rendered YAML input (parseHelmDryRunOutput)
  * - Parsing YAML manifests into resources (parseHelmManifest)
  * - Annotating resources with ARNs (annotateResourceArns)
  * - Resource utilities (grouping, filtering, summaries)
@@ -110,57 +110,24 @@ export interface ResourceIssue {
 }
 
 // ============================================================================
-// Helm JSON Parsing
+// Helm YAML Parsing
 // ============================================================================
 
 /**
- * Parse JSON format input from helm template or helm install --dry-run
- * Accepts either a single K8s resource object or an array of resources
- * Converts to YAML format for downstream processing
+ * Parse YAML format input from helm template output
+ * Accepts one or more YAML documents separated by ---
+ * Normalizes and returns a single YAML string for downstream processing
  */
 export function parseHelmDryRunOutput(input: string): HelmTemplateResult {
   if (!input || input.trim() === '') {
     throw new Error('Input is empty');
   }
 
-  const trimmedInput = input.trim();
-  if (looksLikeJson(trimmedInput)) {
-    return parseHelmJson(trimmedInput);
-  }
-  if (looksLikeHelmDryRun(trimmedInput)) {
-    return parseHelmText(trimmedInput);
-  }
-
-  return parseHelmJson(trimmedInput);
-}
-
-function looksLikeJson(value: string): boolean {
-  const firstChar = value[0];
-  return firstChar === '{' || firstChar === '[';
-}
-
-function looksLikeHelmDryRun(value: string): boolean {
-  return (
-    /MANIFEST:/i.test(value) || /^NAME:/im.test(value) || /^USER-SUPPLIED VALUES:/im.test(value)
-  );
-}
-
-function parseHelmJson(jsonInput: string): HelmTemplateResult {
   try {
-    const parsed = JSON.parse(jsonInput);
-    let resources: unknown[];
-
-    if (Array.isArray(parsed)) {
-      resources = parsed;
-    } else if (parsed && typeof parsed === 'object') {
-      resources = [parsed];
-    } else {
-      throw new Error('JSON input must be an object or array of objects');
-    }
-
-    const validResources = resources.filter(
+    const docs = yaml.loadAll(input);
+    const validResources = docs.filter(
       doc => doc && typeof doc === 'object' && 'kind' in doc && 'apiVersion' in doc
-    );
+    ) as Array<Record<string, unknown>>;
 
     if (validResources.length === 0) {
       throw new Error(
@@ -168,9 +135,8 @@ function parseHelmJson(jsonInput: string): HelmTemplateResult {
       );
     }
 
-    core.info(`✓ Parsed ${validResources.length} Kubernetes resources from JSON input`);
-    const yamlDocs = validResources.map(resource => yaml.dump(resource));
-    const manifestYaml = yamlDocs.join('\n---\n');
+    core.info(`✓ Parsed ${validResources.length} Kubernetes resources from YAML input`);
+    const manifestYaml = validResources.map(resource => yaml.dump(resource)).join('\n---\n');
 
     return {
       manifestYaml,
@@ -179,71 +145,9 @@ function parseHelmJson(jsonInput: string): HelmTemplateResult {
       namespace: undefined,
     };
   } catch (error) {
-    if (error instanceof SyntaxError) {
-      throw new Error(
-        'Invalid JSON format. Please provide valid JSON array of Kubernetes resources.'
-      );
-    }
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Failed to parse JSON input: ${message}`);
+    throw new Error(`Failed to parse YAML input: ${message}`);
   }
-}
-
-function parseHelmText(helmOutput: string): HelmTemplateResult {
-  const manifestYaml = extractHelmSection(helmOutput, 'MANIFEST', { stopOnNextHeader: false });
-  if (!manifestYaml) {
-    throw new Error('MANIFEST section not found in Helm dry-run output. Provide full helm output.');
-  }
-
-  const userSuppliedValues = extractHelmSection(helmOutput, 'USER-SUPPLIED VALUES', {
-    stopOnNextHeader: true,
-  });
-  const releaseName = matchHelmMetadata(helmOutput, 'NAME');
-  const namespace = matchHelmMetadata(helmOutput, 'NAMESPACE');
-
-  core.info('✓ Parsed Helm dry-run text output');
-  return {
-    manifestYaml: manifestYaml.trim(),
-    userSuppliedValues: userSuppliedValues,
-    releaseName: releaseName,
-    namespace: namespace,
-  };
-}
-
-function matchHelmMetadata(content: string, field: string): string | undefined {
-  const regex = new RegExp(`^${field}:\\s*(.+)$`, 'mi');
-  const match = regex.exec(content);
-  return match ? match[1].trim() : undefined;
-}
-
-function extractHelmSection(
-  content: string,
-  header: string,
-  options: { stopOnNextHeader: boolean }
-): string | undefined {
-  const lines = content.split(/\r?\n/);
-  const normalizedHeader = `${header.toUpperCase()}:`;
-  const headerIndex = lines.findIndex(line => line.trim().toUpperCase() === normalizedHeader);
-  if (headerIndex === -1) {
-    return undefined;
-  }
-
-  const collected: string[] = [];
-  for (let i = headerIndex + 1; i < lines.length; i++) {
-    const currentLine = lines[i];
-    const trimmedLine = currentLine.trim();
-    if (
-      options.stopOnNextHeader &&
-      trimmedLine.length > 0 &&
-      /^[A-Z0-9][A-Z0-9\s_-]*:$/.test(trimmedLine)
-    ) {
-      break;
-    }
-    collected.push(currentLine);
-  }
-
-  const section = collected.join('\n').trim();
-  return section.length > 0 ? section : undefined;
 }
 
 function getStringValue(record: Record<string, unknown>, key: string): string | undefined {

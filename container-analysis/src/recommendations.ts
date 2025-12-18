@@ -181,10 +181,19 @@ export function parseImageMap(multiline: string | undefined): Record<string, str
     .filter(Boolean);
   for (const line of lines) {
     const idx = line.indexOf('=');
-    if (idx <= 0) continue;
+    if (idx <= 0) {
+      throw new Error(
+        `Invalid image-map format: "${line}". Expected format: "filepath=image-repository"`
+      );
+    }
     const filePath = line.slice(0, idx).trim();
     const repo = line.slice(idx + 1).trim();
-    if (filePath && repo) map[filePath] = repo;
+    if (!filePath || !repo) {
+      throw new Error(
+        `Invalid image-map entry: "${line}". Both filepath and repository are required.`
+      );
+    }
+    map[filePath] = repo;
   }
   return map;
 }

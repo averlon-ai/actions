@@ -11,10 +11,10 @@ inputs:
     required: true
   manifest-file:
     description: |
-      Path to JSON file containing Kubernetes resources from helm template or helm install --dry-run.
-      Generate with:
-        helm install <release> <chart> --dry-run | yq eval -o=json | jq -s '.' > manifests.json
-      Must be a JSON array of Kubernetes resources with 'kind' and 'apiVersion' fields.
+      Path to a YAML file containing Kubernetes resources from `helm template` or plain K8s YAML.
+      Typical generation:
+        helm template <release> <chart> --namespace <ns> --values values.yaml > manifests.yaml
+      File may contain multiple documents separated by `---`; each must include `kind` and `apiVersion`.
     required: true
   base-url:
     description: "Base URL for the Averlon API service"

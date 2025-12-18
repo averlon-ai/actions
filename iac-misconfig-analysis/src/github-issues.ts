@@ -1,10 +1,12 @@
 import * as core from '@actions/core';
 import { CopilotIssueManager, IssueState } from '@averlon/github-copilot-utils';
+import { AVERLON_CREATED_LABEL } from '@averlon/github-actions-utils';
 import type { TerraformResource } from '@averlon/shared';
 import { generateIssueBody, generateIssueTitle } from './issue-template';
 
 // Action-specific constants
-const AVERLON_TERRAFORM_LABEL = 'averlon-terraform';
+const AVERLON_MISCONFIG_ANALYSIS_LABEL = 'averlon-iac-misconfiguration-analysis';
+const ISSUE_LABELS = [AVERLON_CREATED_LABEL, AVERLON_MISCONFIG_ANALYSIS_LABEL];
 const RESOURCES_PER_ISSUE = 10;
 
 /**
@@ -136,7 +138,7 @@ export class GithubIssuesService extends CopilotIssueManager {
     const { data: issues } = await this.octokit.rest.issues.listForRepo({
       owner: this.owner,
       repo: this.repo,
-      labels: AVERLON_TERRAFORM_LABEL,
+      labels: AVERLON_MISCONFIG_ANALYSIS_LABEL,
       state: IssueState.OPEN,
       per_page: 100,
     });
@@ -206,7 +208,7 @@ export class GithubIssuesService extends CopilotIssueManager {
     const { data: issues } = await this.octokit.rest.issues.listForRepo({
       owner: this.owner,
       repo: this.repo,
-      labels: AVERLON_TERRAFORM_LABEL,
+      labels: AVERLON_MISCONFIG_ANALYSIS_LABEL,
       state: IssueState.OPEN,
       per_page: 100,
     });
@@ -467,7 +469,7 @@ export class GithubIssuesService extends CopilotIssueManager {
       repo: this.repo,
       title,
       body,
-      labels: [AVERLON_TERRAFORM_LABEL],
+      labels: ISSUE_LABELS,
     });
     core.info(`Created Terraform scan issue #${issue.number} for batch ${batchNumber}`);
     await this.assignCopilot(issue.number, assignCopilot);

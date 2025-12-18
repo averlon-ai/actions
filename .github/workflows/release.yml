@@ -43,6 +43,9 @@ jobs:
         id: get_version
         run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
+      - name: Update action usage examples to release version
+        run: bun scripts/update-action-versions.ts "${{ steps.get_version.outputs.VERSION }}"
+
       - name: Configure git
         run: |
           git config user.name "github-actions[bot]"
@@ -52,6 +55,9 @@ jobs:
         run: |
           # Add the built files for all actions using the discover script
           ACTION_DIRS=$(./scripts/discover-actions.sh)
+
+          # Stage doc/template updates for the new version
+          git add -A
 
           for ACTION_NAME in $ACTION_DIRS; do
             git add -f "$ACTION_NAME/dist/"

@@ -2,6 +2,11 @@
  * Utilities for GitHub-specific operations
  */
 
+/**
+ * Label applied to all issues created by Averlon actions
+ */
+export const AVERLON_CREATED_LABEL = 'averlon-created';
+
 export interface GitHubRepository {
   owner: string;
   repo: string;

@@ -97,30 +97,26 @@ api/Dockerfile=myregistry/myapp-api:dev`;
       expect(result).toEqual({});
     });
 
-    it('should handle lines without equals sign', () => {
+    it('should throw on lines without equals sign', () => {
       const input = `Dockerfile=myregistry/myapp:latest
 invalid-line
 another/Dockerfile=myregistry/another:latest`;
 
-      const result = parseImageMap(input);
-
-      expect(result).toEqual({
-        Dockerfile: 'myregistry/myapp:latest',
-        'another/Dockerfile': 'myregistry/another:latest',
-      });
+      expect(() => parseImageMap(input)).toThrow('Invalid image-map format: "invalid-line"');
     });
 
-    it('should handle lines with empty values', () => {
+    it('should throw on lines with empty values', () => {
       const input = `Dockerfile=myregistry/myapp:latest
 empty=
 valid/Dockerfile=myregistry/valid:latest`;
 
-      const result = parseImageMap(input);
+      expect(() => parseImageMap(input)).toThrow('Invalid image-map entry: "empty="');
+    });
 
-      expect(result).toEqual({
-        Dockerfile: 'myregistry/myapp:latest',
-        'valid/Dockerfile': 'myregistry/valid:latest',
-      });
+    it('should throw on lines using colon separator instead of equals', () => {
+      const input = `Dockerfile:myregistry/myapp:latest`;
+
+      expect(() => parseImageMap(input)).toThrow('Invalid image-map format');
     });
 
     it('should trim whitespace from keys and values', () => {

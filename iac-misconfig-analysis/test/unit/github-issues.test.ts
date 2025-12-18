@@ -186,7 +186,10 @@ describe('GithubIssuesService', () => {
       expect(firstCall.title).toBe(
         'Averlon Misconfiguration Remediation Agent for IaC: Batch 1 of 3'
       );
-      expect(firstCall.labels).toEqual(['averlon-terraform']);
+      expect(firstCall.labels).toEqual([
+        'averlon-created',
+        'averlon-iac-misconfiguration-analysis',
+      ]);
       expect(firstCall.body).toContain('View Resources JSON');
 
       // Verify second batch

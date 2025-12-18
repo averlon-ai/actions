@@ -4,7 +4,7 @@ Kubernetes Helm chart misconfiguration detection and remediation
 
 ## 🚀 What It Does
 
-- Converts rendered Kubernetes manifests (Helm or plain YAML) into a JSON array
+- Parses rendered Kubernetes manifests (Helm or plain YAML) for analysis
 - Enriches resources with detected metadata (region, cluster, account ID, ARNs, labels/annotations)
 - Queries Averlon for misconfiguration intelligence and best-practice gaps
 - Creates or updates GitHub issues with remediation guidance
@@ -12,104 +12,71 @@ Kubernetes Helm chart misconfiguration detection and remediation
 
 ## 📋 Prerequisites
 
-1. **Averlon account & API credentials**: `AVERLON_API_KEY`, `AVERLON_API_SECRET`
-2. **GitHub token**:
+Before using this action, ensure you have:
+
+1. **Averlon Account**: Sign up at [Averlon](https://averlon.io) to get your API credentials
+2. **API Credentials**: Obtain your `api_key` and `api_secret` from the Averlon dashboard
+3. **GitHub Token**:
    - Basic usage: workflow `GITHUB_TOKEN` with `issues: write`
    - Copilot auto-assignment: PAT with Copilot access
-3. **Tools**:
-   - `yq` for YAML → JSON
-   - `jq` recommended for formatting
+4. **Tools**:
    - `helm` only if generating manifests from Helm charts (not needed for plain YAML)
-4. **Manifests**: Helm-rendered output or plain Kubernetes YAML that you can convert to JSON
+5. **Manifests**: Helm-rendered output or plain Kubernetes YAML
 
-## Quick Start
+## 🔐 Create Averlon API Keys and MCP Setup
 
-### Using `helm install --dry-run`
+For detailed instructions on creating API keys, please refer to our [API Key Setup Documentation](../docs/actions-api-setup.md).
 
-```yaml
-- name: Generate Helm manifests as JSON
-  run: |
-    helm install my-release ./charts/my-app \
-      --dry-run \
-      --namespace production \
-      --values values.yaml | \
-      sed -n '/^MANIFEST:/,$p' | tail -n +2 | \
-      yq eval -o=json '.' - | jq -s '.' > manifests.json
+For setting up the MCP server, please refer to our [MCP Setup Documentation](../docs/mcp-setup.md).
 
-- name: Analyze with Averlon
-  uses: averlon-ai/actions/k8s-analysis@v1
-  with:
-    api-key: ${{ secrets.AVERLON_API_KEY }}
-    api-secret: ${{ secrets.AVERLON_API_SECRET }}
-    github-token: ${{ secrets.GITHUB_TOKEN }}
-    manifest-file: manifests.json
-```
+## 🛠️ Usage
 
-### Using `helm template`
+### With Helm Template (recommended)
 
 ```yaml
-- name: Generate Helm manifests as JSON
+- name: Generate Helm manifests
   run: |
     helm template my-release ./charts/my-app \
       --namespace production \
-      --values values.yaml | \
-      yq eval -o=json '.' - | jq -s '.' > manifests.json
+      --values values.yaml > manifests.yaml
 
-- name: Analyze with Averlon
-  uses: averlon-ai/actions/k8s-analysis@v1
+- name: Run Averlon Remediation Agent for Kubernetes
+  uses: averlon-ai/actions/k8s-analysis@v1.0.1
   with:
     api-key: ${{ secrets.AVERLON_API_KEY }}
     api-secret: ${{ secrets.AVERLON_API_SECRET }}
     github-token: ${{ secrets.GITHUB_TOKEN }}
-    manifest-file: manifests.json
+    manifest-file: manifests.yaml
 ```
 
-### Using Plain Kubernetes YAML Files (No Helm)
+### With Plain Kubernetes YAML
 
-If you have plain Kubernetes YAML files (not Helm charts), you can analyze them directly:
+If you already have plain Kubernetes YAML files (not Helm charts), you can analyze them directly:
 
 ```yaml
-- name: Convert K8s YAML to JSON
+- name: Bundle manifests
   run: |
-    yq eval -o=json 'path/to/your/manifests.yaml' | jq -s '.' > manifests.json
+    cat deployment.yaml service.yaml configmap.yaml > manifests.yaml
 
-- name: Analyze with Averlon
-  uses: averlon-ai/actions/k8s-analysis@v1
+- name: Run Averlon Remediation Agent for Kubernetes
+  uses: averlon-ai/actions/k8s-analysis@v1.0.1
   with:
     api-key: ${{ secrets.AVERLON_API_KEY }}
     api-secret: ${{ secrets.AVERLON_API_SECRET }}
     github-token: ${{ secrets.GITHUB_TOKEN }}
-    manifest-file: manifests.json
+    manifest-file: manifests.yaml
     release-name: my-app
     namespace: default
 ```
 
-**For multiple YAML files:**
-
-```yaml
-- name: Convert multiple K8s YAML files to JSON
-  run: |
-    cat deployment.yaml service.yaml configmap.yaml | \
-      yq eval -o=json '.' - | jq -s '.' > manifests.json
-```
-
-**For a directory of YAML files:**
-
-```yaml
-- name: Convert all YAML files in directory to JSON
-  run: |
-    cat k8s-manifests/*.yaml | \
-      yq eval -o=json '.' - | jq -s '.' > manifests.json
-```
-
-> **Note:** `manifest-file` can be a single Kubernetes object **or** a JSON array of objects. The conversion snippets above emit an array so you can pass multiple resources at once; single-object JSON also works if you only have one manifest.
+> **Note:** `manifest-file` should point to a YAML file that may contain one or many Kubernetes resources separated by `---`.
 
 ## 🎯 Auto-Detection
 
 The action automatically detects **region**, **cluster**, and **account ID** from multiple sources:
 
 1. **Kubernetes labels** (`topology.kubernetes.io/region`, `topology.kubernetes.io/zone`)
-2. **Helm values** (`app.region`, `app.cluster`, `app.account_id` in USER-SUPPLIED VALUES)
+2. **Chart-emitted values in manifests** (any labels/annotations your chart writes)
 3. **Resource annotations** (`eks.amazonaws.com/cluster-name`, `aws.amazon.com/account-id`)
 4. **Environment variables** (extracts ARNs and account IDs from env vars)
 
@@ -132,7 +99,7 @@ In most cases, you don't need to manually specify `region`, `cluster`, or `cloud
 | `api-key`              | Averlon API key                                                                                                                   | Yes      | -                              |
 | `api-secret`           | Averlon API secret                                                                                                                | Yes      | -                              |
 | `github-token`         | GitHub token for creating issues. Provide a PAT with Copilot access to enable assignment; otherwise uses workflow `GITHUB_TOKEN`. | No       | Workflow `GITHUB_TOKEN`        |
-| `manifest-file`        | Path to the Helm manifests JSON file (an array of Kubernetes resources as shown above).                                           | Yes      | -                              |
+| `manifest-file`        | Path to the Helm manifests YAML file (one or more Kubernetes resources, separated by `---`).                                      | Yes      | -                              |
 | `cloud-id`             | secdi Cloud ID for issue lookup. When omitted, the action discovers using detected account metadata.                              | No       | Auto-detected                  |
 | `release-name`         | Override release name                                                                                                             | No       | -                              |
 | `namespace`            | Override namespace                                                                                                                | No       | -                              |
@@ -155,20 +122,9 @@ helm template my-release ./charts/my-app \
   --values values.yaml
 ```
 
-This prints the rendered Kubernetes YAML (multiple documents separated by `---`), which can be piped directly into the JSON conversion step.
+This prints the rendered Kubernetes YAML (multiple documents separated by `---`), which can be redirected straight to a file.
 
-#### Option B: Using `helm install --dry-run`
-
-```bash
-helm install my-release ./charts/my-app \
-  --dry-run \
-  --namespace production \
-  --values values.yaml
-```
-
-This simulates a full installation and outputs release metadata, user-supplied values, and a `MANIFEST` section. Because of the extra headings, you need to strip everything before `MANIFEST:` prior to converting to JSON.
-
-#### Option C: Using Plain Kubernetes YAML Files
+#### Option B: Using Plain Kubernetes YAML Files
 
 If you already have plain Kubernetes YAML files (not from Helm), you can use them directly without `helm` commands:
 
@@ -183,50 +139,38 @@ cat deployment.yaml service.yaml
 cat k8s-manifests/*.yaml
 ```
 
-No Helm commands needed—just convert to JSON as shown in step 2.
+No Helm commands needed—just bundle your YAML into a single file and point `manifest-file` at it.
 
-### 2. Convert to a JSON array
+### 2. Bundle manifests into YAML
 
-Regardless of how you generated the manifests, the action expects `manifest-file` to contain a JSON array where each entry is a Kubernetes resource with `kind` and `apiVersion`. Use one of the following conversion snippets:
-
-**If you used `helm install --dry-run`:**
-
-```bash
-helm install my-release ./charts/my-app \
-  --dry-run \
-  --namespace production \
-  --values values.yaml | \
-  sed -n '/^MANIFEST:/,$p' | tail -n +2 | \
-  yq eval -o=json '.' - | jq -s '.' > manifests.json
-```
+Regardless of how you generated the manifests, the action expects `manifest-file` to point to a YAML file that contains one or more Kubernetes resources separated by `---`. Use one of the following snippets:
 
 **If you used `helm template`:**
 
 ```bash
 helm template my-release ./charts/my-app \
   --namespace production \
-  --values values.yaml | \
-  yq eval -o=json '.' - | jq -s '.' > manifests.json
+  --values values.yaml > manifests.yaml
 ```
 
 **If you have plain Kubernetes YAML files:**
 
 ```bash
 # Single file
-yq eval -o=json 'your-manifests.yaml' | jq -s '.' > manifests.json
+cp your-manifests.yaml manifests.yaml
 
 # Multiple files
-cat file1.yaml file2.yaml file3.yaml | yq eval -o=json '.' - | jq -s '.' > manifests.json
+cat file1.yaml file2.yaml file3.yaml > manifests.yaml
 
 # All YAML files in a directory
-cat k8s/*.yaml | yq eval -o=json '.' - | jq -s '.' > manifests.json
+cat k8s/*.yaml > manifests.yaml
 ```
 
 ### 3. Analyze with Averlon
 
 The action:
 
-1. Parses the JSON array of Kubernetes resources
+1. Parses the YAML resources
 2. Extracts metadata (ARNs, namespaces, labels, annotations)
 3. Queries Averlon API for known misconfigurations
 4. Creates GitHub issues with findings
@@ -237,45 +181,33 @@ The action:
 ### Basic Example
 
 ```yaml
-name: Helm Security Analysis
+name: Averlon Kubernetes Security Remediation
 
 on:
   pull_request:
     branches: [main]
 
 jobs:
-  analyze:
+  k8s-security-remediation:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Install yq
-        run: |
-          sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq
-          sudo chmod +x /usr/bin/yq
-
       - name: Generate Helm manifests
         run: |
           helm template my-app ./charts/my-app \
             --namespace production \
-            --values values.yaml \
-             > dry-run.txt
+            --values values.yaml > manifests.yaml
 
-          # Extract MANIFEST and convert to JSON
-          sed -n '/^MANIFEST:/,$p' dry-run.txt | \
-            tail -n +2 | \
-            yq eval -o=json '.' - | \
-            jq -s '.' > manifests.json
-
-      - name: Analyze with Averlon
-        uses: averlon-ai/actions/k8s-analysis@v1
+      - name: Run Averlon Remediation Agent for Kubernetes
+        uses: averlon-ai/actions/k8s-analysis@v1.0.1
         with:
           api-key: ${{ secrets.AVERLON_API_KEY }}
           api-secret: ${{ secrets.AVERLON_API_SECRET }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          manifest-file: manifests.json
+          manifest-file: manifests.yaml
           cloud-id: ${{ secrets.AWS_ACCOUNT_ID }}
           namespace: production
           filters: Critical,High
@@ -286,7 +218,7 @@ jobs:
 Analyze plain Kubernetes manifests without Helm:
 
 ```yaml
-name: K8s Security Analysis
+name: Averlon Kubernetes Security Remediation
 
 on:
   pull_request:
@@ -295,33 +227,25 @@ on:
     branches: [main]
 
 jobs:
-  analyze:
+  k8s-security-remediation:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Install yq and jq
+      - name: Bundle Kubernetes YAML
         run: |
-          sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq
-          sudo chmod +x /usr/bin/yq
-          sudo apt-get update && sudo apt-get install -y jq
+          # Combine all YAML files into a single multi-doc YAML file
+          cat k8s-manifests/*.yaml > manifests.yaml
 
-      - name: Convert K8s YAML to JSON
-        run: |
-          # Combine all YAML files and convert to JSON array
-          cat k8s-manifests/*.yaml | \
-            yq eval -o=json '.' - | \
-            jq -s '.' > manifests.json
-
-      - name: Analyze with Averlon
-        uses: averlon-ai/actions/k8s-analysis@v1
+      - name: Run Averlon Remediation Agent for Kubernetes
+        uses: averlon-ai/actions/k8s-analysis@v1.0.1
         with:
           api-key: ${{ secrets.AVERLON_API_KEY }}
           api-secret: ${{ secrets.AVERLON_API_SECRET }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          manifest-file: manifests.json
+          manifest-file: manifests.yaml
           release-name: k8s-app
           namespace: default
           filters: Critical,High
@@ -342,24 +266,16 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install yq
-        run: |
-          sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq
-          sudo chmod +x /usr/bin/yq
-
       - name: Generate manifests for ${{ matrix.environment }}
         run: |
           helm template app-${{ matrix.environment }} ./chart \
             --namespace ${{ matrix.environment }} \
-            --values values-${{ matrix.environment }}.yaml \
-             | \
-            sed -n '/^MANIFEST:/,$p' | tail -n +2 | \
-            yq eval -o=json '.' - | jq -s '.' > manifests.json
+            --values values-${{ matrix.environment }}.yaml > manifests.yaml
 
-      - name: Analyze
-        uses: averlon-ai/actions/k8s-analysis@v1
+      - name: Run Averlon Remediation Agent for Kubernetes
+        uses: averlon-ai/actions/k8s-analysis@v1.0.1
         with:
-          manifest-file: manifests.json
+          manifest-file: manifests.yaml
           api-key: ${{ secrets.AVERLON_API_KEY }}
           api-secret: ${{ secrets.AVERLON_API_SECRET }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -371,10 +287,10 @@ jobs:
 Enable automatic issue fixing with GitHub Copilot:
 
 ```yaml
-- name: Analyze and Auto-fix
-  uses: averlon-ai/actions/k8s-analysis@v1
+- name: Run Averlon Remediation Agent for Kubernetes
+  uses: averlon-ai/actions/k8s-analysis@v1.0.1
   with:
-    manifest-file: manifests.json
+    manifest-file: manifests.yaml
     api-key: ${{ secrets.AVERLON_API_KEY }}
     api-secret: ${{ secrets.AVERLON_API_SECRET }}
     github-token: ${{ secrets.COPILOT_PAT }} # Must be PAT with Copilot access
@@ -441,9 +357,9 @@ namespace-filter: kube-system,monitoring,logging
 
 ```yaml
 - name: Analyze Production Workloads Only
-  uses: averlon-ai/actions/k8s-analysis@v1
+  uses: averlon-ai/actions/k8s-analysis@v1.0.1
   with:
-    manifest-file: manifests.json
+    manifest-file: manifests.yaml
     api-key: ${{ secrets.AVERLON_API_KEY }}
     api-secret: ${{ secrets.AVERLON_API_SECRET }}
     github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -469,41 +385,28 @@ namespace-filter: kube-system,monitoring,logging
 
 ### "No valid Kubernetes resources found"
 
-**Cause:** The JSON doesn't contain valid Kubernetes resources.
+**Cause:** The YAML doesn't contain valid Kubernetes resources.
 
 **Solution:** Ensure each resource has `kind` and `apiVersion` fields:
 
 ```bash
-# Verify your JSON
-cat manifests.json | jq '.[0] | {kind, apiVersion, metadata}'
+# Quick check (first document)
+awk 'BEGIN{RS="---"} NR==1 {print}' manifests.yaml
 ```
 
-### "Invalid JSON format"
+### "Invalid YAML format"
 
-**Cause:** The input is not valid JSON.
+**Cause:** The input is not valid YAML.
 
 **Solution:**
 
-1. Check your conversion pipeline:
+1. Validate the file locally:
    ```bash
-   helm template ...  | \
-     sed -n '/^MANIFEST:/,$p' | tail -n +2 | \
-     yq eval -o=json '.' - | jq '.'
+   yamllint manifests.yaml
    ```
-2. Verify output is valid JSON: `cat manifests.json | jq '.'`
-
-### "No MANIFEST section found"
-
-**Cause:** Using `helm install --dry-run` output but the MANIFEST section is missing or incorrectly parsed.
-
-**Solution:**
-
-1. If using Helm, ensure you're using the correct command:
-   - `helm template` (no MANIFEST section, pipes directly)
-   - `helm install --dry-run` (has MANIFEST section, needs `sed` to extract)
-2. If using plain YAML files, skip the `sed` step entirely:
+2. If using Helm, check the rendered output:
    ```bash
-   cat your-file.yaml | yq eval -o=json '.' - | jq -s '.' > manifests.json
+   helm template my-release ./chart --namespace production --values values.yaml > manifests.yaml
    ```
 
 ### Missing Cloud ID
@@ -521,8 +424,6 @@ cat manifests.json | jq '.[0] | {kind, apiVersion, metadata}'
 
 ## Requirements
 
-- **yq 4.x** - Required for all workflows
-- **jq** - Optional, for formatting (recommended)
 - **Helm 3.x** - Only required for Helm chart analysis; not needed for plain K8s YAML files
 - **GitHub Actions runner** - ubuntu-latest, macos-latest, or windows-latest
 
