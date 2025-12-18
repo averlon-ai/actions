@@ -41,7 +41,7 @@ For setting up the MCP server, please refer to our [MCP Setup Documentation](../
       --values values.yaml > manifests.yaml
 
 - name: Run Averlon Remediation Agent for Kubernetes
-  uses: averlon-ai/actions/k8s-analysis@v1.0.1
+  uses: averlon-ai/actions/k8s-analysis@v1.0.2
   with:
     api-key: ${{ secrets.AVERLON_API_KEY }}
     api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -59,7 +59,7 @@ If you already have plain Kubernetes YAML files (not Helm charts), you can analy
     cat deployment.yaml service.yaml configmap.yaml > manifests.yaml
 
 - name: Run Averlon Remediation Agent for Kubernetes
-  uses: averlon-ai/actions/k8s-analysis@v1.0.1
+  uses: averlon-ai/actions/k8s-analysis@v1.0.2
   with:
     api-key: ${{ secrets.AVERLON_API_KEY }}
     api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -202,7 +202,7 @@ jobs:
             --values values.yaml > manifests.yaml
 
       - name: Run Averlon Remediation Agent for Kubernetes
-        uses: averlon-ai/actions/k8s-analysis@v1.0.1
+        uses: averlon-ai/actions/k8s-analysis@v1.0.2
         with:
           api-key: ${{ secrets.AVERLON_API_KEY }}
           api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -240,7 +240,7 @@ jobs:
           cat k8s-manifests/*.yaml > manifests.yaml
 
       - name: Run Averlon Remediation Agent for Kubernetes
-        uses: averlon-ai/actions/k8s-analysis@v1.0.1
+        uses: averlon-ai/actions/k8s-analysis@v1.0.2
         with:
           api-key: ${{ secrets.AVERLON_API_KEY }}
           api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -273,7 +273,7 @@ jobs:
             --values values-${{ matrix.environment }}.yaml > manifests.yaml
 
       - name: Run Averlon Remediation Agent for Kubernetes
-        uses: averlon-ai/actions/k8s-analysis@v1.0.1
+        uses: averlon-ai/actions/k8s-analysis@v1.0.2
         with:
           manifest-file: manifests.yaml
           api-key: ${{ secrets.AVERLON_API_KEY }}
@@ -288,7 +288,7 @@ Enable automatic issue fixing with GitHub Copilot:
 
 ```yaml
 - name: Run Averlon Remediation Agent for Kubernetes
-  uses: averlon-ai/actions/k8s-analysis@v1.0.1
+  uses: averlon-ai/actions/k8s-analysis@v1.0.2
   with:
     manifest-file: manifests.yaml
     api-key: ${{ secrets.AVERLON_API_KEY }}
@@ -357,7 +357,7 @@ namespace-filter: kube-system,monitoring,logging
 
 ```yaml
 - name: Analyze Production Workloads Only
-  uses: averlon-ai/actions/k8s-analysis@v1.0.1
+  uses: averlon-ai/actions/k8s-analysis@v1.0.2
   with:
     manifest-file: manifests.yaml
     api-key: ${{ secrets.AVERLON_API_KEY }}

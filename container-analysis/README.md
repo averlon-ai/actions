@@ -57,7 +57,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Run Averlon Remediation Agent for Containers
-        uses: averlon-ai/actions/container-analysis@v1.0.1
+        uses: averlon-ai/actions/container-analysis@v1.0.2
         with:
           api-key: ${{ secrets.AVERLON_API_KEY }}
           api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -91,7 +91,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Run Averlon Remediation Agent for Containers
-        uses: averlon-ai/actions/container-analysis@v1.0.1
+        uses: averlon-ai/actions/container-analysis@v1.0.2
         with:
           api-key: ${{ secrets.AVERLON_API_KEY }}
           api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -136,7 +136,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Run Averlon Remediation Agent for Containers
-        uses: averlon-ai/actions/container-analysis@v1.0.1
+        uses: averlon-ai/actions/container-analysis@v1.0.2
         with:
           api-key: ${{ secrets.AVERLON_API_KEY }}
           api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -194,7 +194,7 @@ While Averlon attempts to automatically map Dockerfiles to image repositories, t
 ```yaml
 # Solution: Provide explicit image mapping (recommended)
 - name: Run Averlon Remediation Agent for Containers
-  uses: averlon-ai/actions/container-analysis@v1.0.1
+  uses: averlon-ai/actions/container-analysis@v1.0.2
   with:
     api-key: ${{ secrets.AVERLON_API_KEY }}
     api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -220,7 +220,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Run Averlon Remediation Agent for Containers
-        uses: averlon-ai/actions/container-analysis@v1.0.1
+        uses: averlon-ai/actions/container-analysis@v1.0.2
         with:
           api-key: ${{ secrets.AVERLON_API_KEY }}
           api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -241,7 +241,7 @@ Adjust the filters to focus on critical vulnerabilities.
 ```yaml
 # Solution: Use stricter filters
 - name: Run Averlon Remediation Agent for Containers
-  uses: averlon-ai/actions/container-analysis@v1.0.1
+  uses: averlon-ai/actions/container-analysis@v1.0.2
   with:
     api-key: ${{ secrets.AVERLON_API_KEY }}
     api-secret: ${{ secrets.AVERLON_API_SECRET }}
