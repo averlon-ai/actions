@@ -40,7 +40,7 @@ jobs:
           yq eval -o=json '.' /tmp/manifests/**/*.yaml | jq -s '.' > manifests.json
 
       - name: Analyze with Averlon Misconfiguration Remediation Agent for Kubernetes
-        uses: averlon-org/actions/k8s-analysis@v1
+        uses: averlon-org/actions/k8s-analysis@v1.0.1
         with:
           # Required: Averlon API credentials
           api-key: ${{ secrets.AVERLON_API_KEY }}

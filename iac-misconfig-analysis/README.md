@@ -17,23 +17,32 @@ The Averlon Misconfiguration Remediation Agent for IaC Action helps you identify
 
 Before using this action, ensure you have:
 
-1. **Terraform Setup**: Terraform installed and configured in your workflow
-2. **Averlon API Credentials**: Valid API key and secret from Averlon
-3. **Terraform Plan File**: A JSON-formatted Terraform plan file to scan
-4. **GitHub Token** (optional): For creating GitHub issues. Provide a PAT with Copilot access to enable automated assignment
+1. **Averlon Account**: Sign up at [Averlon](https://averlon.io) to get your API credentials
+2. **API Credentials**: Obtain your `api_key` and `api_secret` from the Averlon dashboard
+3. **Terraform Setup**: Terraform installed and configured in your workflow
+4. **Terraform Plan File**: A JSON-formatted Terraform plan file to scan
+5. **GitHub Token**: A GitHub token with permissions to create and manage issues
+   - For basic usage: Use `${{ secrets.GITHUB_TOKEN }}` with appropriate `permissions` declared in your workflow
+   - For Copilot auto-assignment: **Optional** - Use a Personal Access Token (PAT) with Copilot access (the default `GITHUB_TOKEN` does not support Copilot assignment)
+
+## 🔐 Create Averlon API Keys and MCP Setup
+
+For detailed instructions on creating API keys, please refer to our [API Key Setup Documentation](../docs/actions-api-setup.md).
+
+For setting up the MCP server, please refer to our [MCP Setup Documentation](../docs/mcp-setup.md).
 
 ## 🛠️ Usage
 
 ### Basic Workflow
 
 ```yaml
-name: Terraform Misconfiguration Scan
+name: Averlon IaC Misconfiguration Remediation
 on:
   pull_request:
     types: [opened, synchronize]
 
 jobs:
-  terraform-scan:
+  iac-misconfiguration-remediation:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -53,12 +62,11 @@ jobs:
           terraform plan -out=tfplan
           terraform show -json tfplan > plan.json
 
-      - name: Run Terraform Misconfiguration Scan
-        uses: averlon-ai/actions/iac-misconfig-analysis@v1
+      - name: Run Averlon Remediation Agent for IaC Misconfigurations
+        uses: averlon-ai/actions/iac-misconfig-analysis@v1.0.1
         with:
           api-key: ${{ secrets.AVERLON_API_KEY }}
           api-secret: ${{ secrets.AVERLON_API_SECRET }}
-          repo-name: ${{ github.repository }}
           commit: ${{ github.event.pull_request.head.sha }}
           plan-path: './plan.json'
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -66,18 +74,17 @@ jobs:
 
 The action will automatically create GitHub issues for resources with misconfigurations, batching 10 resources per issue.
 
-### Custom Processing
+### With Custom Processing
 
 Process scan results programmatically using the `scan-result` output:
 
 ```yaml
-- name: Run Terraform Misconfiguration Scan
+- name: Run Averlon Remediation Agent for IaC Misconfigurations
   id: scan
-  uses: averlon-ai/actions/iac-misconfig-analysis@v1
+  uses: averlon-ai/actions/iac-misconfig-analysis@v1.0.1
   with:
     api-key: ${{ secrets.AVERLON_API_KEY }}
     api-secret: ${{ secrets.AVERLON_API_SECRET }}
-    repo-name: ${{ github.repository }}
     commit: ${{ github.event.pull_request.head.sha }}
     plan-path: './plan.json'
     github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -112,18 +119,17 @@ Process scan results programmatically using the `scan-result` output:
     path: scan-result.json
 ```
 
-### Without GitHub Issues
+### With Issue Creation Disabled
 
 Skip GitHub issue creation if you only need the output:
 
 ```yaml
-- name: Run Terraform Misconfiguration Scan
+- name: Run Averlon Remediation Agent for IaC Misconfigurations
   id: scan
-  uses: averlon-ai/actions/iac-misconfig-analysis@v1
+  uses: averlon-ai/actions/iac-misconfig-analysis@v1.0.1
   with:
     api-key: ${{ secrets.AVERLON_API_KEY }}
     api-secret: ${{ secrets.AVERLON_API_SECRET }}
-    repo-name: ${{ github.repository }}
     commit: ${{ github.event.pull_request.head.sha }}
     plan-path: './plan.json'
     # Omit github-token to skip issue creation
@@ -134,16 +140,15 @@ Skip GitHub issue creation if you only need the output:
     # Process the results as needed
 ```
 
-### Advanced Configuration
+### With Advanced Configuration
 
 ```yaml
-- name: Run Terraform Misconfiguration Scan
-  uses: averlon-ai/actions/iac-misconfig-analysis@v1
+- name: Run Averlon Remediation Agent for IaC Misconfigurations
+  uses: averlon-ai/actions/iac-misconfig-analysis@v1.0.1
   with:
     # Required inputs
     api-key: ${{ secrets.AVERLON_API_KEY }}
     api-secret: ${{ secrets.AVERLON_API_SECRET }}
-    repo-name: ${{ github.repository }}
     commit: ${{ github.event.pull_request.head.sha }}
     plan-path: './plan.json'
 
@@ -171,7 +176,6 @@ Skip GitHub issue creation if you only need the output:
 | ------------ | ---------------------------------------------- |
 | `api-key`    | Averlon API key ID for authentication          |
 | `api-secret` | Averlon API secret for HMAC signatures         |
-| `repo-name`  | Name of the repository (e.g., `owner/repo`)    |
 | `commit`     | Commit SHA to scan                             |
 | `plan-path`  | Path to the JSON-formatted Terraform plan file |
 
@@ -193,9 +197,9 @@ Skip GitHub issue creation if you only need the output:
 **Example**:
 
 ```yaml
-- name: Run Terraform Misconfiguration Scan
+- name: Run Averlon Remediation Agent for IaC Misconfigurations
   id: scan
-  uses: averlon-ai/actions/iac-misconfig-analysis@v1
+  uses: averlon-ai/actions/iac-misconfig-analysis@v1.0.1
   # ... inputs
 
 - name: Use output
@@ -277,7 +281,7 @@ If you see "Resource not accessible by integration" errors:
 
 ```yaml
 jobs:
-  terraform-scan:
+  iac-misconfiguration-remediation:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -332,8 +336,8 @@ scan-timeout: '1800'
 Enable debug logging for troubleshooting:
 
 ```yaml
-- name: Run Terraform Misconfiguration Scan
-  uses: averlon-ai/actions/iac-misconfig-analysis@v1
+- name: Run Averlon Remediation Agent for IaC Misconfigurations
+  uses: averlon-ai/actions/iac-misconfig-analysis@v1.0.1
   env:
     ACTIONS_STEP_DEBUG: true
   with:

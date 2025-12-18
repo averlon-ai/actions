@@ -1,11 +1,13 @@
 import * as core from '@actions/core';
 import * as github from '@actions/github';
 import { CopilotIssueManager, IssueState } from '@averlon/github-copilot-utils';
+import { AVERLON_CREATED_LABEL } from '@averlon/github-actions-utils';
 import type { ParsedResource } from './resource-parser';
 import { generateIssueBody, generateIssueTitle } from './issue-template';
 
 // Action-specific constants
-const AVERLON_HELM_LABEL = 'averlon-helm';
+const AVERLON_K8S_ANALYSIS_LABEL = 'averlon-k8s-analysis';
+const ISSUE_LABELS = [AVERLON_CREATED_LABEL, AVERLON_K8S_ANALYSIS_LABEL];
 
 /**
  * Extracts the resource identifier from an Averlon Helm issue title
@@ -125,7 +127,7 @@ export class GithubIssuesService extends CopilotIssueManager {
         repo: this.repo,
         title,
         body,
-        labels: [AVERLON_HELM_LABEL],
+        labels: ISSUE_LABELS,
       });
       core.info(`Created resource list issue #${issue.number} for chart ${chartName}`);
       await this.assignCopilot(issue.number, assignCopilot);
@@ -183,7 +185,7 @@ export class GithubIssuesService extends CopilotIssueManager {
     const { data: issues } = await this.octokit.rest.issues.listForRepo({
       owner: this.owner,
       repo: this.repo,
-      labels: AVERLON_HELM_LABEL,
+      labels: AVERLON_K8S_ANALYSIS_LABEL,
       state: IssueState.OPEN,
       per_page: 100,
     });
@@ -221,7 +223,7 @@ export class GithubIssuesService extends CopilotIssueManager {
     const { data: issues } = await this.octokit.rest.issues.listForRepo({
       owner: this.owner,
       repo: this.repo,
-      labels: AVERLON_HELM_LABEL,
+      labels: AVERLON_K8S_ANALYSIS_LABEL,
       state: IssueState.OPEN,
       per_page: 100,
     });
@@ -236,7 +238,7 @@ export class GithubIssuesService extends CopilotIssueManager {
     const { data: issues } = await this.octokit.rest.issues.listForRepo({
       owner: this.owner,
       repo: this.repo,
-      labels: AVERLON_HELM_LABEL,
+      labels: AVERLON_K8S_ANALYSIS_LABEL,
       state: IssueState.OPEN,
       per_page: 100,
     });

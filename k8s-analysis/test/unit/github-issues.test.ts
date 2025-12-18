@@ -137,7 +137,7 @@ describe('GithubIssuesService', () => {
       expect(mockListForRepo).toHaveBeenCalledWith({
         owner: 'test-owner',
         repo: 'test-repo',
-        labels: 'averlon-helm',
+        labels: 'averlon-k8s-analysis',
         state: 'open',
         per_page: 100,
       });
@@ -147,7 +147,7 @@ describe('GithubIssuesService', () => {
         repo: 'test-repo',
         title: 'Averlon Misconfiguration Remediation Agent for Kubernetes: test-chart',
         body: expect.stringContaining('test-chart'),
-        labels: ['averlon-helm'],
+        labels: ['averlon-created', 'averlon-k8s-analysis'],
       });
 
       expect(mockAssignCopilot).toHaveBeenCalledWith(1, false);

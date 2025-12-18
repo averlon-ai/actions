@@ -8,17 +8,17 @@ import {
 
 describe('extractDockerfilePathFromTitle', () => {
   it('should extract simple Dockerfile path', () => {
-    const title = 'Averlon Scanning: my-registry/my-app - Dockerfile';
+    const title = 'Averlon Container Analysis: my-registry/my-app - Dockerfile';
     expect(extractDockerfilePathFromTitle(title)).toBe('Dockerfile');
   });
 
   it('should extract nested Dockerfile path', () => {
-    const title = 'Averlon Scanning: my-registry/my-app - cmd/Dockerfile';
+    const title = 'Averlon Container Analysis: my-registry/my-app - cmd/Dockerfile';
     expect(extractDockerfilePathFromTitle(title)).toBe('cmd/Dockerfile');
   });
 
   it('should handle image repository with dashes', () => {
-    const title = 'Averlon Scanning: my-registry/my-app-with-dashes - Dockerfile';
+    const title = 'Averlon Container Analysis: my-registry/my-app-with-dashes - Dockerfile';
     expect(extractDockerfilePathFromTitle(title)).toBe('Dockerfile');
   });
 

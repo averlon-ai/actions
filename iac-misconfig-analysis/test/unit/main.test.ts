@@ -1,6 +1,7 @@
 import { describe, it, expect, spyOn, beforeEach, afterEach, mock } from 'bun:test';
 import * as core from '@actions/core';
 import { run } from '../../src/main';
+import { GithubIssuesService } from '../../src/github-issues';
 import type { ApiClient, ScanTerraformResult, UploadTerraformFileRequest } from '@averlon/shared';
 
 // Mock the api-client module
@@ -65,9 +66,6 @@ const mockReadFile = mock(() => Promise.resolve(Buffer.from('test-file-content')
 // Mock the fs/promises module
 const fsModule = await import('node:fs/promises');
 const readFileSpy = spyOn(fsModule, 'readFile').mockImplementation(mockReadFile as any);
-
-// Note: pr-comment module was removed - GitHub issues are now created instead
-
 describe('iac-misconfig-analysis main.ts', () => {
   let infoSpy: ReturnType<typeof spyOn>;
   let warningSpy: ReturnType<typeof spyOn>;
@@ -77,6 +75,7 @@ describe('iac-misconfig-analysis main.ts', () => {
   let setOutputSpy: ReturnType<typeof spyOn>;
   let setFailedSpy: ReturnType<typeof spyOn>;
   let isDebugSpy: ReturnType<typeof spyOn>;
+  let createBatchedIssuesSpy: ReturnType<typeof spyOn>;
   let originalEnv: NodeJS.ProcessEnv;
 
   beforeEach(() => {
@@ -114,7 +113,6 @@ describe('iac-misconfig-analysis main.ts', () => {
     mockStartScanTerraform.mockClear();
     mockGetScanTerraformResult.mockClear();
     mockReadFile.mockClear();
-    // Note: PR comment functionality removed - GitHub issues are used instead
 
     // Reset spy on createApiClient and ensure it returns the correct mock
     createApiClientSpy.mockClear();
@@ -132,11 +130,15 @@ describe('iac-misconfig-analysis main.ts', () => {
     process.env.INPUT_REPO_NAME = 'test-repo';
     process.env.INPUT_COMMIT = 'abc123';
     process.env.INPUT_PLAN_PATH = './test/plan.json';
-    process.env.INPUT_SCAN_POLL_INTERVAL = '30';
-    process.env.INPUT_SCAN_TIMEOUT = '1800';
+    // Keep polling fast in tests to avoid long sleeps/backoff
+    process.env.INPUT_SCAN_POLL_INTERVAL = '1';
+    process.env.INPUT_SCAN_TIMEOUT = '60';
     process.env.INPUT_GITHUB_TOKEN = 'test-github-token';
-    process.env.INPUT_COMMENT_ON_PR = 'true';
-    process.env.INPUT_COMMENT_MODE = 'update';
+
+    createBatchedIssuesSpy = spyOn(
+      GithubIssuesService.prototype,
+      'createBatchedIssues'
+    ).mockResolvedValue();
   });
 
   afterEach(() => {
@@ -149,6 +151,7 @@ describe('iac-misconfig-analysis main.ts', () => {
     setOutputSpy.mockRestore();
     setFailedSpy.mockRestore();
     isDebugSpy.mockRestore();
+    createBatchedIssuesSpy.mockRestore();
 
     // Restore original environment
     process.env = originalEnv;
@@ -292,10 +295,12 @@ describe('iac-misconfig-analysis main.ts', () => {
     });
 
     it('should handle GitHub issues creation failure gracefully', async () => {
-      // Note: PR comment functionality removed - GitHub issues are used instead
       // This test verifies that GitHub issues creation failures don't fail the entire action
       process.env.GITHUB_REPOSITORY = 'test-owner/test-repo';
       process.env.INPUT_GITHUB_TOKEN = 'test-token';
+
+      // Force GitHub issues creation to fail fast
+      createBatchedIssuesSpy.mockRejectedValueOnce(new Error('Issues creation failed'));
 
       await run();
 
@@ -328,7 +333,7 @@ describe('iac-misconfig-analysis main.ts', () => {
         },
       ];
       expect(setOutputSpy).toHaveBeenCalledWith('scan-result', JSON.stringify(expectedResources));
-    });
+    }, 10000);
   });
 
   describe('input validation', () => {
@@ -392,16 +397,6 @@ describe('iac-misconfig-analysis main.ts', () => {
 
       // Should complete successfully with default value
       expect(mockStartScanTerraform).toHaveBeenCalled();
-    });
-
-    it('should use default comment-on-pr when not provided', async () => {
-      delete process.env.INPUT_COMMENT_ON_PR;
-
-      await run();
-
-      // Should complete successfully with default value (true)
-      // Note: comment-on-pr input is no longer used - GitHub issues are created when github-token is provided
-      expect(infoSpy).toHaveBeenCalledWith('Action completed successfully');
     });
 
     it('should handle missing GITHUB_REPOSITORY gracefully', async () => {
@@ -908,9 +903,8 @@ describe('iac-misconfig-analysis main.ts', () => {
     });
 
     // Note: Comment mode behavior is tested in:
-    // 1. Main successful flow test - verifies PR commenting works
-    // 2. Input validation tests - verifies invalid comment modes are rejected
-    // 3. PR comment skip tests - verifies commenting is skipped when appropriate
-    // Additional comment mode tests would be redundant
+    // 1. Main successful flow test - verifies GitHub issues work
+    // 2. Input validation tests
+    // 3. GitHub issues skip tests - verifies creation is skipped when appropriate
   });
 });

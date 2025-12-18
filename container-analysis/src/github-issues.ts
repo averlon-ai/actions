@@ -1,14 +1,16 @@
 import * as core from '@actions/core';
 import { CopilotIssueManager, IssueState } from '@averlon/github-copilot-utils';
+import { AVERLON_CREATED_LABEL } from '@averlon/github-actions-utils';
 import type { GitDockerfileRecommendation } from '@averlon/shared';
 
 // Action-specific constants
-const AVERLON_LABEL = 'averlon';
+const AVERLON_CONTAINER_ANALYSIS_LABEL = 'averlon-container-analysis';
+const ISSUE_LABELS = [AVERLON_CREATED_LABEL, AVERLON_CONTAINER_ANALYSIS_LABEL];
 
 /**
  * Extracts the Dockerfile path from an Averlon issue title.
  *
- * Issue titles are formatted as: "Averlon Scanning: {imageRepo} - {dockerfilePath}"
+ * Issue titles are formatted as: "Averlon Container Analysis: {imageRepo} - {dockerfilePath}"
  * This function safely extracts the dockerfilePath part, handling edge cases where
  * the imageRepo might contain dashes or other special characters
  */
@@ -17,8 +19,7 @@ export function extractDockerfilePathFromTitle(title: string): string {
     return '';
   }
 
-  // Look for the pattern "Averlon Scanning: " followed by content, then " - " and the path
-  const averlonPrefix = 'Averlon Scanning: ';
+  const averlonPrefix = 'Averlon Container Analysis: ';
   const pathSeparator = ' - ';
 
   const prefixIndex = title.indexOf(averlonPrefix);
@@ -99,7 +100,7 @@ export class GithubIssuesService extends CopilotIssueManager {
         repo: this.repo,
         title,
         body,
-        labels: [AVERLON_LABEL],
+        labels: ISSUE_LABELS,
       });
       core.info(`Created security recommendation #${issue.number} for ${rec.Path}`);
       await this.assignCopilot(issue.number, autoAssignCopilot);
@@ -146,7 +147,7 @@ export class GithubIssuesService extends CopilotIssueManager {
   }
 
   private formatIssueTitle(imageRepo: string, dockerfilePath: string): string {
-    return `Averlon Scanning: ${imageRepo} - ${dockerfilePath}`;
+    return `Averlon Container Analysis: ${imageRepo} - ${dockerfilePath}`;
   }
 
   private formatIssueBody(rec: GitDockerfileRecommendation): string {
@@ -160,7 +161,7 @@ export class GithubIssuesService extends CopilotIssueManager {
     body += `**Dockerfile:** \`${rec.Path}\`\n`;
     body += `**Image Repository:** \`${rec.ImageRepository?.RepositoryName || 'Unknown'}\`\n\n`;
     if (fixAll.Prompt) body += `### Recommendation\n${fixAll.Prompt}\n\n`;
-    body += `---\n*This issue was automatically created by Averlon scanning.*`;
+    body += `---\n*This issue was automatically created by Averlon Container Analysis.*`;
     return body;
   }
 
@@ -168,7 +169,7 @@ export class GithubIssuesService extends CopilotIssueManager {
     const { data: issues } = await this.octokit.rest.issues.listForRepo({
       owner: this.owner,
       repo: this.repo,
-      labels: AVERLON_LABEL,
+      labels: AVERLON_CONTAINER_ANALYSIS_LABEL,
       state: IssueState.OPEN,
       per_page: 100,
     });
@@ -205,7 +206,7 @@ export class GithubIssuesService extends CopilotIssueManager {
     const { data: issues } = await this.octokit.rest.issues.listForRepo({
       owner: this.owner,
       repo: this.repo,
-      labels: AVERLON_LABEL,
+      labels: AVERLON_CONTAINER_ANALYSIS_LABEL,
       state: IssueState.OPEN,
       per_page: 100,
     });

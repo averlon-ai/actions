@@ -162,8 +162,36 @@ async function main(): Promise<void> {
   }
 
   const manifestContent = fs.readFileSync(inputs.manifestFilePath, 'utf-8');
-  core.info('Parsing Helm manifest JSON...');
-  const parsed = parseHelmDryRunOutput(manifestContent);
+  core.info('Parsing Helm manifest YAML...');
+
+  let parsed: ReturnType<typeof parseHelmDryRunOutput>;
+  try {
+    parsed = parseHelmDryRunOutput(manifestContent);
+  } catch (error) {
+    const snippet = manifestContent.slice(0, 1000);
+    const message = error instanceof Error ? error.message : String(error);
+    core.error(`Failed to parse manifest file: ${inputs.manifestFilePath}`);
+    core.error(`Parser error: ${message}`);
+    core.error('First 1000 characters of manifest for debugging:');
+    core.error(snippet.length > 0 ? snippet : '<empty file>');
+
+    await core.summary
+      .addHeading('Averlon Misconfiguration Remediation Agent for Kubernetes')
+      .addRaw(
+        [
+          '❌ Failed to parse manifest file.',
+          `File: ${inputs.manifestFilePath}`,
+          `Error: ${message}`,
+          'Shown below: first 1000 characters of the manifest for debugging.',
+        ].join('\n')
+      )
+      .addCodeBlock(snippet.length > 0 ? snippet : '<empty file>')
+      .write();
+
+    core.setFailed(`Failed to parse manifest file: ${message}`);
+    return;
+  }
+
   const manifestYaml = parsed.manifestYaml;
   const userSuppliedValues = parsed.userSuppliedValues;
   const derivedReleaseName = parsed.releaseName;
@@ -296,13 +324,7 @@ async function main(): Promise<void> {
           core.info('    Issues:');
           for (const issue of resource.issues) {
             const issueTitle = issue.title || issue.summary || issue.id;
-            const classificationLabel =
-              issue.classification && issue.classification.length > 0
-                ? ` [${issue.classification.join(', ')}]`
-                : '';
-            core.info(
-              `      • [${issue.severity ?? 'Unknown'}] ${issueTitle} (ID: ${issue.id})${classificationLabel}`
-            );
+            core.info(`      • [${issue.severity ?? 'Unknown'}] ${issueTitle} (ID: ${issue.id})`);
           }
         }
       }

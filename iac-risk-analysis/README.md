@@ -16,23 +16,28 @@ The Averlon Infrastructure Risk PreCog Agent Action helps you understand the com
 
 Before using this action, ensure you have:
 
-1. **Terraform Setup**: Terraform installed and configured in your workflow
-2. **Averlon API Credentials**: Valid API key and secret from Averlon
-3. **Terraform Files**: Both plan and graph files for base and head commits
-4. **Git Access**: Ability to checkout different commits
+1. **Averlon Account**: Sign up at [Averlon](https://averlon.io) to get your API credentials
+2. **API Credentials**: Obtain your `api_key` and `api_secret` from the Averlon dashboard
+3. **Terraform Setup**: Terraform installed and configured in your workflow
+4. **Terraform Files**: Both plan and graph files for base and head commits
+5. **Git Access**: Ability to checkout different commits
+
+## 🔐 Create Averlon API Keys
+
+For detailed instructions on creating API keys, please refer to our [API Key Setup Documentation](../docs/actions-api-setup.md).
 
 ## 🛠️ Usage
 
 ### Basic Workflow
 
 ```yaml
-name: Terraform Security Analysis
+name: Averlon IaC Risk Analysis
 on:
   pull_request:
     types: [opened, synchronize]
 
 jobs:
-  terraform-analysis:
+  iac-risk-analysis:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -64,8 +69,8 @@ jobs:
           terraform show -json head-plan.tfplan > head-plan.json
           terraform graph > head-graph.dot
 
-      - name: Run Terraform Risk Analysis
-        uses: averlon-ai/actions/iac-risk-analysis@v1
+      - name: Run Averlon IaC Risk Analysis
+        uses: averlon-ai/actions/iac-risk-analysis@v1.0.1
         with:
           api-key: ${{ secrets.AVERLON_API_KEY }}
           api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -83,14 +88,14 @@ jobs:
 
 The action will automatically post formatted security analysis to your PR.
 
-### Custom Processing
+### With Custom Processing
 
 Process scan results programmatically using the `scan-result` output:
 
 ```yaml
-- name: Run Terraform Risk Analysis
+- name: Run Averlon IaC Risk Analysis
   id: analysis
-  uses: averlon-ai/actions/iac-risk-analysis@v1
+  uses: averlon-ai/actions/iac-risk-analysis@v1.0.1
   with:
     api-key: ${{ secrets.AVERLON_API_KEY }}
     api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -123,14 +128,14 @@ Process scan results programmatically using the `scan-result` output:
     path: scan-result.json
 ```
 
-### Without PR Comments
+### With PR Comments Disabled
 
 Disable automatic PR comments if you only need the output:
 
 ```yaml
-- name: Run Terraform Risk Analysis
+- name: Run Averlon IaC Risk Analysis
   id: analysis
-  uses: averlon-ai/actions/iac-risk-analysis@v1
+  uses: averlon-ai/actions/iac-risk-analysis@v1.0.1
   with:
     api-key: ${{ secrets.AVERLON_API_KEY }}
     api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -149,11 +154,11 @@ Disable automatic PR comments if you only need the output:
     # Process the results as needed
 ```
 
-### Advanced Configuration
+### With Advanced Configuration
 
 ```yaml
-- name: Run Terraform Risk Analysis
-  uses: averlon-ai/actions/iac-risk-analysis@v1
+- name: Run Averlon IaC Risk Analysis
+  uses: averlon-ai/actions/iac-risk-analysis@v1.0.1
   with:
     # Required inputs
     api-key: ${{ secrets.AVERLON_API_KEY }}
@@ -220,9 +225,9 @@ Disable automatic PR comments if you only need the output:
 
 **Example**:
 ```yaml
-- name: Run Terraform Risk Analysis
+- name: Run Averlon IaC Risk Analysis
   id: analysis
-  uses: averlon-ai/actions/iac-risk-analysis@v1
+  uses: averlon-ai/actions/iac-risk-analysis@v1.0.1
   # ... inputs
 
 - name: Use output
@@ -270,7 +275,7 @@ If you see "Resource not accessible by integration" errors:
 
 ```yaml
 jobs:
-  terraform-analysis:
+  iac-risk-analysis:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -310,8 +315,8 @@ scan-timeout: '3600' # 1 hour instead of default 30 minutes
 Enable debug logging for troubleshooting:
 
 ```yaml
-- name: Run Terraform Risk Analysis
-  uses: averlon-ai/actions/iac-risk-analysis@v1
+- name: Run Averlon IaC Risk Analysis
+  uses: averlon-ai/actions/iac-risk-analysis@v1.0.1
   env:
     ACTIONS_STEP_DEBUG: true
   with:

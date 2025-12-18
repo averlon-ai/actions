@@ -44,7 +44,6 @@ export interface ConsolidatedIssue {
   title?: string;
   summary?: string;
   type?: string;
-  classification?: string[];
   status?: string;
   affectedResources: Array<{
     kind: string;
@@ -68,7 +67,6 @@ export interface ConsolidatedIssuesJson {
     resourcesWithIssues: number;
     totalIssues: number;
     issuesBySeverity: Record<string, number>;
-    issuesByClassification: Record<string, number>;
   };
   issues: ConsolidatedIssue[];
   resourcesWithIssues: Array<{
@@ -82,7 +80,6 @@ export interface ConsolidatedIssuesJson {
       severity: string;
       title?: string;
       summary?: string;
-      classification?: string[];
     }>;
   }>;
 }
@@ -168,7 +165,6 @@ export function buildConsolidatedIssuesJson(args: {
 
   const issueMap = new Map<string, ConsolidatedIssue>();
   const issuesBySeverity: Record<string, number> = {};
-  const issuesByClassification: Record<string, number> = {};
   const resourcesWithIssuesArray: ConsolidatedIssuesJson['resourcesWithIssues'] = [];
 
   for (const resource of resources) {
@@ -187,19 +183,12 @@ export function buildConsolidatedIssuesJson(args: {
         severity: issue.severity ?? 'Unknown',
         title: issue.title,
         summary: issue.summary,
-        classification: issue.classification,
       })),
     });
 
     for (const issue of resource.issues) {
       const severity = issue.severity ?? 'Unknown';
       issuesBySeverity[severity] = (issuesBySeverity[severity] || 0) + 1;
-
-      if (issue.classification) {
-        for (const classif of issue.classification) {
-          issuesByClassification[classif] = (issuesByClassification[classif] || 0) + 1;
-        }
-      }
 
       if (issueMap.has(issue.id)) {
         const existingIssue = issueMap.get(issue.id)!;
@@ -217,7 +206,6 @@ export function buildConsolidatedIssuesJson(args: {
           title: issue.title,
           summary: issue.summary,
           type: issue.type,
-          classification: issue.classification,
           status: issue.status,
           affectedResources: [
             {
@@ -261,7 +249,6 @@ export function buildConsolidatedIssuesJson(args: {
       resourcesWithIssues: resourcesWithIssuesArray.length,
       totalIssues: consolidatedIssues.length,
       issuesBySeverity,
-      issuesByClassification,
     },
     issues: consolidatedIssues,
     resourcesWithIssues: resourcesWithIssuesArray,
