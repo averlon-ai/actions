@@ -6,8 +6,8 @@ Security analysis for Terraform infrastructure changes with misconfiguration det
 
 The Averlon Misconfiguration Remediation Agent for IaC Action helps you identify security issues in your Terraform infrastructure by:
 
-- **🔍 Misconfiguration Detection**: Scans Terraform plans for security misconfigurations and compliance violations
-- **⚠️ Issue Identification**: Identifies specific security issues and policy violations in your infrastructure
+- **🔍 Misconfiguration Detection**: Scans Terraform plans for security misconfigurations
+- **⚠️ Issue Identification**: Identifies specific security issues in your infrastructure
 - **📊 Issue Reporting**: Provides detailed issue IDs and resource information
 - **📝 GitHub Issues**: Automatically creates GitHub issues for resources with misconfigurations (batched 10 resources per issue)
 - **🤖 Copilot Integration**: Optionally assigns GitHub Copilot to issues for automated remediation
@@ -63,7 +63,7 @@ jobs:
           terraform show -json tfplan > plan.json
 
       - name: Run Averlon Remediation Agent for IaC Misconfigurations
-        uses: averlon-ai/actions/iac-misconfig-analysis@v1.0.1
+        uses: averlon-ai/actions/iac-misconfig-analysis@v1.0.3
         with:
           api-key: ${{ secrets.AVERLON_API_KEY }}
           api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -74,51 +74,6 @@ jobs:
 
 The action will automatically create GitHub issues for resources with misconfigurations, batching 10 resources per issue.
 
-### With Custom Processing
-
-Process scan results programmatically using the `scan-result` output:
-
-```yaml
-- name: Run Averlon Remediation Agent for IaC Misconfigurations
-  id: scan
-  uses: averlon-ai/actions/iac-misconfig-analysis@v1.0.1
-  with:
-    api-key: ${{ secrets.AVERLON_API_KEY }}
-    api-secret: ${{ secrets.AVERLON_API_SECRET }}
-    commit: ${{ github.event.pull_request.head.sha }}
-    plan-path: './plan.json'
-    github-token: ${{ secrets.GITHUB_TOKEN }}
-
-- name: Process scan results
-  run: |
-    # Parse scan results (JSON array of TerraformResource objects)
-    echo '${{ steps.scan.outputs.scan-result }}' | jq '.'
-
-    # Check if resources with issues were found
-    RESOURCES='${{ steps.scan.outputs.scan-result }}'
-    RESOURCE_COUNT=$(echo "$RESOURCES" | jq 'length')
-    if [ "$RESOURCE_COUNT" -gt 0 ]; then
-      echo "Found $RESOURCE_COUNT resources with security issues!"
-      # Count total issues
-      ISSUE_COUNT=$(echo "$RESOURCES" | jq '[.[] | .Issues // [] | length] | add')
-      echo "Total issues found: $ISSUE_COUNT"
-    fi
-
-    # Send to monitoring system
-    curl -X POST https://your-monitoring.com/api/scans \
-      -H "Content-Type: application/json" \
-      -d "$RESOURCES"
-
-    # Save as artifact
-    echo '${{ steps.scan.outputs.scan-result }}' > scan-result.json
-
-- name: Upload results
-  uses: actions/upload-artifact@v4
-  with:
-    name: terraform-scan-results
-    path: scan-result.json
-```
-
 ### With Issue Creation Disabled
 
 Skip GitHub issue creation if you only need the output:
@@ -126,7 +81,7 @@ Skip GitHub issue creation if you only need the output:
 ```yaml
 - name: Run Averlon Remediation Agent for IaC Misconfigurations
   id: scan
-  uses: averlon-ai/actions/iac-misconfig-analysis@v1.0.1
+  uses: averlon-ai/actions/iac-misconfig-analysis@v1.0.3
   with:
     api-key: ${{ secrets.AVERLON_API_KEY }}
     api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -144,7 +99,7 @@ Skip GitHub issue creation if you only need the output:
 
 ```yaml
 - name: Run Averlon Remediation Agent for IaC Misconfigurations
-  uses: averlon-ai/actions/iac-misconfig-analysis@v1.0.1
+  uses: averlon-ai/actions/iac-misconfig-analysis@v1.0.3
   with:
     # Required inputs
     api-key: ${{ secrets.AVERLON_API_KEY }}
@@ -159,13 +114,15 @@ Skip GitHub issue creation if you only need the output:
     scan-poll-interval: '45' # Poll every 45 seconds
     scan-timeout: '3600' # 1 hour timeout for large infrastructure
     base-url: 'https://wfe.prod.averlon.io/' # Custom API endpoint
+    auto-assign-copilot: 'true' #auto assign created issue to copilot
+    resource-type-filter: 'aws_s3_bucket,aws_lambda_function' # filter the misconfiguration for specific terraform resource types
 ```
 
 **GitHub Issues:**
 
 - Issues are automatically created for resources with misconfigurations
 - Resources are batched into groups of 10 per issue
-- Issues are labeled with `averlon-terraform` for easy filtering
+- Issues are labeled with `averlon-iac-misconfiguration-analysis` for easy filtering
 - If a GitHub token with Copilot access is provided, issues can be automatically assigned to Copilot for remediation
 
 ## 📥 Inputs
@@ -199,7 +156,7 @@ Skip GitHub issue creation if you only need the output:
 ```yaml
 - name: Run Averlon Remediation Agent for IaC Misconfigurations
   id: scan
-  uses: averlon-ai/actions/iac-misconfig-analysis@v1.0.1
+  uses: averlon-ai/actions/iac-misconfig-analysis@v1.0.3
   # ... inputs
 
 - name: Use output
@@ -337,7 +294,7 @@ Enable debug logging for troubleshooting:
 
 ```yaml
 - name: Run Averlon Remediation Agent for IaC Misconfigurations
-  uses: averlon-ai/actions/iac-misconfig-analysis@v1.0.1
+  uses: averlon-ai/actions/iac-misconfig-analysis@v1.0.3
   env:
     ACTIONS_STEP_DEBUG: true
   with:
@@ -396,24 +353,4 @@ The action returns a JSON stringified array of `TerraformResource` objects:
 
 ```json
 []
-```
-
-## 🔧 Local Testing
-
-Test the action locally:
-
-```bash
-# Set environment variables
-export INPUT_API_KEY="your-test-api-key"
-export INPUT_API_SECRET="your-test-api-secret"
-export INPUT_REPO_NAME="test-repo"
-export INPUT_COMMIT="abc123"
-export INPUT_PLAN_PATH="./test/plan.json"
-export INPUT_SCAN_POLL_INTERVAL="30"
-export INPUT_SCAN_TIMEOUT="1800"
-export INPUT_GITHUB_TOKEN="test-token"
-export GITHUB_REPOSITORY="test-owner/test-repo"
-
-# Run the action
-bun run dev
 ```

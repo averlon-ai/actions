@@ -260,11 +260,12 @@ export function getGitRepoUrl(): string {
 export function parseFilters(input: string | undefined): number {
   if (!input) return 0;
   const nameToBit: Record<string, number> = {
-    RecommendedOrExploited: 0x1,
     Critical: 0x2,
     High: 0x4,
     HighRCE: 0x8,
     MediumApplication: 0x10,
+    Recommended: 0x20,
+    Exploited: 0x40,
   };
   let mask = 0;
   const parts = input

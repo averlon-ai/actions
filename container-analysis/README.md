@@ -19,9 +19,9 @@ Before using this action, ensure you have:
 
 1. **Averlon Account**: Sign up at [Averlon](https://averlon.io) to get your API credentials
 2. **API Credentials**: Obtain your `api_key` and `api_secret` from the Averlon dashboard
-3. **GitHub Token**: A GitHub token with permissions to create and manage issues and pull requests
-   - For basic usage: Use `${{ secrets.GITHUB_TOKEN }}` with appropriate `permissions` declared in your workflow
-   - For Copilot auto-assignment: **Required** - Use a Personal Access Token (PAT) with Copilot access (the default `GITHUB_TOKEN` does not support Copilot assignment)
+3. **GitHub Token**: A GitHub token with `contents: read` and `issues: write` permissions
+   - For basic usage: Use `${{ secrets.GITHUB_TOKEN }}` with the required permissions declared in your workflow
+   - For Copilot auto-assignment: **Required** - Use a Personal Access Token (PAT) with Copilot access and additional `pull_requests: write` permission (the default `GITHUB_TOKEN` does not support Copilot assignment)
 4. **Dockerfiles**: At least one Dockerfile in your repository
 
 ## 🔐 Create Averlon API Keys and MCP Setup
@@ -57,7 +57,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Run Averlon Remediation Agent for Containers
-        uses: averlon-ai/actions/container-analysis@v1.0.1
+        uses: averlon-ai/actions/container-analysis@v1.0.3
         with:
           api-key: ${{ secrets.AVERLON_API_KEY }}
           api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -91,16 +91,16 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Run Averlon Remediation Agent for Containers
-        uses: averlon-ai/actions/container-analysis@v1.0.1
+        uses: averlon-ai/actions/container-analysis@v1.0.3
         with:
           api-key: ${{ secrets.AVERLON_API_KEY }}
           api-secret: ${{ secrets.AVERLON_API_SECRET }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           image-map: |
             Dockerfile=docker.io/username/repo-name
-            backend/Dockerfile=account-id.dkr.ecr.us-west-2.amazonaws.com/repo-name
-            frontend/Dockerfile.prod=ghcr.io/orgname/frontend-app
-          filters: 'RecommendedOrExploited,Critical,High'
+            path/to/Dockerfile=account-id.dkr.ecr.us-west-2.amazonaws.com/repo-name
+            path/to/Dockerfile.prod=ghcr.io/orgname/frontend-app
+          filters: 'Recommended,Critical,High'
 ```
 
 ### With GitHub Copilot Auto-Assignment
@@ -136,7 +136,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Run Averlon Remediation Agent for Containers
-        uses: averlon-ai/actions/container-analysis@v1.0.1
+        uses: averlon-ai/actions/container-analysis@v1.0.3
         with:
           api-key: ${{ secrets.AVERLON_API_KEY }}
           api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -146,15 +146,15 @@ jobs:
 
 ## 📥 Inputs
 
-| Input                 | Description                                                                                                                                                                                                      | Required | Default                                   |
-| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ----------------------------------------- |
-| `api-key`             | Averlon API key for authentication                                                                                                                                                                               | ✅       | -                                         |
-| `api-secret`          | Averlon API secret for authentication                                                                                                                                                                            | ✅       | -                                         |
-| `github-token`        | GitHub token for creating/managing issues. Use `${{ secrets.GITHUB_TOKEN }}` with `permissions: issues: write` declared in your workflow. **For Copilot auto-assignment, a PAT with Copilot access is required** | ✅       | -                                         |
-| `base-url`            | Base URL for the Averlon API service                                                                                                                                                                             | ❌       | `https://wfe.prod.averlon.io/`            |
-| `image-map`           | Multiline mapping of Dockerfile paths to image repository names (format: `path=repository`). **Recommended**: While Averlon attempts automatic mapping, explicit mapping ensures accuracy                        | ❌       | -                                         |
-| `filters`             | Comma-separated vulnerability filters: `RecommendedOrExploited`, `Critical`, `High`, `HighRCE`, `MediumApplication`                                                                                              | ❌       | `RecommendedOrExploited,Critical,HighRCE` |
-| `auto-assign-copilot` | Auto-assign security issues to GitHub Copilot agent for automated fixes. **Requires a PAT with Copilot access**                                                                                                  | ❌       | `false`                                   |
+| Input                 | Description                                                                                                                                                                                                                                                         | Required | Default                        |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------------------------------ |
+| `api-key`             | Averlon API key for authentication                                                                                                                                                                                                                                  | ✅       | -                              |
+| `api-secret`          | Averlon API secret for authentication                                                                                                                                                                                                                               | ✅       | -                              |
+| `github-token`        | GitHub token with `contents: read` and `issues: write` permissions. Use `${{ secrets.GITHUB_TOKEN }}` for basic usage. **For Copilot auto-assignment**: Requires a Personal Access Token (PAT) with Copilot access and additional `pull_requests: write` permission | ✅       | -                              |
+| `base-url`            | Base URL for the Averlon API service                                                                                                                                                                                                                                | ❌       | `https://wfe.prod.averlon.io/` |
+| `image-map`           | Multiline mapping of Dockerfile paths to image repository urls (format: `path=repository-url`). Example: `Dockerfile=docker.io/username/repo-name`. **Recommended**: While Averlon attempts automatic mapping, explicit mapping ensures accuracy                    | ❌       | -                              |
+| `filters`             | Comma-separated vulnerability filters: `Recommended`, `Exploited`, `Critical`, `High`, `HighRCE`, `MediumApplication`                                                                                                                                               | ❌       | `Recommended,Critical,HighRCE` |
+| `auto-assign-copilot` | Auto-assign security issues to GitHub Copilot agent for automated fixes. **Requires a PAT with Copilot access**                                                                                                                                                     | ❌       | `false`                        |
 
 ## 📤 Outputs
 
@@ -194,7 +194,7 @@ While Averlon attempts to automatically map Dockerfiles to image repositories, t
 ```yaml
 # Solution: Provide explicit image mapping (recommended)
 - name: Run Averlon Remediation Agent for Containers
-  uses: averlon-ai/actions/container-analysis@v1.0.1
+  uses: averlon-ai/actions/container-analysis@v1.0.3
   with:
     api-key: ${{ secrets.AVERLON_API_KEY }}
     api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -220,7 +220,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Run Averlon Remediation Agent for Containers
-        uses: averlon-ai/actions/container-analysis@v1.0.1
+        uses: averlon-ai/actions/container-analysis@v1.0.3
         with:
           api-key: ${{ secrets.AVERLON_API_KEY }}
           api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -231,7 +231,7 @@ jobs:
 Ensure your PAT has:
 
 - Repository access to your repos
-- `Contents` (read), `Issues` (read/write), `Pull requests` (read/write) permissions
+- `Contents` (read), `Issues` (write), `Pull requests` (read/write) permissions
 - Your GitHub account has Copilot access enabled
 
 **Issue: "Too many low-priority findings"**
@@ -241,13 +241,57 @@ Adjust the filters to focus on critical vulnerabilities.
 ```yaml
 # Solution: Use stricter filters
 - name: Run Averlon Remediation Agent for Containers
-  uses: averlon-ai/actions/container-analysis@v1.0.1
+  uses: averlon-ai/actions/container-analysis@v1.0.3
   with:
     api-key: ${{ secrets.AVERLON_API_KEY }}
     api-secret: ${{ secrets.AVERLON_API_SECRET }}
     github-token: ${{ secrets.GITHUB_TOKEN }}
     filters: 'Critical,HighRCE' # Only show critical and high-risk RCE vulnerabilities
 ```
+
+**Issue: GitHub API errors (e.g., "Not Found" when listing repository issues)**
+
+If you encounter errors like `Not Found - https://docs.github.com/rest/issues/issues#list-repository-issues` or `Action failed: Not Found`, this typically indicates that the GitHub token (PAT or `GITHUB_TOKEN`) doesn't have the required permissions to access the repository's issues API.
+
+**Solution: Ensure your token has the required permissions**
+
+For `GITHUB_TOKEN` (default token):
+
+```yaml
+# Solution: Declare proper permissions in your workflow
+jobs:
+  container-security-remediation:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # Required to read repository contents
+      issues: write # Required to read/create/update issues
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Run Averlon Remediation Agent for Containers
+        uses: averlon-ai/actions/container-analysis@v1.0.3
+        with:
+          api-key: ${{ secrets.AVERLON_API_KEY }}
+          api-secret: ${{ secrets.AVERLON_API_SECRET }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+```
+
+For Personal Access Token (PAT):
+
+1. Go to GitHub Settings → Developer settings → Personal access tokens → Fine-grained tokens
+2. Ensure your token has:
+   - Repository access: Select the repositories you want to scan
+   - Permissions:
+     - `Contents` (read) - Required to read Dockerfiles
+     - `Issues` (write) - Required to create/update issues
+     - `Pull requests` (read/write) - Required if using Copilot auto-assignment
+
+**Additional checks:**
+
+- Verify that Issues are enabled in your repository settings (Settings → General → Features → Issues)
+- Ensure the token has access to the repository (for PATs, check repository access settings)
+- For organization repositories, ensure the token has access to organization resources if required
 
 ## 💡 Best Practices
 

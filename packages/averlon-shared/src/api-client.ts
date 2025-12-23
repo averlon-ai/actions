@@ -193,7 +193,7 @@ export class ApiClient {
     }
 
     try {
-      core.info(`Making ${method} request to: ${endpoint}`);
+      core.debug(`Making ${method} request to: ${endpoint}`);
 
       // Add custom agent if certificate validation is disabled
       const finalOptions = this.httpsAgent
