@@ -6,6 +6,7 @@ import {
   getGitRepoUrl,
   parseFilters,
   parseImageMap,
+  toRelativePath,
 } from './recommendations';
 import { createApiClient, GetGitProjectRecommendationsRequest } from '@averlon/shared';
 import { getInputSafe, parseBoolean } from '@averlon/github-actions-utils';
@@ -40,7 +41,7 @@ async function _getInputs(): Promise<ActionInputs> {
   // Get optional inputs with defaults
   const baseUrl = getInputSafe('base-url', false) || 'https://wfe.prod.averlon.io/';
   const imageMapInput = getInputSafe('image-map', false) || '';
-  const filtersRaw = getInputSafe('filters', false) || 'RecommendedOrExploited,Critical,HighRCE';
+  const filtersRaw = getInputSafe('filters', false) || 'Recommended,Critical,HighRCE';
   const autoAssignCopilotStr = getInputSafe('auto-assign-copilot', false) || 'false';
   const autoAssignCopilot = parseBoolean(autoAssignCopilotStr);
 
@@ -109,7 +110,6 @@ async function main(): Promise<void> {
 
   const response = await client.getGitProjectRecommendations(payload);
   const dockerRecs = response?.DockerfileRecommendations || [];
-  core.info(`Received ${dockerRecs.length} recommendation${dockerRecs.length !== 1 ? 's' : ''}`);
 
   const octokit = github.getOctokit(inputs.githubToken);
   const issuesService = new GithubIssuesService(octokit, inputs.githubOwner, inputs.githubRepo);
@@ -132,35 +132,57 @@ async function main(): Promise<void> {
 
     try {
       if (rec) {
+        // Successfully mapped: We got a recommendation from backend, which means we were able to map this Dockerfile to an image repository
+        const mappedImageRepo = rec.ImageRepository?.RepositoryName;
+        core.info(
+          `[${dockerfilePath}] ✓ Successfully mapped to image repository: ${mappedImageRepo || 'Unknown'}`
+        );
+
         const fixAll = rec.FixAllRecommendation;
 
         if (fixAll) {
+          // Mapped AND has recommendations
+          core.info(`[${dockerfilePath}] Security recommendations found`);
           // If there are recommendations, create or update an issue for this Dockerfile (and assign to Copilot if configured).
           await issuesService.createOrUpdateIssue(rec, inputs.autoAssignCopilot);
         } else {
+          // Mapped BUT no recommendations
+          core.info(`[${dockerfilePath}] No security recommendations available`);
           // If there are no recommendations, close any existing issue related to this Dockerfile.
-          core.info(
-            `No security recommendations for ${dockerfilePath}; closing any existing issue if necessary.`
-          );
           await issuesService.closeIssueByPath(
             dockerfilePath,
             'This issue has been automatically closed because no security recommendations are available for this Dockerfile in the latest scan.'
           );
         }
       } else {
-        // No recommendation returned, which means we were not able to find the mapped image repository for this Dockerfile.
-        // We should not close the issue in this case.
-        core.warning(
-          `Skipping Dockerfile ${dockerfilePath} as we are not able to map it to an image repository. Closing any opened issues for it.`
-        );
-        await issuesService.closeIssueByPath(
-          dockerfilePath,
-          'This issue has been automatically closed because we were not able to map the Dockerfile to an image repository.'
-        );
+        // Failed to map: No recommendation returned from backend, which means we were not able to map this Dockerfile to an image repository
+        const relPath = toRelativePath(dockerfilePath);
+        const mappedImageRepo = imageMap[relPath];
+
+        if (mappedImageRepo) {
+          // Dockerfile is in image-map but Averlon didn't find/scan the image repository
+          core.warning(
+            `[${dockerfilePath}] ✗ Failed to map: Image repository "${mappedImageRepo}" was specified in image-map but not found in Averlon or not scanned yet. Please ensure the image repository in the image-map input is correct and has been scanned by Averlon`
+          );
+          await issuesService.closeIssueByPath(
+            dockerfilePath,
+            'This issue has been automatically closed by Averlon Containers analysis GitHub action.'
+          );
+        } else {
+          // No recommendation returned, which means we were not able to find the mapped image repository for this Dockerfile.
+          // Close any existing issues for this Dockerfile since we can't analyze it without an image repository mapping.
+          core.warning(
+            `[${dockerfilePath}] ✗ Failed to map: Unable to map this Dockerfile to an image repository. Please use image-map input to explicitly map it to an image repository.`
+          );
+          await issuesService.closeIssueByPath(
+            dockerfilePath,
+            'This issue has been automatically closed by Averlon Containers analysis GitHub action.'
+          );
+        }
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      core.error(`Failed to process issues for ${dockerfilePath}: ${message}`);
+      core.error(`Failed to process ${dockerfilePath}: ${message}`);
       throw error; // Fail the entire action as requested
     }
   }
@@ -171,7 +193,7 @@ async function main(): Promise<void> {
     await issuesService.cleanupOrphanedIssues(dockerfiles);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    core.error(`Failed to cleanup orphaned issues: ${message}`);
+    core.error(`Failed to cleanup orphaned github issues: ${message}`);
     throw error; // Fail the entire action as requested
   }
 

@@ -70,7 +70,7 @@ jobs:
           terraform graph > head-graph.dot
 
       - name: Run Averlon IaC Risk Analysis
-        uses: averlon-ai/actions/iac-risk-analysis@v1.0.1
+        uses: averlon-ai/actions/iac-risk-analysis@v1.0.3
         with:
           api-key: ${{ secrets.AVERLON_API_KEY }}
           api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -95,7 +95,7 @@ Process scan results programmatically using the `scan-result` output:
 ```yaml
 - name: Run Averlon IaC Risk Analysis
   id: analysis
-  uses: averlon-ai/actions/iac-risk-analysis@v1.0.1
+  uses: averlon-ai/actions/iac-risk-analysis@v1.0.3
   with:
     api-key: ${{ secrets.AVERLON_API_KEY }}
     api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -135,7 +135,7 @@ Disable automatic PR comments if you only need the output:
 ```yaml
 - name: Run Averlon IaC Risk Analysis
   id: analysis
-  uses: averlon-ai/actions/iac-risk-analysis@v1.0.1
+  uses: averlon-ai/actions/iac-risk-analysis@v1.0.3
   with:
     api-key: ${{ secrets.AVERLON_API_KEY }}
     api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -158,7 +158,7 @@ Disable automatic PR comments if you only need the output:
 
 ```yaml
 - name: Run Averlon IaC Risk Analysis
-  uses: averlon-ai/actions/iac-risk-analysis@v1.0.1
+  uses: averlon-ai/actions/iac-risk-analysis@v1.0.3
   with:
     # Required inputs
     api-key: ${{ secrets.AVERLON_API_KEY }}
@@ -227,7 +227,7 @@ Disable automatic PR comments if you only need the output:
 ```yaml
 - name: Run Averlon IaC Risk Analysis
   id: analysis
-  uses: averlon-ai/actions/iac-risk-analysis@v1.0.1
+  uses: averlon-ai/actions/iac-risk-analysis@v1.0.3
   # ... inputs
 
 - name: Use output
@@ -316,7 +316,7 @@ Enable debug logging for troubleshooting:
 
 ```yaml
 - name: Run Averlon IaC Risk Analysis
-  uses: averlon-ai/actions/iac-risk-analysis@v1.0.1
+  uses: averlon-ai/actions/iac-risk-analysis@v1.0.3
   env:
     ACTIONS_STEP_DEBUG: true
   with:

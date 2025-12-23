@@ -144,8 +144,8 @@ valid/Dockerfile=myregistry/valid:latest`;
     });
 
     it('should parse all available filters', () => {
-      const result = parseFilters('RecommendedOrExploited,Critical,High,HighRCE,MediumApplication');
-      expect(result).toBe(0x1f); // All bits set
+      const result = parseFilters('Recommended,Exploited,Critical,High,HighRCE,MediumApplication');
+      expect(result).toBe(0x7e); // All filter bits set (0x2 | 0x4 | 0x8 | 0x10 | 0x20 | 0x40)
     });
 
     it('should handle empty string', () => {

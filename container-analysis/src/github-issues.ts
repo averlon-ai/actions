@@ -79,8 +79,6 @@ export class GithubIssuesService extends CopilotIssueManager {
 
       const bodyChanged = normalizedCurrentBody !== normalizedNewBody;
 
-      core.info(`Security Recommendation Changed: ${bodyChanged}`);
-
       if (bodyChanged) {
         await this.octokit.rest.issues.update({
           owner: this.owner,
@@ -89,7 +87,7 @@ export class GithubIssuesService extends CopilotIssueManager {
           title,
           body,
         });
-        core.info(`Updated security recommendation #${existingIssueNumber} for ${rec.Path}`);
+        core.info(`[${rec.Path}] Updated GitHub issue #${existingIssueNumber}`);
         await this.handleCopilotAssignmentForUpdatedIssue(existingIssueNumber, autoAssignCopilot);
       } else {
         await this.handleCopilotAssignmentForUnchangedIssue(existingIssueNumber, autoAssignCopilot);
@@ -102,7 +100,7 @@ export class GithubIssuesService extends CopilotIssueManager {
         body,
         labels: ISSUE_LABELS,
       });
-      core.info(`Created security recommendation #${issue.number} for ${rec.Path}`);
+      core.info(`[${rec.Path}] Created GitHub issue #${issue.number}`);
       await this.assignCopilot(issue.number, autoAssignCopilot);
     }
   }
@@ -111,8 +109,10 @@ export class GithubIssuesService extends CopilotIssueManager {
     const existingIssueNumber = await this.findExistingAverlonIssue(dockerfilePath);
     if (existingIssueNumber) {
       await this.closeIssue(existingIssueNumber, message);
+      core.info(`[${dockerfilePath}] Closed existing open GitHub issue #${existingIssueNumber}`);
       return true;
     }
+    core.info(`[${dockerfilePath}] No existing open GitHub issue found`);
     return false;
   }
 
@@ -127,12 +127,10 @@ export class GithubIssuesService extends CopilotIssueManager {
       );
       if (!pathExists) {
         try {
-          core.info(
-            `Closing orphaned security recommendation #${issue.number} for Dockerfile path "${issue.path}"`
-          );
+          core.info(`[${issue.path}] Closing Orphaned GitHub issue`);
           await this.closeIssueByPath(
             issue.path,
-            'This issue has been automatically closed because the Dockerfile no longer exists in the repository.'
+            'This issue has been automatically closed by Averlon Container Analysis GitHub action because the Dockerfile no longer exists in the repository.'
           );
         } catch (err) {
           errors.push(err instanceof Error ? err : new Error(String(err)));
@@ -197,7 +195,6 @@ export class GithubIssuesService extends CopilotIssueManager {
       issue_number: issueNumber,
       state: IssueState.CLOSED,
     });
-    core.info(`Closed security recommendation #${issueNumber}`);
   }
 
   private async getAllAverlonIssues(): Promise<
