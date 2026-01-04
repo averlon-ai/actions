@@ -124,8 +124,8 @@ describe('iac-misconfig-analysis main.ts', () => {
     // postOrUpdateCommentSpy removed - GitHub issues are used instead
 
     // Set up default environment variables for testing
-    process.env.INPUT_API_KEY = 'test-api-key';
-    process.env.INPUT_API_SECRET = 'test-api-secret';
+    process.env.INPUT_AVERLON_API_KEY = 'test-api-key';
+    process.env.INPUT_AVERLON_API_SECRET = 'test-api-secret';
     process.env.INPUT_BASE_URL = 'https://test.example.com';
     process.env.INPUT_REPO_NAME = 'test-repo';
     process.env.INPUT_COMMIT = 'abc123';
@@ -338,24 +338,28 @@ describe('iac-misconfig-analysis main.ts', () => {
 
   describe('input validation', () => {
     it('should set failed when required API key is missing', async () => {
-      delete process.env.INPUT_API_KEY;
+      delete process.env.INPUT_AVERLON_API_KEY;
       getInputSpy.mockReturnValue('');
 
       await run();
 
       expect(setFailedSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Input required and not supplied: api-key')
+        expect.stringContaining(
+          'Averlon API key required: provide averlon-api-key (preferred) or api-key (deprecated)'
+        )
       );
     });
 
     it('should set failed when required API secret is missing', async () => {
-      delete process.env.INPUT_API_SECRET;
+      delete process.env.INPUT_AVERLON_API_SECRET;
       getInputSpy.mockReturnValue('');
 
       await run();
 
       expect(setFailedSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Input required and not supplied: api-secret')
+        expect.stringContaining(
+          'Averlon API secret required: provide averlon-api-secret (preferred) or api-secret (deprecated)'
+        )
       );
     });
 

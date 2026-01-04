@@ -3,12 +3,18 @@ description: 'Kubernetes Helm chart misconfiguration detection and remediation'
 author: 'Averlon'
 
 inputs:
-  api-key:
+  averlon-api-key:
     description: "API key for authentication with Averlon"
     required: true
-  api-secret:
+  averlon-api-secret:
     description: "API secret for authentication with Averlon"
     required: true
+  api-key:
+    description: "[Deprecated] API key for authentication (use averlon-api-key instead)"
+    required: false
+  api-secret:
+    description: "[Deprecated] API secret for authentication (use averlon-api-secret instead)"
+    required: false
   manifest-file:
     description: |
       Path to a YAML file containing Kubernetes resources from `helm template` or plain K8s YAML.

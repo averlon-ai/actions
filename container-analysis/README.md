@@ -18,10 +18,10 @@ This action scans your repository's Dockerfiles to identify security vulnerabili
 Before using this action, ensure you have:
 
 1. **Averlon Account**: Sign up at [Averlon](https://averlon.io) to get your API credentials
-2. **API Credentials**: Obtain your `api_key` and `api_secret` from the Averlon dashboard
+2. **API Credentials**: Obtain your `api_key` and `api_secret` from the Averlon dashboard (requires Averlon admin access; ask an Averlon org admin to create them if you don't have admin access). Store them as secrets (for example, `AVERLON_API_KEY` and `AVERLON_API_SECRET`) and pass them as `averlon-api-key` / `averlon-api-secret`.
 3. **GitHub Token**: A GitHub token with `contents: read` and `issues: write` permissions
-   - For basic usage: Use `${{ secrets.GITHUB_TOKEN }}` with the required permissions declared in your workflow
-   - For Copilot auto-assignment: **Required** - Use a Personal Access Token (PAT) with Copilot access and additional `pull_requests: write` permission (the default `GITHUB_TOKEN` does not support Copilot assignment)
+   - For basic usage: Use `${{ secrets.GITHUB_TOKEN }}` with appropriate GitHub Actions workflow `permissions` declared in your workflow (see [permissions docs](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#permissions))
+   - For Copilot auto-assignment: **Required** - Use a Personal Access Token (PAT) with Copilot access (the default `GITHUB_TOKEN` does not support Copilot assignment)
 4. **Dockerfiles**: At least one Dockerfile in your repository
 
 ## 🔐 Create Averlon API Keys and MCP Setup
@@ -57,10 +57,10 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Run Averlon Remediation Agent for Containers
-        uses: averlon-ai/actions/container-analysis@v1.0.3
+        uses: averlon-ai/actions/container-analysis@v1.0.1
         with:
-          api-key: ${{ secrets.AVERLON_API_KEY }}
-          api-secret: ${{ secrets.AVERLON_API_SECRET }}
+          averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
+          averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
@@ -91,10 +91,10 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Run Averlon Remediation Agent for Containers
-        uses: averlon-ai/actions/container-analysis@v1.0.3
+        uses: averlon-ai/actions/container-analysis@v1.0.1
         with:
-          api-key: ${{ secrets.AVERLON_API_KEY }}
-          api-secret: ${{ secrets.AVERLON_API_SECRET }}
+          averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
+          averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           image-map: |
             Dockerfile=docker.io/username/repo-name
@@ -136,10 +136,10 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Run Averlon Remediation Agent for Containers
-        uses: averlon-ai/actions/container-analysis@v1.0.3
+        uses: averlon-ai/actions/container-analysis@v1.0.1
         with:
-          api-key: ${{ secrets.AVERLON_API_KEY }}
-          api-secret: ${{ secrets.AVERLON_API_SECRET }}
+          averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
+          averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
           github-token: ${{ secrets.COPILOT_PAT }} # PAT with Copilot access required
           auto-assign-copilot: 'true'
 ```
@@ -148,8 +148,8 @@ jobs:
 
 | Input                 | Description                                                                                                                                                                                                                                                         | Required | Default                        |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------------------------------ |
-| `api-key`             | Averlon API key for authentication                                                                                                                                                                                                                                  | ✅       | -                              |
-| `api-secret`          | Averlon API secret for authentication                                                                                                                                                                                                                               | ✅       | -                              |
+| `averlon-api-key`     | Averlon API key for authentication                                                                                                                                                                                                                                  | ✅       | -                              |
+| `averlon-api-secret`  | Averlon API secret for authentication                                                                                                                                                                                                                               | ✅       | -                              |
 | `github-token`        | GitHub token with `contents: read` and `issues: write` permissions. Use `${{ secrets.GITHUB_TOKEN }}` for basic usage. **For Copilot auto-assignment**: Requires a Personal Access Token (PAT) with Copilot access and additional `pull_requests: write` permission | ✅       | -                              |
 | `base-url`            | Base URL for the Averlon API service                                                                                                                                                                                                                                | ❌       | `https://wfe.prod.averlon.io/` |
 | `image-map`           | Multiline mapping of Dockerfile paths to image repository urls (format: `path=repository-url`). Example: `Dockerfile=docker.io/username/repo-name`. **Recommended**: While Averlon attempts automatic mapping, explicit mapping ensures accuracy                    | ❌       | -                              |
@@ -194,10 +194,10 @@ While Averlon attempts to automatically map Dockerfiles to image repositories, t
 ```yaml
 # Solution: Provide explicit image mapping (recommended)
 - name: Run Averlon Remediation Agent for Containers
-  uses: averlon-ai/actions/container-analysis@v1.0.3
+  uses: averlon-ai/actions/container-analysis@v1.0.1
   with:
-    api-key: ${{ secrets.AVERLON_API_KEY }}
-    api-secret: ${{ secrets.AVERLON_API_SECRET }}
+    averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
+    averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
     github-token: ${{ secrets.GITHUB_TOKEN }}
     image-map: |
       Dockerfile=docker.io/username/repo-name
@@ -220,10 +220,10 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Run Averlon Remediation Agent for Containers
-        uses: averlon-ai/actions/container-analysis@v1.0.3
+        uses: averlon-ai/actions/container-analysis@v1.0.1
         with:
-          api-key: ${{ secrets.AVERLON_API_KEY }}
-          api-secret: ${{ secrets.AVERLON_API_SECRET }}
+          averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
+          averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
           github-token: ${{ secrets.COPILOT_PAT }} # Must be a PAT, not GITHUB_TOKEN
           auto-assign-copilot: 'true'
 ```
@@ -241,10 +241,10 @@ Adjust the filters to focus on critical vulnerabilities.
 ```yaml
 # Solution: Use stricter filters
 - name: Run Averlon Remediation Agent for Containers
-  uses: averlon-ai/actions/container-analysis@v1.0.3
+  uses: averlon-ai/actions/container-analysis@v1.0.1
   with:
-    api-key: ${{ secrets.AVERLON_API_KEY }}
-    api-secret: ${{ secrets.AVERLON_API_SECRET }}
+    averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
+    averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
     github-token: ${{ secrets.GITHUB_TOKEN }}
     filters: 'Critical,HighRCE' # Only show critical and high-risk RCE vulnerabilities
 ```
@@ -270,10 +270,10 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Run Averlon Remediation Agent for Containers
-        uses: averlon-ai/actions/container-analysis@v1.0.3
+        uses: averlon-ai/actions/container-analysis@v1.0.1
         with:
-          api-key: ${{ secrets.AVERLON_API_KEY }}
-          api-secret: ${{ secrets.AVERLON_API_SECRET }}
+          averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
+          averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
 

@@ -2,12 +2,18 @@ name: 'Averlon Misconfiguration Remediation Agent for IaC'
 description: 'Security analysis for Terraform infrastructure changes with misconfiguration detection and remediation'
 author: 'Averlon'
 inputs:
-  api-key:
+  averlon-api-key:
     description: 'Averlon API key'
     required: true
-  api-secret:
+  averlon-api-secret:
     description: 'Averlon API secret'
     required: true
+  api-key:
+    description: '[Deprecated] Averlon API key (use averlon-api-key instead)'
+    required: false
+  api-secret:
+    description: '[Deprecated] Averlon API secret (use averlon-api-secret instead)'
+    required: false
   commit:
     description: 'Commit SHA to scan'
     required: true

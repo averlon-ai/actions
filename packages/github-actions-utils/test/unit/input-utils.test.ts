@@ -16,13 +16,13 @@ describe('input-utils', () => {
     mockGetInput.mockClear();
     mockDebug.mockClear();
     // Clear environment variables
-    delete process.env['INPUT_API_KEY'];
+    delete process.env['INPUT_AVERLON_API_KEY'];
     delete process.env['INPUT_TEST_VALUE'];
   });
 
   afterEach(() => {
     // Clean up environment variables
-    delete process.env['INPUT_API_KEY'];
+    delete process.env['INPUT_AVERLON_API_KEY'];
     delete process.env['INPUT_TEST_VALUE'];
   });
 
@@ -30,22 +30,24 @@ describe('input-utils', () => {
     it('should return value from GitHub Actions core when available', () => {
       mockGetInput.mockReturnValue('test-value');
 
-      const result = getInputSafe('api-key', true);
+      const result = getInputSafe('averlon-api-key', true);
 
       expect(result).toBe('test-value');
-      expect(mockGetInput).toHaveBeenCalledWith('api-key', { required: false });
-      expect(mockDebug).toHaveBeenCalledWith("Got input 'api-key' from GitHub Actions core");
+      expect(mockGetInput).toHaveBeenCalledWith('averlon-api-key', { required: false });
+      expect(mockDebug).toHaveBeenCalledWith(
+        "Got input 'averlon-api-key' from GitHub Actions core"
+      );
     });
 
     it('should fallback to environment variables when core returns empty', () => {
       mockGetInput.mockReturnValue('');
-      process.env['INPUT_API_KEY'] = 'env-value';
+      process.env['INPUT_AVERLON_API_KEY'] = 'env-value';
 
-      const result = getInputSafe('api-key', true);
+      const result = getInputSafe('averlon-api-key', true);
 
       expect(result).toBe('env-value');
       expect(mockDebug).toHaveBeenCalledWith(
-        "Got input 'api-key' from environment variable INPUT_API_KEY"
+        "Got input 'averlon-api-key' from environment variable INPUT_AVERLON_API_KEY"
       );
     });
 
@@ -78,9 +80,9 @@ describe('input-utils', () => {
       mockGetInput.mockImplementation(() => {
         throw new Error('Core not available');
       });
-      process.env['INPUT_API_KEY'] = 'fallback-value';
+      process.env['INPUT_AVERLON_API_KEY'] = 'fallback-value';
 
-      const result = getInputSafe('api-key', true);
+      const result = getInputSafe('averlon-api-key', true);
 
       expect(result).toBe('fallback-value');
       expect(mockDebug).toHaveBeenCalledWith(

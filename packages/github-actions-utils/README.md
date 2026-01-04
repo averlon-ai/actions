@@ -15,7 +15,7 @@ A shared package containing common utilities for GitHub Actions in the Averlon A
 import { getInputSafe, parseBoolean } from '@averlon/github-actions-utils';
 
 // Get required input with automatic fallback to environment variables
-const apiKey = getInputSafe('api-key', true);
+const apiKey = getInputSafe('averlon-api-key', true);
 
 // Get optional input with default
 const baseUrl = getInputSafe('base-url', false) || 'https://default.example.com';

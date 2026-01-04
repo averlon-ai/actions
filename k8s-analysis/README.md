@@ -15,9 +15,9 @@ Kubernetes Helm chart misconfiguration detection and remediation
 Before using this action, ensure you have:
 
 1. **Averlon Account**: Sign up at [Averlon](https://averlon.io) to get your API credentials
-2. **API Credentials**: Obtain your `api_key` and `api_secret` from the Averlon dashboard
+2. **API Credentials**: Obtain your `api_key` and `api_secret` from the Averlon dashboard (requires Averlon admin access; ask an Averlon org admin to create them if you don't have admin access). Store them as secrets (for example, `AVERLON_API_KEY` and `AVERLON_API_SECRET`) and pass them as `averlon-api-key` / `averlon-api-secret`.
 3. **GitHub Token**:
-   - Basic usage: workflow `GITHUB_TOKEN` with `issues: write`
+   - Basic usage: workflow `GITHUB_TOKEN` with `issues: write` and appropriate GitHub Actions workflow `permissions` configured (see [permissions docs](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#permissions))
    - Copilot auto-assignment: PAT with Copilot access
 4. **Tools**:
    - `helm` only if generating manifests from Helm charts (not needed for plain YAML)
@@ -41,10 +41,10 @@ For setting up the MCP server, please refer to our [MCP Setup Documentation](../
       --values values.yaml > manifests.yaml
 
 - name: Run Averlon Remediation Agent for Kubernetes
-  uses: averlon-ai/actions/k8s-analysis@v1.0.3
+  uses: averlon-ai/actions/k8s-analysis@v1.0.1
   with:
-    api-key: ${{ secrets.AVERLON_API_KEY }}
-    api-secret: ${{ secrets.AVERLON_API_SECRET }}
+    averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
+    averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
     github-token: ${{ secrets.GITHUB_TOKEN }}
     manifest-file: manifests.yaml
 ```
@@ -59,10 +59,10 @@ If you already have plain Kubernetes YAML files (not Helm charts), you can analy
     cat deployment.yaml service.yaml configmap.yaml > manifests.yaml
 
 - name: Run Averlon Remediation Agent for Kubernetes
-  uses: averlon-ai/actions/k8s-analysis@v1.0.3
+  uses: averlon-ai/actions/k8s-analysis@v1.0.1
   with:
-    api-key: ${{ secrets.AVERLON_API_KEY }}
-    api-secret: ${{ secrets.AVERLON_API_SECRET }}
+    averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
+    averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
     github-token: ${{ secrets.GITHUB_TOKEN }}
     manifest-file: manifests.yaml
     release-name: my-app
@@ -96,8 +96,8 @@ In most cases, you don't need to manually specify `region`, `cluster`, or `cloud
 
 | Input                  | Description                                                                                                                       | Required | Default                        |
 | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------- | -------- | ------------------------------ |
-| `api-key`              | Averlon API key                                                                                                                   | Yes      | -                              |
-| `api-secret`           | Averlon API secret                                                                                                                | Yes      | -                              |
+| `averlon-api-key`      | Averlon API key                                                                                                                   | Yes      | -                              |
+| `averlon-api-secret`   | Averlon API secret                                                                                                                | Yes      | -                              |
 | `github-token`         | GitHub token for creating issues. Provide a PAT with Copilot access to enable assignment; otherwise uses workflow `GITHUB_TOKEN`. | No       | Workflow `GITHUB_TOKEN`        |
 | `manifest-file`        | Path to the Helm manifests YAML file (one or more Kubernetes resources, separated by `---`).                                      | Yes      | -                              |
 | `cloud-id`             | secdi Cloud ID for issue lookup. When omitted, the action discovers using detected account metadata.                              | No       | Auto-detected                  |
@@ -202,10 +202,10 @@ jobs:
             --values values.yaml > manifests.yaml
 
       - name: Run Averlon Remediation Agent for Kubernetes
-        uses: averlon-ai/actions/k8s-analysis@v1.0.3
+        uses: averlon-ai/actions/k8s-analysis@v1.0.1
         with:
-          api-key: ${{ secrets.AVERLON_API_KEY }}
-          api-secret: ${{ secrets.AVERLON_API_SECRET }}
+          averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
+          averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           manifest-file: manifests.yaml
           cloud-id: ${{ secrets.AWS_ACCOUNT_ID }}
@@ -240,10 +240,10 @@ jobs:
           cat k8s-manifests/*.yaml > manifests.yaml
 
       - name: Run Averlon Remediation Agent for Kubernetes
-        uses: averlon-ai/actions/k8s-analysis@v1.0.3
+        uses: averlon-ai/actions/k8s-analysis@v1.0.1
         with:
-          api-key: ${{ secrets.AVERLON_API_KEY }}
-          api-secret: ${{ secrets.AVERLON_API_SECRET }}
+          averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
+          averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           manifest-file: manifests.yaml
           release-name: k8s-app
@@ -273,11 +273,11 @@ jobs:
             --values values-${{ matrix.environment }}.yaml > manifests.yaml
 
       - name: Run Averlon Remediation Agent for Kubernetes
-        uses: averlon-ai/actions/k8s-analysis@v1.0.3
+        uses: averlon-ai/actions/k8s-analysis@v1.0.1
         with:
           manifest-file: manifests.yaml
-          api-key: ${{ secrets.AVERLON_API_KEY }}
-          api-secret: ${{ secrets.AVERLON_API_SECRET }}
+          averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
+          averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           namespace: ${{ matrix.environment }}
 ```
@@ -288,11 +288,11 @@ Enable automatic issue fixing with GitHub Copilot:
 
 ```yaml
 - name: Run Averlon Remediation Agent for Kubernetes
-  uses: averlon-ai/actions/k8s-analysis@v1.0.3
+  uses: averlon-ai/actions/k8s-analysis@v1.0.1
   with:
     manifest-file: manifests.yaml
-    api-key: ${{ secrets.AVERLON_API_KEY }}
-    api-secret: ${{ secrets.AVERLON_API_SECRET }}
+    averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
+    averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
     github-token: ${{ secrets.COPILOT_PAT }} # Must be PAT with Copilot access
     filters: Critical,High
 ```
@@ -357,11 +357,11 @@ namespace-filter: kube-system,monitoring,logging
 
 ```yaml
 - name: Analyze Production Workloads Only
-  uses: averlon-ai/actions/k8s-analysis@v1.0.3
+  uses: averlon-ai/actions/k8s-analysis@v1.0.1
   with:
     manifest-file: manifests.yaml
-    api-key: ${{ secrets.AVERLON_API_KEY }}
-    api-secret: ${{ secrets.AVERLON_API_SECRET }}
+    averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
+    averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
     github-token: ${{ secrets.GITHUB_TOKEN }}
     # Severity filters
     filters: Critical,High
