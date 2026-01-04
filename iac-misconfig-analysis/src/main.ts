@@ -138,9 +138,23 @@ async function _getInputs(): Promise<ActionInputs> {
     core.setSecret(githubToken);
   }
 
+  const apiKey = getInputSafe('averlon-api-key', false) || getInputSafe('api-key', false);
+  const apiSecret = getInputSafe('averlon-api-secret', false) || getInputSafe('api-secret', false);
+
+  if (!apiKey) {
+    throw new Error(
+      'Averlon API key required: provide averlon-api-key (preferred) or api-key (deprecated)'
+    );
+  }
+  if (!apiSecret) {
+    throw new Error(
+      'Averlon API secret required: provide averlon-api-secret (preferred) or api-secret (deprecated)'
+    );
+  }
+
   return {
-    apiKey: getInputSafe('api-key', true),
-    apiSecret: getInputSafe('api-secret', true),
+    apiKey,
+    apiSecret,
     baseUrl: getInputSafe('base-url', false) || 'https://wfe.prod.averlon.io/',
     commit: getInputSafe('commit', true),
     scanPollInterval,

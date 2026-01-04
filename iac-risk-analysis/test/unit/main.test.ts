@@ -112,8 +112,8 @@ describe('main.ts', () => {
     readFileSpy.mockClear();
 
     // Set up default environment variables for testing
-    process.env.INPUT_API_KEY = 'test-api-key';
-    process.env.INPUT_API_SECRET = 'test-api-secret';
+    process.env.INPUT_AVERLON_API_KEY = 'test-api-key';
+    process.env.INPUT_AVERLON_API_SECRET = 'test-api-secret';
     process.env.INPUT_BASE_URL = 'https://test.example.com';
     process.env.INPUT_REPO_NAME = 'test-repo';
     process.env.INPUT_BASE_COMMIT_HASH = 'abc123';
@@ -240,25 +240,29 @@ describe('main.ts', () => {
 
   describe('input handling', () => {
     it('should throw error when required API key is missing', async () => {
-      delete process.env.INPUT_API_KEY;
+      delete process.env.INPUT_AVERLON_API_KEY;
       getInputSpy.mockReturnValue('');
 
-      await expect(run()).rejects.toThrow('Input required and not supplied: api-key');
+      await expect(run()).rejects.toThrow(
+        'Averlon API key required: provide averlon-api-key (preferred) or api-key (deprecated)'
+      );
     });
 
     it('should throw error when required API secret is missing', async () => {
-      delete process.env.INPUT_API_SECRET;
+      delete process.env.INPUT_AVERLON_API_SECRET;
       getInputSpy.mockReturnValue('');
 
-      await expect(run()).rejects.toThrow('Input required and not supplied: api-secret');
+      await expect(run()).rejects.toThrow(
+        'Averlon API secret required: provide averlon-api-secret (preferred) or api-secret (deprecated)'
+      );
     });
 
     it('should prefer GitHub Actions core.getInput over environment variables', async () => {
       getInputSpy.mockImplementation((name: string) => {
         switch (name) {
-          case 'api-key':
+          case 'averlon-api-key':
             return 'github-api-key';
-          case 'api-secret':
+          case 'averlon-api-secret':
             return 'github-api-secret';
           case 'base-url':
             return 'https://github.example.com';
@@ -300,8 +304,8 @@ describe('main.ts', () => {
       getInputSpy.mockReturnValue('');
 
       // Test hyphenated input names are converted to uppercase with underscores
-      process.env.INPUT_API_KEY = 'env-api-key';
-      process.env.INPUT_API_SECRET = 'env-api-secret';
+      process.env.INPUT_AVERLON_API_KEY = 'env-api-key';
+      process.env.INPUT_AVERLON_API_SECRET = 'env-api-secret';
       process.env.INPUT_BASE_URL = 'https://env.example.com';
 
       await run();

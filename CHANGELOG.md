@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.4] - 2026-01-03
+- replace api-key and api-secret with averlon-api-key and averlon-api-secret
+- Update readme
+
 ## [1.0.3] - 2025-12-22
 - Update readme for actions for more accurate information
 - Update filters for container security

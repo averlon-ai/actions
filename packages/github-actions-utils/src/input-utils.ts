@@ -4,7 +4,7 @@ import { IssueSeverityEnum } from '@averlon/shared/types';
 /**
  * Safely get input from GitHub Actions or environment variables
  *
- * @param name - The input name (e.g., 'api-key')
+ * @param name - The input name (e.g., 'averlon-api-key')
  * @param required - Whether the input is required
  * @returns The input value or empty string if not required and not found
  * @throws Error if required input is missing

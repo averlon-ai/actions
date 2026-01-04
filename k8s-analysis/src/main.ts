@@ -54,8 +54,19 @@ interface ActionInputs {
 async function getInputs(): Promise<ActionInputs> {
   core.info('Collecting and validating action inputs...');
 
-  const apiKey = getInputSafe('api-key', true);
-  const apiSecret = getInputSafe('api-secret', true);
+  const apiKey = getInputSafe('averlon-api-key', false) || getInputSafe('api-key', false);
+  const apiSecret = getInputSafe('averlon-api-secret', false) || getInputSafe('api-secret', false);
+
+  if (!apiKey) {
+    throw new Error(
+      'Averlon API key required: provide averlon-api-key (preferred) or api-key (deprecated)'
+    );
+  }
+  if (!apiSecret) {
+    throw new Error(
+      'Averlon API secret required: provide averlon-api-secret (preferred) or api-secret (deprecated)'
+    );
+  }
   const explicitGithubToken = getInputSafe('github-token', false);
   const fallbackGithubToken = process.env['GITHUB_TOKEN'] || '';
   const githubToken = explicitGithubToken || fallbackGithubToken;

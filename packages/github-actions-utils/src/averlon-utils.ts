@@ -20,10 +20,21 @@ export interface AverlonCommonInputs {
  * These inputs are shared across all Averlon actions
  */
 export function getAverlonCommonInputs(): AverlonCommonInputs {
-  // Required inputs
-  const apiKey = getInputSafe('api-key', true);
-  const apiSecret = getInputSafe('api-secret', true);
+  // Required inputs with backward compatibility
+  const apiKey = getInputSafe('averlon-api-key', false) || getInputSafe('api-key', false);
+  const apiSecret = getInputSafe('averlon-api-secret', false) || getInputSafe('api-secret', false);
   const githubToken = getInputSafe('github-token', true);
+
+  if (!apiKey) {
+    throw new Error(
+      'Averlon API key required: provide averlon-api-key (preferred) or api-key (deprecated)'
+    );
+  }
+  if (!apiSecret) {
+    throw new Error(
+      'Averlon API secret required: provide averlon-api-secret (preferred) or api-secret (deprecated)'
+    );
+  }
 
   // Optional inputs with defaults
   const baseUrl = getInputSafe('base-url', false) || 'https://wfe.prod.averlon.io/';

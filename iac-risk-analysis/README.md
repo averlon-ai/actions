@@ -17,10 +17,11 @@ The Averlon Infrastructure Risk PreCog Agent Action helps you understand the com
 Before using this action, ensure you have:
 
 1. **Averlon Account**: Sign up at [Averlon](https://averlon.io) to get your API credentials
-2. **API Credentials**: Obtain your `api_key` and `api_secret` from the Averlon dashboard
+2. **API Credentials**: Obtain your `api_key` and `api_secret` from the Averlon dashboard (requires Averlon admin access; ask an Averlon org admin to create them if you don't have admin access). Store them as secrets (for example, `AVERLON_API_KEY` and `AVERLON_API_SECRET`) and pass them as `averlon-api-key` / `averlon-api-secret`.
 3. **Terraform Setup**: Terraform installed and configured in your workflow
 4. **Terraform Files**: Both plan and graph files for base and head commits
 5. **Git Access**: Ability to checkout different commits
+6. **GitHub Token**: Workflow token with appropriate GitHub Actions `permissions` configured (see [permissions docs](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#permissions))
 
 ## 🔐 Create Averlon API Keys
 
@@ -51,9 +52,10 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: 1.5.0
+          terraform_version: 1.5.0 # Set to the version your repo uses (or omit if not needed)
 
       - name: Generate base Terraform plan and graph
+        working-directory: ./infrastructure # Update to the directory containing your Terraform code
         run: |
           git checkout ${{ github.event.pull_request.base.sha }}
           terraform init
@@ -62,6 +64,7 @@ jobs:
           terraform graph > base-graph.dot
 
       - name: Generate head Terraform plan and graph
+        working-directory: ./infrastructure # Update to the directory containing your Terraform code
         run: |
           git checkout ${{ github.event.pull_request.head.sha }}
           terraform init
@@ -70,23 +73,24 @@ jobs:
           terraform graph > head-graph.dot
 
       - name: Run Averlon IaC Risk Analysis
-        uses: averlon-ai/actions/iac-risk-analysis@v1.0.3
+        uses: averlon-ai/actions/iac-risk-analysis@v1.0.1
         with:
-          api-key: ${{ secrets.AVERLON_API_KEY }}
-          api-secret: ${{ secrets.AVERLON_API_SECRET }}
+          averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
+          averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
           repo-name: ${{ github.repository }}
           base-commit-hash: ${{ github.event.pull_request.base.sha }}
           head-commit-hash: ${{ github.event.pull_request.head.sha }}
-          base-plan-path: './base-plan.json'
-          head-plan-path: './head-plan.json'
-          base-graph-path: './base-graph.dot'
-          head-graph-path: './head-graph.dot'
+          base-plan-path: './infrastructure/base-plan.json' # Update if you change working-directory
+          head-plan-path: './infrastructure/head-plan.json' # Update if you change working-directory
+          base-graph-path: './infrastructure/base-graph.dot' # Update if you change working-directory
+          head-graph-path: './infrastructure/head-graph.dot' # Update if you change working-directory
           github-token: ${{ secrets.GITHUB_TOKEN }}
           # comment-on-pr: 'true'  # Default, can be omitted
           # comment-mode: 'update'  # Default: updates existing comment
 ```
 
 The action will automatically post formatted security analysis to your PR.
+If your Terraform files live at the repository root, drop the `working-directory` lines above and use `./base-plan.json` and `./head-plan.json` (and the matching graph paths).
 
 ### With Custom Processing
 
@@ -95,10 +99,10 @@ Process scan results programmatically using the `scan-result` output:
 ```yaml
 - name: Run Averlon IaC Risk Analysis
   id: analysis
-  uses: averlon-ai/actions/iac-risk-analysis@v1.0.3
+  uses: averlon-ai/actions/iac-risk-analysis@v1.0.1
   with:
-    api-key: ${{ secrets.AVERLON_API_KEY }}
-    api-secret: ${{ secrets.AVERLON_API_SECRET }}
+    averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
+    averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
     repo-name: ${{ github.repository }}
     base-commit-hash: ${{ github.event.pull_request.base.sha }}
     head-commit-hash: ${{ github.event.pull_request.head.sha }}
@@ -135,10 +139,10 @@ Disable automatic PR comments if you only need the output:
 ```yaml
 - name: Run Averlon IaC Risk Analysis
   id: analysis
-  uses: averlon-ai/actions/iac-risk-analysis@v1.0.3
+  uses: averlon-ai/actions/iac-risk-analysis@v1.0.1
   with:
-    api-key: ${{ secrets.AVERLON_API_KEY }}
-    api-secret: ${{ secrets.AVERLON_API_SECRET }}
+    averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
+    averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
     repo-name: ${{ github.repository }}
     base-commit-hash: ${{ github.event.pull_request.base.sha }}
     head-commit-hash: ${{ github.event.pull_request.head.sha }}
@@ -158,11 +162,11 @@ Disable automatic PR comments if you only need the output:
 
 ```yaml
 - name: Run Averlon IaC Risk Analysis
-  uses: averlon-ai/actions/iac-risk-analysis@v1.0.3
+  uses: averlon-ai/actions/iac-risk-analysis@v1.0.1
   with:
     # Required inputs
-    api-key: ${{ secrets.AVERLON_API_KEY }}
-    api-secret: ${{ secrets.AVERLON_API_SECRET }}
+    averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
+    averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
     repo-name: ${{ github.repository }}
     base-commit-hash: ${{ github.event.pull_request.base.sha }}
     head-commit-hash: ${{ github.event.pull_request.head.sha }}
@@ -196,8 +200,8 @@ Disable automatic PR comments if you only need the output:
 
 | Input              | Description                                 |
 | ------------------ | ------------------------------------------- |
-| `api-key`          | Averlon API key ID for authentication       |
-| `api-secret`       | Averlon API secret for HMAC signatures      |
+| `averlon-api-key`          | Averlon API key ID for authentication       |
+| `averlon-api-secret`       | Averlon API secret for HMAC signatures      |
 | `repo-name`        | Name of the repository                      |
 | `base-commit-hash` | Base commit hash for comparison             |
 | `head-commit-hash` | Head commit hash for comparison             |
@@ -227,7 +231,7 @@ Disable automatic PR comments if you only need the output:
 ```yaml
 - name: Run Averlon IaC Risk Analysis
   id: analysis
-  uses: averlon-ai/actions/iac-risk-analysis@v1.0.3
+  uses: averlon-ai/actions/iac-risk-analysis@v1.0.1
   # ... inputs
 
 - name: Use output
@@ -265,8 +269,8 @@ The comment updates automatically on new commits (in `update` mode) to keep your
 
 ```yaml
 # Ensure your secrets are properly configured
-api-key: ${{ secrets.AVERLON_API_KEY }} # Must be set in repository secrets
-api-secret: ${{ secrets.AVERLON_API_SECRET }} # Must be set in repository secrets
+averlon-api-key: ${{ secrets.AVERLON_API_KEY }} # Must be set in repository secrets
+averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }} # Must be set in repository secrets
 ````
 
 **PR Comment Permission Errors**
@@ -316,7 +320,7 @@ Enable debug logging for troubleshooting:
 
 ```yaml
 - name: Run Averlon IaC Risk Analysis
-  uses: averlon-ai/actions/iac-risk-analysis@v1.0.3
+  uses: averlon-ai/actions/iac-risk-analysis@v1.0.1
   env:
     ACTIONS_STEP_DEBUG: true
   with:
@@ -351,8 +355,8 @@ Test the action locally:
 
 ```bash
 # Set environment variables
-export INPUT_API_KEY="your-test-api-key"
-export INPUT_API_SECRET="your-test-api-secret"
+export INPUT_AVERLON_API_KEY="your-test-api-key"
+export INPUT_AVERLON_API_SECRET="your-test-api-secret"
 export INPUT_REPO_NAME="test-repo"
 export INPUT_BASE_COMMIT_HASH="abc123"
 export INPUT_HEAD_COMMIT_HASH="def456"

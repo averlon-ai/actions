@@ -22,6 +22,6 @@ Your workflow should reference these secrets:
 
 ```yaml
 with:
-  api-key: ${{ secrets.AVERLON_API_KEY }}
-  api-secret: ${{ secrets.AVERLON_API_SECRET }}
+  averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
+  averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
 ```

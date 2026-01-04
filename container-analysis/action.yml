@@ -3,12 +3,18 @@ description: 'Docker and container security analysis with vulnerability detectio
 author: 'Averlon'
 
 inputs:
-  api-key:
+  averlon-api-key:
     description: 'API key for authentication'
     required: true
-  api-secret:
+  averlon-api-secret:
     description: 'API secret for authentication'
     required: true
+  api-key:
+    description: '[Deprecated] API key for authentication (use averlon-api-key instead)'
+    required: false
+  api-secret:
+    description: '[Deprecated] API secret for authentication (use averlon-api-secret instead)'
+    required: false
   github-token:
     description: |
       GitHub token for creating issues / pull request.

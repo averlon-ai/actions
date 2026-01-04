@@ -44,12 +44,18 @@ inputs:
     description: "Comment mode: 'always' (create new comment each time), 'update' (update existing comment), or 'on-security-risks' (only comment if risks found)"
     required: false
     default: 'update'
-  api-key:
+  averlon-api-key:
     description: 'API key for authentication'
     required: true
-  api-secret:
+  averlon-api-secret:
     description: 'API secret for authentication'
     required: true
+  api-key:
+    description: '[Deprecated] API key for authentication (use averlon-api-key instead)'
+    required: false
+  api-secret:
+    description: '[Deprecated] API secret for authentication (use averlon-api-secret instead)'
+    required: false
   base-url:
     description: 'Base URL for the API service'
     required: false

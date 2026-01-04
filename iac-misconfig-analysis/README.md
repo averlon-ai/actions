@@ -18,11 +18,11 @@ The Averlon Misconfiguration Remediation Agent for IaC Action helps you identify
 Before using this action, ensure you have:
 
 1. **Averlon Account**: Sign up at [Averlon](https://averlon.io) to get your API credentials
-2. **API Credentials**: Obtain your `api_key` and `api_secret` from the Averlon dashboard
+2. **API Credentials**: Obtain your `api_key` and `api_secret` from the Averlon dashboard (requires Averlon admin access; ask an Averlon org admin to create them if you don't have admin access). Store them as secrets (for example, `AVERLON_API_KEY` and `AVERLON_API_SECRET`) and pass them as `averlon-api-key` / `averlon-api-secret`.
 3. **Terraform Setup**: Terraform installed and configured in your workflow
 4. **Terraform Plan File**: A JSON-formatted Terraform plan file to scan
 5. **GitHub Token**: A GitHub token with permissions to create and manage issues
-   - For basic usage: Use `${{ secrets.GITHUB_TOKEN }}` with appropriate `permissions` declared in your workflow
+   - For basic usage: Use `${{ secrets.GITHUB_TOKEN }}` with appropriate GitHub Actions workflow `permissions` declared in your workflow (see [permissions docs](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#permissions))
    - For Copilot auto-assignment: **Optional** - Use a Personal Access Token (PAT) with Copilot access (the default `GITHUB_TOKEN` does not support Copilot assignment)
 
 ## 🔐 Create Averlon API Keys and MCP Setup
@@ -54,25 +54,27 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: 1.5.0
+          terraform_version: 1.5.0 # Set to the version your repo uses (or omit if not needed)
 
       - name: Generate Terraform plan
+        working-directory: ./infrastructure # Update to the directory containing your Terraform code
         run: |
           terraform init
           terraform plan -out=tfplan
           terraform show -json tfplan > plan.json
 
       - name: Run Averlon Remediation Agent for IaC Misconfigurations
-        uses: averlon-ai/actions/iac-misconfig-analysis@v1.0.3
+        uses: averlon-ai/actions/iac-misconfig-analysis@v1.0.1
         with:
-          api-key: ${{ secrets.AVERLON_API_KEY }}
-          api-secret: ${{ secrets.AVERLON_API_SECRET }}
+          averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
+          averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
           commit: ${{ github.event.pull_request.head.sha }}
-          plan-path: './plan.json'
+          plan-path: './infrastructure/plan.json' # Update if you change working-directory
           github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
 The action will automatically create GitHub issues for resources with misconfigurations, batching 10 resources per issue.
+If your Terraform files live at the repository root, drop the `working-directory` line above and use `./plan.json` for `plan-path`.
 
 ### With Issue Creation Disabled
 
@@ -81,10 +83,10 @@ Skip GitHub issue creation if you only need the output:
 ```yaml
 - name: Run Averlon Remediation Agent for IaC Misconfigurations
   id: scan
-  uses: averlon-ai/actions/iac-misconfig-analysis@v1.0.3
+  uses: averlon-ai/actions/iac-misconfig-analysis@v1.0.1
   with:
-    api-key: ${{ secrets.AVERLON_API_KEY }}
-    api-secret: ${{ secrets.AVERLON_API_SECRET }}
+    averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
+    averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
     commit: ${{ github.event.pull_request.head.sha }}
     plan-path: './plan.json'
     # Omit github-token to skip issue creation
@@ -99,11 +101,11 @@ Skip GitHub issue creation if you only need the output:
 
 ```yaml
 - name: Run Averlon Remediation Agent for IaC Misconfigurations
-  uses: averlon-ai/actions/iac-misconfig-analysis@v1.0.3
+  uses: averlon-ai/actions/iac-misconfig-analysis@v1.0.1
   with:
     # Required inputs
-    api-key: ${{ secrets.AVERLON_API_KEY }}
-    api-secret: ${{ secrets.AVERLON_API_SECRET }}
+    averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
+    averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
     commit: ${{ github.event.pull_request.head.sha }}
     plan-path: './plan.json'
 
@@ -129,12 +131,12 @@ Skip GitHub issue creation if you only need the output:
 
 ### Required Inputs
 
-| Input        | Description                                    |
-| ------------ | ---------------------------------------------- |
-| `api-key`    | Averlon API key ID for authentication          |
-| `api-secret` | Averlon API secret for HMAC signatures         |
-| `commit`     | Commit SHA to scan                             |
-| `plan-path`  | Path to the JSON-formatted Terraform plan file |
+| Input                | Description                                    |
+| -------------------- | ---------------------------------------------- |
+| `averlon-api-key`    | Averlon API key ID for authentication          |
+| `averlon-api-secret` | Averlon API secret for HMAC signatures         |
+| `commit`             | Commit SHA to scan                             |
+| `plan-path`          | Path to the JSON-formatted Terraform plan file |
 
 ### Optional Inputs
 
@@ -156,7 +158,7 @@ Skip GitHub issue creation if you only need the output:
 ```yaml
 - name: Run Averlon Remediation Agent for IaC Misconfigurations
   id: scan
-  uses: averlon-ai/actions/iac-misconfig-analysis@v1.0.3
+  uses: averlon-ai/actions/iac-misconfig-analysis@v1.0.1
   # ... inputs
 
 - name: Use output
@@ -228,8 +230,8 @@ When `github-token` is provided, the action automatically creates GitHub issues:
 
 ```yaml
 # Ensure your secrets are properly configured
-api-key: ${{ secrets.AVERLON_API_KEY }} # Must be set in repository secrets
-api-secret: ${{ secrets.AVERLON_API_SECRET }} # Must be set in repository secrets
+averlon-api-key: ${{ secrets.AVERLON_API_KEY }} # Must be set in repository secrets
+averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }} # Must be set in repository secrets
 ```
 
 **GitHub Issues Permission Errors**
@@ -294,7 +296,7 @@ Enable debug logging for troubleshooting:
 
 ```yaml
 - name: Run Averlon Remediation Agent for IaC Misconfigurations
-  uses: averlon-ai/actions/iac-misconfig-analysis@v1.0.3
+  uses: averlon-ai/actions/iac-misconfig-analysis@v1.0.1
   env:
     ACTIONS_STEP_DEBUG: true
   with:
