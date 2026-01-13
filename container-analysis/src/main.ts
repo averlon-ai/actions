@@ -5,6 +5,7 @@ import {
   findDockerfiles,
   getGitRepoUrl,
   parseFilters,
+  parseIgnorePaths,
   parseImageMap,
   toRelativePath,
 } from './recommendations';
@@ -22,6 +23,7 @@ interface ActionInputs {
   autoAssignCopilot: boolean;
   githubOwner: string;
   githubRepo: string;
+  ignorePaths: string[];
 }
 
 /**
@@ -55,6 +57,8 @@ async function _getInputs(): Promise<ActionInputs> {
   const filtersRaw = getInputSafe('filters', false) || 'Recommended,Critical,HighRCE';
   const autoAssignCopilotStr = getInputSafe('auto-assign-copilot', false) || 'false';
   const autoAssignCopilot = parseBoolean(autoAssignCopilotStr);
+  const ignorePathsRaw = getInputSafe('ignore-paths', false) || '';
+  const ignorePaths = parseIgnorePaths(ignorePathsRaw);
 
   // GITHUB_REPOSITORY is a standard environment variable automatically provided by GitHub Actions
   // It contains the repository name in the format "owner/repo" (e.g., "octocat/Hello-World")
@@ -75,6 +79,7 @@ async function _getInputs(): Promise<ActionInputs> {
   core.debug(`Base URL: ${baseUrl}`);
   core.debug(`Filters: ${filtersRaw}`);
   core.debug(`Image map provided: ${imageMapInput ? 'yes' : 'no'}`);
+  core.debug(`Ignore paths: ${ignorePaths.length > 0 ? ignorePaths.join(', ') : 'none'}`);
   core.info(`Auto-assign Copilot ${autoAssignCopilot ? 'enabled' : 'disabled'}`);
 
   if (githubToken) {
@@ -91,6 +96,7 @@ async function _getInputs(): Promise<ActionInputs> {
     autoAssignCopilot,
     githubOwner,
     githubRepo,
+    ignorePaths,
   };
 }
 
@@ -98,7 +104,7 @@ async function main(): Promise<void> {
   core.debug('Step 1: Collecting and validating inputs');
   const inputs = await _getInputs();
 
-  const dockerfiles = await findDockerfiles();
+  const dockerfiles = await findDockerfiles(inputs.ignorePaths);
   core.info(
     `Found ${dockerfiles.length} Dockerfile${dockerfiles.length !== 1 ? 's' : ''} in the repository`
   );

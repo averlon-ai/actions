@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.5] - 2026-01-13
+- add ignore-path option
+- Update readme
+
 ## [1.0.4] - 2026-01-03
 - replace api-key and api-secret with averlon-api-key and averlon-api-secret
 - Update readme

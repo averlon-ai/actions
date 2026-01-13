@@ -9,6 +9,7 @@ import {
   buildDockerfileRequests,
   getGitRepoUrl,
   parseFilters,
+  parseIgnorePaths,
 } from '../../src/recommendations';
 
 describe('recommendations.ts', () => {
@@ -174,6 +175,58 @@ valid/Dockerfile=myregistry/valid:latest`;
     });
   });
 
+  describe('parseIgnorePaths', () => {
+    it('should parse comma-separated paths', () => {
+      const result = parseIgnorePaths('**/vendor/**,**/testdata/**');
+      expect(result).toEqual(['**/vendor/**', '**/testdata/**']);
+    });
+
+    it('should parse newline-separated paths', () => {
+      const result = parseIgnorePaths('**/vendor/**\n**/testdata/**');
+      expect(result).toEqual(['**/vendor/**', '**/testdata/**']);
+    });
+
+    it('should parse mixed comma and newline separated paths', () => {
+      const result = parseIgnorePaths('**/vendor/**,**/testdata/**\n**/examples/**');
+      expect(result).toEqual(['**/vendor/**', '**/testdata/**', '**/examples/**']);
+    });
+
+    it('should trim whitespace from paths', () => {
+      const result = parseIgnorePaths('  **/vendor/**  ,  **/testdata/**  ');
+      expect(result).toEqual(['**/vendor/**', '**/testdata/**']);
+    });
+
+    it('should filter out empty paths', () => {
+      const result = parseIgnorePaths('**/vendor/**,,**/testdata/**,');
+      expect(result).toEqual(['**/vendor/**', '**/testdata/**']);
+    });
+
+    it('should handle empty string', () => {
+      const result = parseIgnorePaths('');
+      expect(result).toEqual([]);
+    });
+
+    it('should handle undefined input', () => {
+      const result = parseIgnorePaths(undefined);
+      expect(result).toEqual([]);
+    });
+
+    it('should handle single path without separator', () => {
+      const result = parseIgnorePaths('Dockerfile.debug');
+      expect(result).toEqual(['Dockerfile.debug']);
+    });
+
+    it('should handle paths with whitespace and empty lines', () => {
+      const result = parseIgnorePaths(`
+        **/vendor/**
+        **/testdata/**
+
+        **/examples/**
+      `);
+      expect(result).toEqual(['**/vendor/**', '**/testdata/**', '**/examples/**']);
+    });
+  });
+
   describe('getGitRepoUrl', () => {
     const originalEnv = process.env;
 
@@ -229,6 +282,7 @@ valid/Dockerfile=myregistry/valid:latest`;
         await fs.promises.writeFile(path.join(tempDir, 'Dockerfile'), 'FROM node:18');
         await fs.promises.writeFile(path.join(tempDir, 'subdir', 'Dockerfile'), 'FROM node:18');
         await fs.promises.writeFile(path.join(tempDir, 'app.dockerfile'), 'FROM node:18');
+        await fs.promises.writeFile(path.join(tempDir, 'dockerfile.app'), 'FROM node:18');
 
         process.chdir(tempDir);
         const result = await findDockerfiles();
@@ -248,6 +302,7 @@ valid/Dockerfile=myregistry/valid:latest`;
           path.join(tempDir, 'Dockerfile'),
           path.join(tempDir, 'subdir', 'Dockerfile'),
           path.join(tempDir, 'app.dockerfile'),
+          path.join(tempDir, 'dockerfile.app'),
         ];
         const resolvedResults = result.map(p => {
           return path.isAbsolute(p) ? p : path.resolve(tempDir, p);
@@ -268,6 +323,82 @@ valid/Dockerfile=myregistry/valid:latest`;
         process.chdir(tempDir);
         const result = await findDockerfiles();
         expect(result).toEqual([]);
+      } finally {
+        process.chdir(previousCwd);
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it('should respect custom ignore paths', async () => {
+      const previousCwd = process.cwd();
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dockerfiles-custom-ignore-'));
+      try {
+        // Create Dockerfiles in various directories
+        await fs.promises.mkdir(path.join(tempDir, 'vendor'), { recursive: true });
+        await fs.promises.mkdir(path.join(tempDir, 'src'), { recursive: true });
+        await fs.promises.writeFile(path.join(tempDir, 'Dockerfile'), 'FROM node:18');
+        await fs.promises.writeFile(path.join(tempDir, 'vendor', 'Dockerfile'), 'FROM node:18');
+        await fs.promises.writeFile(path.join(tempDir, 'src', 'Dockerfile'), 'FROM node:18');
+
+        process.chdir(tempDir);
+        const result = await findDockerfiles(['**/vendor/**']);
+
+        // Should find only the root and src Dockerfiles, not the vendor one
+        expect(result).toHaveLength(2);
+        expect(result).toContain('Dockerfile');
+        expect(result).toContain('src/Dockerfile');
+        expect(result).not.toContain('vendor/Dockerfile');
+      } finally {
+        process.chdir(previousCwd);
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it('should handle multiple custom ignore paths', async () => {
+      const previousCwd = process.cwd();
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dockerfiles-multi-ignore-'));
+      try {
+        // Create Dockerfiles in various directories
+        await fs.promises.mkdir(path.join(tempDir, 'vendor'), { recursive: true });
+        await fs.promises.mkdir(path.join(tempDir, 'examples'), { recursive: true });
+        await fs.promises.mkdir(path.join(tempDir, 'src'), { recursive: true });
+        await fs.promises.writeFile(path.join(tempDir, 'Dockerfile'), 'FROM node:18');
+        await fs.promises.writeFile(path.join(tempDir, 'vendor', 'Dockerfile'), 'FROM node:18');
+        await fs.promises.writeFile(path.join(tempDir, 'examples', 'Dockerfile'), 'FROM node:18');
+        await fs.promises.writeFile(path.join(tempDir, 'src', 'Dockerfile'), 'FROM node:18');
+
+        process.chdir(tempDir);
+        const result = await findDockerfiles(['**/vendor/**', '**/examples/**']);
+
+        // Should find only the root and src Dockerfiles
+        expect(result).toHaveLength(2);
+        expect(result).toContain('Dockerfile');
+        expect(result).toContain('src/Dockerfile');
+      } finally {
+        process.chdir(previousCwd);
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it('should ignore a specific file in the root folder', async () => {
+      const previousCwd = process.cwd();
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dockerfiles-root-ignore-'));
+      try {
+        // Create Dockerfiles - one in root to ignore, others to keep
+        await fs.promises.mkdir(path.join(tempDir, 'src'), { recursive: true });
+        await fs.promises.writeFile(path.join(tempDir, 'Dockerfile'), 'FROM node:18');
+        await fs.promises.writeFile(path.join(tempDir, 'Dockerfile.debug'), 'FROM node:18');
+        await fs.promises.writeFile(path.join(tempDir, 'src', 'Dockerfile'), 'FROM node:18');
+
+        process.chdir(tempDir);
+        // Ignore only the root Dockerfile.debug file
+        const result = await findDockerfiles(['Dockerfile.debug']);
+
+        // Should find root Dockerfile and src/Dockerfile, but not Dockerfile.debug
+        expect(result).toHaveLength(2);
+        expect(result).toContain('Dockerfile');
+        expect(result).toContain('src/Dockerfile');
+        expect(result).not.toContain('Dockerfile.debug');
       } finally {
         process.chdir(previousCwd);
         fs.rmSync(tempDir, { recursive: true, force: true });
