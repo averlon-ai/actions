@@ -37,6 +37,10 @@ inputs:
     description: 'Base URL for the API service'
     required: false
     default: 'https://wfe.prod.averlon.io/'
+  ignore-paths:
+    description: 'Glob patterns to ignore when searching for Dockerfiles (newline or comma separated). Example: "**/testdata/**,**/vendor/**"'
+    required: false
+    default: ''
 
 runs:
   using: 'node20'

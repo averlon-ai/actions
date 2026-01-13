@@ -57,7 +57,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Run Averlon Remediation Agent for Containers
-        uses: averlon-ai/actions/container-analysis@v1.0.4
+        uses: averlon-ai/actions/container-analysis@v1.0.5
         with:
           averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
           averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -91,7 +91,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Run Averlon Remediation Agent for Containers
-        uses: averlon-ai/actions/container-analysis@v1.0.4
+        uses: averlon-ai/actions/container-analysis@v1.0.5
         with:
           averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
           averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -136,7 +136,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Run Averlon Remediation Agent for Containers
-        uses: averlon-ai/actions/container-analysis@v1.0.4
+        uses: averlon-ai/actions/container-analysis@v1.0.5
         with:
           averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
           averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -155,6 +155,7 @@ jobs:
 | `image-map`           | Multiline mapping of Dockerfile paths to image repository urls (format: `path=repository-url`). Example: `Dockerfile=docker.io/username/repo-name`. **Recommended**: While Averlon attempts automatic mapping, explicit mapping ensures accuracy                    | ❌       | -                              |
 | `filters`             | Comma-separated vulnerability filters: `Recommended`, `Exploited`, `Critical`, `High`, `HighRCE`, `MediumApplication`                                                                                                                                               | ❌       | `Recommended,Critical,HighRCE` |
 | `auto-assign-copilot` | Auto-assign security issues to GitHub Copilot agent for automated fixes. **Requires a PAT with Copilot access**                                                                                                                                                     | ❌       | `false`                        |
+| `ignore-paths`        | Glob patterns to ignore when searching for Dockerfiles (newline or comma separated). Uses [micromatch](https://github.com/micromatch/micromatch) syntax (via fast-glob). Example: `**/testdata/**,**/vendor/**`                                                     | ❌       | -                              |
 
 ## 📤 Outputs
 
@@ -194,7 +195,7 @@ While Averlon attempts to automatically map Dockerfiles to image repositories, t
 ```yaml
 # Solution: Provide explicit image mapping (recommended)
 - name: Run Averlon Remediation Agent for Containers
-  uses: averlon-ai/actions/container-analysis@v1.0.4
+  uses: averlon-ai/actions/container-analysis@v1.0.5
   with:
     averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
     averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -220,7 +221,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Run Averlon Remediation Agent for Containers
-        uses: averlon-ai/actions/container-analysis@v1.0.4
+        uses: averlon-ai/actions/container-analysis@v1.0.5
         with:
           averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
           averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -234,6 +235,40 @@ Ensure your PAT has:
 - `Contents` (read), `Issues` (write), `Pull requests` (read/write) permissions
 - Your GitHub account has Copilot access enabled
 
+**Issue: "Unwanted files detected as Dockerfiles"**
+
+If the action is detecting files that aren't actual Dockerfiles (e.g., test data files or documentation), use the `ignore-paths` input to exclude them. The `ignore-paths` input supports [micromatch](https://github.com/micromatch/micromatch) glob patterns (via fast-glob), including wildcards (`*`, `**`), negation (`!`), and brace expansion.
+
+```yaml
+# Solution: Exclude specific paths from Dockerfile detection
+- name: Run Averlon Remediation Agent for Containers
+  uses: averlon-ai/actions/container-analysis@v1.0.5
+  with:
+    averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
+    averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
+    github-token: ${{ secrets.GITHUB_TOKEN }}
+    ignore-paths: |
+      **/testdata/**
+      **/test-data/**
+      **/vendor/**
+      **/examples/**
+```
+
+You can also ignore a specific file in the root folder:
+
+```yaml
+# Solution: Ignore a specific Dockerfile in the root folder
+- name: Run Averlon Remediation Agent for Containers
+  uses: averlon-ai/actions/container-analysis@v1.0.5
+  with:
+    averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
+    averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
+    github-token: ${{ secrets.GITHUB_TOKEN }}
+    ignore-paths: Dockerfile.debug
+```
+
+**Note**: The action automatically ignores common non-Dockerfile patterns like `*.json`, `*.md`, `*.txt`, `*.yaml`, `*.yml`, and `node_modules/`.
+
 **Issue: "Too many low-priority findings"**
 
 Adjust the filters to focus on critical vulnerabilities.
@@ -241,7 +276,7 @@ Adjust the filters to focus on critical vulnerabilities.
 ```yaml
 # Solution: Use stricter filters
 - name: Run Averlon Remediation Agent for Containers
-  uses: averlon-ai/actions/container-analysis@v1.0.4
+  uses: averlon-ai/actions/container-analysis@v1.0.5
   with:
     averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
     averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -270,7 +305,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Run Averlon Remediation Agent for Containers
-        uses: averlon-ai/actions/container-analysis@v1.0.4
+        uses: averlon-ai/actions/container-analysis@v1.0.5
         with:
           averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
           averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}

@@ -112,9 +112,10 @@ function parseDockerLabels(fileContent: string): Record<string, string> {
 /**
  * Finds all Dockerfiles in the repository.
  *
+ * @param ignorePaths - Optional array of glob patterns to ignore when searching for Dockerfiles.
  * @returns The list of Dockerfiles.
  */
-export async function findDockerfiles(): Promise<string[]> {
+export async function findDockerfiles(ignorePaths?: string[]): Promise<string[]> {
   const patterns = [
     // Standard Dockerfile patterns
     '**/Dockerfile',
@@ -132,10 +133,6 @@ export async function findDockerfiles(): Promise<string[]> {
     '**/*.dockerfile',
     '**/*.Dockerfile',
 
-    // Docker files with prefixes and suffixes
-    '**/*Dockerfile*',
-    '**/*dockerfile*',
-
     // Common custom naming patterns
     '**/docker.*.dockerfile',
     '**/*.docker.*.dockerfile',
@@ -145,6 +142,7 @@ export async function findDockerfiles(): Promise<string[]> {
     onlyFiles: true,
     followSymbolicLinks: true,
     unique: true,
+    ignore: [...(ignorePaths || [])],
   });
   return entries.sort();
 }
@@ -276,4 +274,21 @@ export function parseFilters(input: string | undefined): number {
     if (nameToBit[part] != null) mask |= nameToBit[part];
   }
   return mask;
+}
+
+/**
+ * Parses ignore paths from a string input.
+ *
+ * This function converts a string of ignore patterns (separated by newlines or commas)
+ * into an array of trimmed, non-empty path patterns.
+ *
+ * @param input - String containing ignore patterns separated by newlines or commas.
+ * @returns An array of trimmed, non-empty path patterns.
+ */
+export function parseIgnorePaths(input: string | undefined): string[] {
+  if (!input) return [];
+  return input
+    .split(/[\n,]/)
+    .map(p => p.trim())
+    .filter(p => p.length > 0);
 }
