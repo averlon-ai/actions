@@ -118,67 +118,58 @@ export function formatScanResult(scanResult: string, commitSha: string): string 
       core.debug('No summary data found in scan results');
     }
 
-    // TODO: ADD ACCESS RISK SUMMARY SECTION
+    // === Access Risk Summary Section ===
+    // IAM/Access control risks (who has access to what)
+    const accessPermissions = parsedResult.AccessAnalysis?.AccessPermissions;
+    if (accessPermissions && accessPermissions.length > 0) {
+      // Check if there are any actual changes (added/removed)
+      const hasActualChanges = accessPermissions.some(
+        perm => (perm.Added && perm.Added.length > 0) || (perm.Removed && perm.Removed.length > 0)
+      );
 
-    // // === Access Risk Summary Section ===
-    // // IAM/Access control risks (who has access to what)
-    // if (parsedResult.accessRiskSummary) {
-    //   core.debug('Parsing access risk summary data');
-    //   try {
-    //     const riskAssessments: AccessRiskAssessment[] = JSON.parse(parsedResult.accessRiskSummary);
-    //     if (Array.isArray(riskAssessments) && riskAssessments.length > 0) {
-    //       hasRisks = true;
-    //       core.info(`Found ${riskAssessments.length} access risk assessment(s)`);
-    //       resultSummary += `### 🛡️ Access Risk Assessment\n\n`;
+      if (hasActualChanges) {
+        hasRisks = true;
+        core.info(`Found ${accessPermissions.length} access permission change(s)`);
+        resultSummary += `### 🛡️ Access Risk Assessment\n\n`;
 
-    //       riskAssessments.forEach((assessment, index) => {
-    //         const riskLevel = assessment.riskAssessment?.riskLevel || 'Unknown';
-    //         const riskEmoji = getSeverityEmoji(riskLevel);
-    //         const principalId = assessment.principalId || 'Unknown Principal';
-    //         const targetResource = assessment.targetResource || 'Unknown Resource';
+        accessPermissions.forEach((perm, index) => {
+          const principalId = perm.PrincipalID || 'Unknown Principal';
+          const targetResource = perm.TargetResourceID || 'Unknown Resource';
+          const hasChanges =
+            (perm.Added && perm.Added.length > 0) || (perm.Removed && perm.Removed.length > 0);
 
-    //         core.debug(
-    //           `Processing access risk ${index + 1}: ${principalId} → ${targetResource} (${riskLevel})`
-    //         );
+          if (hasChanges) {
+            core.debug(`Processing access change ${index + 1}: ${principalId} → ${targetResource}`);
 
-    //         resultSummary += `#### ${riskEmoji} Assessment ${index + 1}\n\n`;
-    //         // Extract just the last part of the ARN/path for readability
-    //         resultSummary += `- **Principal**: \`${principalId.split('/').pop()}\`\n`;
-    //         resultSummary += `- **Target Resource**: \`${targetResource.split('/').pop()}\`\n`;
-    //         resultSummary += `- **Risk Level**: **${riskLevel}**\n`;
+            resultSummary += `#### Assessment ${index + 1}: \`${principalId.split('/').pop()}\` → \`${targetResource.split('/').pop()}\`\n\n`;
 
-    //         if (assessment.riskAssessment?.issuesSummary) {
-    //           resultSummary += `- **Issues**: ${assessment.riskAssessment.issuesSummary}\n`;
-    //         }
-    //         if (assessment.riskAssessment?.impactAssessment) {
-    //           resultSummary += `- **Impact**: ${assessment.riskAssessment.impactAssessment}\n`;
-    //         }
+            if (perm.Added && perm.Added.length > 0) {
+              resultSummary += `**➕ Added Permissions:**\n`;
+              perm.Added.forEach(p => {
+                resultSummary += `- \`${p}\`\n`;
+              });
+              resultSummary += `\n`;
+            }
 
-    //         // Vulnerabilities
-    //         const vulnerabilities = assessment.riskAssessment?.vulnerabilities || [];
-    //         const validVulnerabilities = vulnerabilities.filter(
-    //           vuln => vuln.cve || vuln.severity || vuln.riskAnalysis
-    //         );
+            if (perm.Removed && perm.Removed.length > 0) {
+              resultSummary += `**➖ Removed Permissions:**\n`;
+              perm.Removed.forEach(p => {
+                resultSummary += `- \`${p}\`\n`;
+              });
+              resultSummary += `\n`;
+            }
 
-    //         if (validVulnerabilities.length > 0) {
-    //           resultSummary += `\n**Vulnerabilities:**\n`;
-    //           validVulnerabilities.forEach(vuln => {
-    //             const severityEmoji = getSeverityEmoji(vuln.severity);
-    //             resultSummary += `- ${severityEmoji} **${vuln.cve || 'Unknown CVE'}** (${vuln.severity || 'Unknown'})\n`;
-    //             if (vuln.riskAnalysis) {
-    //               resultSummary += `  - ${vuln.riskAnalysis}\n`;
-    //             }
-    //           });
-    //         }
-    //         resultSummary += `\n`;
-    //       });
-    //     }
-    //   } catch {
-    //     // Fall back to displaying raw access risk summary if parsing fails
-    //     core.warning('Failed to parse accessRiskSummary as JSON, displaying as code block');
-    //     resultSummary += `### 🛡️ Access Risk Assessment\n\n\`\`\`\n${parsedResult.accessRiskSummary}\n\`\`\`\n\n`;
-    //   }
-    // }
+            if (perm.Unchanged && perm.Unchanged.length > 0) {
+              resultSummary += `**➡️ Unchanged Permissions:**\n`;
+              perm.Unchanged.forEach(p => {
+                resultSummary += `- \`${p}\`\n`;
+              });
+              resultSummary += `\n`;
+            }
+          }
+        });
+      }
+    }
 
     // === Generic Summary Section ===
     // Handle any additional summary data not covered by specific sections
@@ -286,19 +277,16 @@ export function hasRisksInResult(scanResult: string): boolean {
       }
     }
 
-    // TODO: ADD ACCESS RISK SUMMARY CHECK
-
-    // // Check for access risk summary
-    // if (parsed.accessRiskSummary) {
-    //   try {
-    //     const accessRisks = JSON.parse(parsed.accessRiskSummary);
-    //     if (Array.isArray(accessRisks) && accessRisks.length > 0) {
-    //       return true;
-    //     }
-    //   } catch {
-    //     return parsed.accessRiskSummary.trim().length > 0;
-    //   }
-    // }
+    // Check for access permission changes
+    const accessPermissions = parsed.AccessAnalysis?.AccessPermissions;
+    if (accessPermissions && accessPermissions.length > 0) {
+      // If any permission has Added or Removed changes, it's a risk
+      for (const perm of accessPermissions) {
+        if ((perm.Added && perm.Added.length > 0) || (perm.Removed && perm.Removed.length > 0)) {
+          return true;
+        }
+      }
+    }
 
     return false;
   } catch {

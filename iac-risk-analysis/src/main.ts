@@ -374,12 +374,27 @@ async function _runTerraformScan(
           `✓ Terraform scan completed successfully after ${elapsedSeconds} seconds and ${attempts} polling attempts`
         );
 
-        if (resultResponse.ReachabilityAnalysis) {
+        // Build the result object with both ReachabilityAnalysis and AccessAnalysis
+        const hasReachability = !!resultResponse.ReachabilityAnalysis;
+        const hasAccess = !!resultResponse.AccessAnalysis;
+
+        if (hasReachability || hasAccess) {
+          const scanResultObj: {
+            ReachabilityAnalysis?: typeof resultResponse.ReachabilityAnalysis;
+            AccessAnalysis?: typeof resultResponse.AccessAnalysis;
+          } = {};
+
+          if (hasReachability) {
+            scanResultObj.ReachabilityAnalysis = resultResponse.ReachabilityAnalysis;
+          }
+          if (hasAccess) {
+            scanResultObj.AccessAnalysis = resultResponse.AccessAnalysis;
+          }
+
           core.info('Scan result received and validated');
-          core.debug(
-            `Scan result length: ${JSON.stringify(resultResponse.ReachabilityAnalysis).length} chars`
-          );
-          return JSON.stringify(resultResponse.ReachabilityAnalysis);
+          const resultJson = JSON.stringify(scanResultObj);
+          core.debug(`Scan result length: ${resultJson.length} chars`);
+          return resultJson;
         } else {
           // Unusual: scan succeeded but no result data
           core.warning('Scan completed but no result data was returned');

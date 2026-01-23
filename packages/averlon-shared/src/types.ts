@@ -71,13 +71,15 @@ export type JobStatus =
 export interface AnalyzeTerraformResult {
   JobID: string;
   Status: JobStatus;
-  ReachabilityAnalysis: TerraformReachabilityAnalysis;
+  ReachabilityAnalysis?: TerraformReachabilityAnalysis;
+  AccessAnalysis?: TerraformAccessAnalysis;
 }
 
 export interface ScanTerraformRequest {
   RepoName: string;
   Commit: string;
   ResourceTypes?: string[];
+  IncludeResourcesWithoutIssues?: boolean;
 }
 
 export interface ScanTerraformResult {
@@ -323,6 +325,30 @@ export interface TerraformReachabilityAnalysisSummary {
   NewInternetEgressExposures?: string[];
   TextSummary?: string;
   // RiskSummary is a JSON string that unmarshals to RiskAssessment[]
+  RiskSummary?: string;
+}
+
+// TerraformAccessAnalysis matches the proto definition
+export interface TerraformAccessAnalysis {
+  AccessPermissions?: TerraformAccessPermission[];
+  Resources?: TerraformResource[];
+  Summary?: TerraformAccessAnalysisSummary;
+}
+
+// TerraformAccessPermission represents permission changes
+// for a specific principal and resource.
+export interface TerraformAccessPermission {
+  PrincipalID?: string;
+  TargetResourceID?: string;
+  Unchanged?: string[];
+  Added?: string[];
+  Removed?: string[];
+}
+
+// TerraformAccessAnalysisSummary matches the proto definition
+export interface TerraformAccessAnalysisSummary {
+  TextSummary?: string;
+  // RiskSummary is a JSON string that unmarshals to AccessRiskAssessment[]
   RiskSummary?: string;
 }
 

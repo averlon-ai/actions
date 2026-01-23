@@ -64,7 +64,7 @@ jobs:
           terraform show -json tfplan > plan.json
 
       - name: Run Averlon Remediation Agent for IaC Misconfigurations
-        uses: averlon-ai/actions/iac-misconfig-analysis@v1.0.5
+        uses: averlon-ai/actions/iac-misconfig-analysis@v1.0.6
         with:
           averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
           averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -83,7 +83,7 @@ Skip GitHub issue creation if you only need the output:
 ```yaml
 - name: Run Averlon Remediation Agent for IaC Misconfigurations
   id: scan
-  uses: averlon-ai/actions/iac-misconfig-analysis@v1.0.5
+  uses: averlon-ai/actions/iac-misconfig-analysis@v1.0.6
   with:
     averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
     averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -101,12 +101,12 @@ Skip GitHub issue creation if you only need the output:
 
 ```yaml
 - name: Run Averlon Remediation Agent for IaC Misconfigurations
-  uses: averlon-ai/actions/iac-misconfig-analysis@v1.0.5
+  uses: averlon-ai/actions/iac-misconfig-analysis@v1.0.6
   with:
     # Required inputs
     averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
     averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
-    commit: ${{ github.event.pull_request.head.sha }}
+    commit: ${{ github.sha }}
     plan-path: './plan.json'
 
     # Optional: GitHub issues creation
@@ -118,6 +118,7 @@ Skip GitHub issue creation if you only need the output:
     base-url: 'https://wfe.prod.averlon.io/' # Custom API endpoint
     auto-assign-copilot: 'true' #auto assign created issue to copilot
     resource-type-filter: 'aws_s3_bucket,aws_lambda_function' # filter the misconfiguration for specific terraform resource types
+    include-resources-without-issues: 'true' # If true, will get the resources present in terraform plan file with or without issues. Default is false.
 ```
 
 **GitHub Issues:**
@@ -158,7 +159,7 @@ Skip GitHub issue creation if you only need the output:
 ```yaml
 - name: Run Averlon Remediation Agent for IaC Misconfigurations
   id: scan
-  uses: averlon-ai/actions/iac-misconfig-analysis@v1.0.5
+  uses: averlon-ai/actions/iac-misconfig-analysis@v1.0.6
   # ... inputs
 
 - name: Use output
@@ -296,7 +297,7 @@ Enable debug logging for troubleshooting:
 
 ```yaml
 - name: Run Averlon Remediation Agent for IaC Misconfigurations
-  uses: averlon-ai/actions/iac-misconfig-analysis@v1.0.5
+  uses: averlon-ai/actions/iac-misconfig-analysis@v1.0.6
   env:
     ACTIONS_STEP_DEBUG: true
   with:

@@ -10,6 +10,7 @@ export const AVERLON_CREATED_LABEL = 'averlon-created';
 export interface GitHubRepository {
   owner: string;
   repo: string;
+  commit: string;
 }
 
 /**
@@ -30,7 +31,9 @@ export function parseGitHubRepository(): GitHubRepository {
     );
   }
 
-  return { owner, repo };
+  const commit = process.env['GITHUB_SHA'];
+
+  return { owner, repo, commit };
 }
 
 /**
