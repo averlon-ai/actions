@@ -75,6 +75,7 @@ export interface ActionInputs {
   githubRepo: string;
   autoAssignCopilot: boolean;
   resourceTypeFilter?: string[];
+  IncludeResourcesWithoutIssues: boolean;
 }
 
 /**
@@ -125,6 +126,9 @@ async function _getInputs(): Promise<ActionInputs> {
   const autoAssignCopilot = parseBoolean(autoAssignCopilotStr);
   // Parse resource type
   const resourceTypeFilterRaw = getInputSafe('resource-type-filter', false);
+  const IncludeResourcesWithoutIssuesStr =
+    getInputSafe('include-resources-without-issues', false) || 'false';
+  const IncludeResourcesWithoutIssues = parseBoolean(IncludeResourcesWithoutIssuesStr);
   const resourceTypeFilter = resourceTypeFilterRaw
     ? resourceTypeFilterRaw
         .split(',')
@@ -132,7 +136,8 @@ async function _getInputs(): Promise<ActionInputs> {
         .filter(t => t.length > 0)
     : undefined;
 
-  const { owner: githubOwner, repo: githubRepo } = parseGitHubRepository();
+  const { owner: githubOwner, repo: githubRepo, commit: defaultCommit } = parseGitHubRepository();
+  const commit = getInputSafe('commit', false) || defaultCommit;
 
   if (githubToken) {
     core.setSecret(githubToken);
@@ -156,7 +161,7 @@ async function _getInputs(): Promise<ActionInputs> {
     apiKey,
     apiSecret,
     baseUrl: getInputSafe('base-url', false) || 'https://wfe.prod.averlon.io/',
-    commit: getInputSafe('commit', true),
+    commit,
     scanPollInterval,
     scanTimeout,
     planPath: getInputSafe('plan-path', true),
@@ -165,6 +170,7 @@ async function _getInputs(): Promise<ActionInputs> {
     githubRepo,
     autoAssignCopilot,
     resourceTypeFilter,
+    IncludeResourcesWithoutIssues,
   };
 }
 
@@ -311,6 +317,7 @@ async function _runScanTerraformMisconfiguration(
     RepoName: `${inputs.githubOwner}/${inputs.githubRepo}`,
     Commit: inputs.commit,
     ResourceTypes: inputs.resourceTypeFilter,
+    IncludeResourcesWithoutIssues: inputs.IncludeResourcesWithoutIssues,
   };
 
   core.debug(`Scan request: ${JSON.stringify(scanRequest, null, 2)}`);

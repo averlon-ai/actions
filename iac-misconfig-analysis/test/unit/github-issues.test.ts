@@ -1,4 +1,39 @@
 import { describe, it, expect, beforeEach, afterEach, spyOn, mock } from 'bun:test';
+
+// Create mock functions for @actions/core
+const mockInfo = mock(() => {});
+const mockWarning = mock(() => {});
+const mockError = mock(() => {});
+const mockDebug = mock(() => {});
+const mockGetInput = mock(() => '');
+const mockSetOutput = mock(() => {});
+const mockSetFailed = mock(() => {});
+const mockIsDebug = mock(() => false);
+
+// Mock @actions/core before importing
+mock.module('@actions/core', () => ({
+  info: mockInfo,
+  warning: mockWarning,
+  error: mockError,
+  debug: mockDebug,
+  getInput: mockGetInput,
+  setOutput: mockSetOutput,
+  setFailed: mockSetFailed,
+  isDebug: mockIsDebug,
+}));
+
+// Mock @actions/github before importing
+const mockGetOctokit = mock(() => ({
+  rest: {
+    issues: {},
+    gists: {},
+  },
+}));
+
+mock.module('@actions/github', () => ({
+  getOctokit: mockGetOctokit,
+}));
+
 import * as core from '@actions/core';
 import * as github from '@actions/github';
 import { GithubIssuesService, extractBatchNumberFromTitle } from '../../src/github-issues';

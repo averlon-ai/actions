@@ -1,4 +1,27 @@
 import { describe, it, expect, spyOn, beforeEach, afterEach, mock } from 'bun:test';
+
+// Create mock functions for @actions/core
+const mockInfo = mock(() => {});
+const mockWarning = mock(() => {});
+const mockError = mock(() => {});
+const mockDebug = mock(() => {});
+const mockGetInput = mock(() => '');
+const mockSetOutput = mock(() => {});
+const mockSetFailed = mock(() => {});
+const mockIsDebug = mock(() => false);
+
+// Mock @actions/core before importing
+mock.module('@actions/core', () => ({
+  info: mockInfo,
+  warning: mockWarning,
+  error: mockError,
+  debug: mockDebug,
+  getInput: mockGetInput,
+  setOutput: mockSetOutput,
+  setFailed: mockSetFailed,
+  isDebug: mockIsDebug,
+}));
+
 import * as core from '@actions/core';
 import {
   ApiClient,

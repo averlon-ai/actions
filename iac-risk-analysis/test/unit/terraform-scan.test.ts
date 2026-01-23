@@ -37,6 +37,7 @@ function setupMocks() {
       ReachabilityAnalysis: {
         TextSummary: 'test-result',
       } as any,
+      AccessAnalysis: undefined,
     })
   );
 
@@ -106,7 +107,7 @@ describe('_runTerraformScan function', () => {
 
       const result = await _runTerraformScan(inputs, mockApiClient);
 
-      expect(result).toBe('{"TextSummary":"test-result"}');
+      expect(result).toBe('{"ReachabilityAnalysis":{"TextSummary":"test-result"}}');
       expect(mockStartAnalyzeTerraform).toHaveBeenCalledWith({
         RepoName: 'test-repo',
         BaseCommit: 'abc123',
@@ -151,7 +152,7 @@ describe('_runTerraformScan function', () => {
 
       const result = await _runTerraformScan(inputs, mockApiClient);
 
-      expect(result).toBe('{"TextSummary":"success-after-retries"}');
+      expect(result).toBe('{"ReachabilityAnalysis":{"TextSummary":"success-after-retries"}}');
       expect(mockGetAnalyzeTerraformResult).toHaveBeenCalledTimes(4);
       expect(infoSpy).toHaveBeenCalledWith(
         expect.stringContaining('Scan still in progress (Running). Waiting')
@@ -188,7 +189,7 @@ describe('_runTerraformScan function', () => {
 
       const result = await _runTerraformScan(inputs, mockApiClient);
 
-      expect(result).toBe('{"TextSummary":"final-result"}');
+      expect(result).toBe('{"ReachabilityAnalysis":{"TextSummary":"final-result"}}');
       expect(infoSpy).toHaveBeenCalledWith(
         expect.stringContaining('Scan still in progress (Scheduled). Waiting')
       );
@@ -213,6 +214,60 @@ describe('_runTerraformScan function', () => {
 
       expect(result).toBe('');
       expect(warningSpy).toHaveBeenCalledWith('Scan completed but no result data was returned');
+    });
+
+    it('should return both ReachabilityAnalysis and AccessAnalysis when both are present', async () => {
+      const inputs = createTestInputs();
+
+      mockGetAnalyzeTerraformResult.mockResolvedValue({
+        JobID: 'test-job-123',
+        Status: 'Succeeded',
+        ReachabilityAnalysis: {
+          TextSummary: 'reachability-result',
+        } as any,
+        AccessAnalysis: {
+          AccessPermissions: [
+            {
+              PrincipalID: 'arn:aws:iam::123456789012:role/test-principal',
+              TargetResourceID: 'arn:aws:s3:::test-bucket',
+              Added: ['s3:GetObject'],
+            },
+          ],
+        } as any,
+      });
+
+      const result = await _runTerraformScan(inputs, mockApiClient);
+
+      expect(result).toBe(
+        '{"ReachabilityAnalysis":{"TextSummary":"reachability-result"},"AccessAnalysis":{"AccessPermissions":[{"PrincipalID":"arn:aws:iam::123456789012:role/test-principal","TargetResourceID":"arn:aws:s3:::test-bucket","Added":["s3:GetObject"]}]}}'
+      );
+      expect(infoSpy).toHaveBeenCalledWith('Scan result received and validated');
+    });
+
+    it('should return only AccessAnalysis when ReachabilityAnalysis is undefined', async () => {
+      const inputs = createTestInputs();
+
+      mockGetAnalyzeTerraformResult.mockResolvedValue({
+        JobID: 'test-job-123',
+        Status: 'Succeeded',
+        ReachabilityAnalysis: undefined,
+        AccessAnalysis: {
+          AccessPermissions: [
+            {
+              PrincipalID: 'arn:aws:iam::123456789012:role/access-only',
+              TargetResourceID: 'arn:aws:s3:::test-bucket',
+              Removed: ['s3:DeleteObject'],
+            },
+          ],
+        } as any,
+      });
+
+      const result = await _runTerraformScan(inputs, mockApiClient);
+
+      expect(result).toBe(
+        '{"AccessAnalysis":{"AccessPermissions":[{"PrincipalID":"arn:aws:iam::123456789012:role/access-only","TargetResourceID":"arn:aws:s3:::test-bucket","Removed":["s3:DeleteObject"]}]}}'
+      );
+      expect(infoSpy).toHaveBeenCalledWith('Scan result received and validated');
     });
   });
 
@@ -302,7 +357,7 @@ describe('_runTerraformScan function', () => {
 
       const result = await _runTerraformScan(inputs, mockApiClient);
 
-      expect(result).toBe('{"TextSummary":"final-result"}');
+      expect(result).toBe('{"ReachabilityAnalysis":{"TextSummary":"final-result"}}');
       expect(warningSpy).toHaveBeenCalledWith(
         'Unknown scan status: UnknownStatus. Continuing to poll...'
       );
@@ -348,7 +403,7 @@ describe('_runTerraformScan function', () => {
 
       const result = await _runTerraformScan(inputs, mockApiClient);
 
-      expect(result).toBe('{"TextSummary":"test-result"}');
+      expect(result).toBe('{"ReachabilityAnalysis":{"TextSummary":"test-result"}}');
       expect(infoSpy).toHaveBeenCalledWith(
         'Polling for scan results with exponential backoff (base interval: 5s, timeout: 30s)...'
       );

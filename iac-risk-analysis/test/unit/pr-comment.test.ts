@@ -152,65 +152,73 @@ describe('pr-comment.ts', () => {
       expect(infoSpy).toHaveBeenCalledWith('Found 3 risk assessment(s)');
     });
 
-    // it('should handle access risk assessments', () => {
-    //   const accessRiskSummary = JSON.stringify([
-    //     {
-    //       principalId: 'arn:aws:iam::123456789012:role/path/to/AdminRole',
-    //       targetResource: 'arn:aws:s3:::bucket-name/path/to/sensitive-bucket',
-    //       riskAssessment: {
-    //         riskLevel: 'HIGH',
-    //         issuesSummary: 'Overly permissive IAM role',
-    //         impactAssessment: 'Can access sensitive data',
-    //       },
-    //     },
-    //   ]);
+    it('should handle access risk assessments using AccessPermissions', () => {
+      const scanResult = JSON.stringify({
+        AccessAnalysis: {
+          AccessPermissions: [
+            {
+              PrincipalID: 'arn:aws:iam::123456789012:role/path/to/AdminRole',
+              TargetResourceID: 'arn:aws:s3:::bucket-name/path/to/sensitive-bucket',
+              Unchanged: ['s3:ListBucket'],
+              Added: ['s3:GetObject', 's3:PutObject'],
+              Removed: ['s3:DeleteObject'],
+            },
+          ],
+          Summary: {
+            TextSummary: 'Access analysis completed',
+            RiskSummary:
+              '[{"principalId":"arn:aws:iam::123456789012:role/path/to/AdminRole","targetResource":"arn:aws:s3:::bucket-name/path/to/sensitive-bucket","riskAssessment":{"riskLevel":"High"}}]',
+          },
+        },
+      });
 
-    //   const scanResult = JSON.stringify({
-    //     accessRiskSummary: accessRiskSummary,
-    //   });
+      const result = formatScanResult(scanResult, commitSha);
 
-    //   const result = formatScanResult(scanResult, commitSha);
+      expect(result).toContain('### 🛡️ Access Risk Assessment');
+      expect(result).toContain('Assessment 1: `AdminRole` → `sensitive-bucket`');
+      expect(result).toContain('**➕ Added Permissions:**');
+      expect(result).toContain('`s3:GetObject`');
+      expect(result).toContain('`s3:PutObject`');
+      expect(result).toContain('**➖ Removed Permissions:**');
+      expect(result).toContain('`s3:DeleteObject`');
+      expect(result).toContain('**➡️ Unchanged Permissions:**');
+      expect(result).toContain('`s3:ListBucket`');
+      expect(infoSpy).toHaveBeenCalledWith('Found 1 access permission change(s)');
+    });
 
-    //   expect(result).toContain('### 🛡️ Access Risk Assessment');
-    //   expect(result).toContain('Assessment 1');
-    //   expect(result).toContain('**Principal**: `AdminRole`');
-    //   expect(result).toContain('**Target Resource**: `sensitive-bucket`');
-    //   expect(result).toContain('**Risk Level**: **HIGH**');
-    //   expect(result).toContain('**Issues**: Overly permissive IAM role');
-    //   expect(result).toContain('**Impact**: Can access sensitive data');
-    //   expect(infoSpy).toHaveBeenCalledWith('Found 1 access risk assessment(s)');
-    // });
+    it('should handle multiple access risk assessments using AccessPermissions', () => {
+      const scanResult = JSON.stringify({
+        AccessAnalysis: {
+          AccessPermissions: [
+            {
+              PrincipalID: 'arn:aws:iam::123456789012:role/Role1',
+              TargetResourceID: 'arn:aws:s3:::bucket1',
+              Added: ['s3:GetObject'],
+            },
+            {
+              PrincipalID: 'arn:aws:iam::123456789012:user/User2',
+              TargetResourceID: 'arn:aws:dynamodb:us-east-1:123456789012:table/Table2',
+              Removed: ['dynamodb:PutItem'],
+            },
+          ],
+          Summary: {
+            TextSummary: 'Multiple access changes detected',
+            RiskSummary:
+              '[{"principalId":"arn:aws:iam::123456789012:role/Role1","targetResource":"arn:aws:s3:::bucket1","riskAssessment":{"riskLevel":"Medium"}}]',
+          },
+        },
+      });
 
-    // it('should handle multiple access risk assessments', () => {
-    //   const accessRiskSummary = JSON.stringify([
-    //     {
-    //       principalId: 'arn:aws:iam::123456789012:role/Role1',
-    //       targetResource: 'arn:aws:s3:::bucket1',
-    //       riskAssessment: {
-    //         riskLevel: 'CRITICAL',
-    //       },
-    //     },
-    //     {
-    //       principalId: 'arn:aws:iam::123456789012:user/User2',
-    //       targetResource: 'arn:aws:dynamodb:us-east-1:123456789012:table/Table2',
-    //       riskAssessment: {
-    //         riskLevel: 'MEDIUM',
-    //       },
-    //     },
-    //   ]);
+      const result = formatScanResult(scanResult, commitSha);
 
-    //   const scanResult = JSON.stringify({
-    //     accessRiskSummary: accessRiskSummary,
-    //   });
-
-    //   const result = formatScanResult(scanResult, commitSha);
-
-    //   expect(result).toContain('Assessment 1');
-    //   expect(result).toContain('Assessment 2');
-    //   expect(result).toContain('**Principal**: `Role1`');
-    //   expect(result).toContain('**Principal**: `User2`');
-    //   expect(infoSpy).toHaveBeenCalledWith('Found 2 access risk assessment(s)');
-    // });
+      expect(result).toContain('Assessment 1: `Role1` → `arn:aws:s3:::bucket1`');
+      expect(result).toContain('Assessment 2: `User2` → `Table2`');
+      expect(result).toContain('**➕ Added Permissions:**');
+      expect(result).toContain('`s3:GetObject`');
+      expect(result).toContain('**➖ Removed Permissions:**');
+      expect(result).toContain('`dynamodb:PutItem`');
+      expect(infoSpy).toHaveBeenCalledWith('Found 2 access permission change(s)');
+    });
 
     it('should handle ReachabilityAnalysis.Summary format (new proto structure)', () => {
       const scanResult = JSON.stringify({
@@ -291,20 +299,6 @@ describe('pr-comment.ts', () => {
         'Failed to parse RiskSummary as JSON, displaying as text'
       );
     });
-
-    // it('should handle invalid accessRiskSummary JSON gracefully', () => {
-    //   const scanResult = JSON.stringify({
-    //     accessRiskSummary: 'not-valid-json',
-    //   });
-
-    //   const result = formatScanResult(scanResult, commitSha);
-
-    //   expect(result).toContain('### 🛡️ Access Risk Assessment');
-    //   expect(result).toContain('not-valid-json');
-    //   expect(warningSpy).toHaveBeenCalledWith(
-    //     'Failed to parse accessRiskSummary as JSON, displaying as code block'
-    //   );
-    // });
 
     it('should handle completely invalid JSON input', () => {
       const result = formatScanResult('not-json-at-all', commitSha);
@@ -395,47 +389,43 @@ describe('pr-comment.ts', () => {
       expect(result).toContain('**CVE-2024-1234** (Unknown)');
     });
 
-    // it('should handle access risk with missing optional fields', () => {
-    //   const accessRiskSummary = JSON.stringify([
-    //     {
-    //       // Missing principalId and targetResource
-    //       riskAssessment: {
-    //         riskLevel: 'LOW',
-    //       },
-    //     },
-    //   ]);
+    it('should handle access risk with missing optional fields', () => {
+      const scanResult = JSON.stringify({
+        AccessAnalysis: {
+          AccessPermissions: [
+            {
+              // Missing PrincipalID and TargetResourceID
+              Added: ['s3:GetObject'],
+            },
+          ],
+        },
+      });
 
-    //   const scanResult = JSON.stringify({
-    //     accessRiskSummary: accessRiskSummary,
-    //   });
+      const result = formatScanResult(scanResult, commitSha);
 
-    //   const result = formatScanResult(scanResult, commitSha);
+      expect(result).toContain('Assessment 1: `Unknown Principal` → `Unknown Resource`');
+      expect(result).toContain('**➕ Added Permissions:**');
+      expect(result).toContain('`s3:GetObject`');
+    });
 
-    //   expect(result).toContain('**Principal**: `Unknown Principal`');
-    //   expect(result).toContain('**Target Resource**: `Unknown Resource`');
-    //   expect(result).toContain('**Risk Level**: **LOW**');
-    // });
+    it('should extract last part of ARN for principals and resources', () => {
+      const scanResult = JSON.stringify({
+        AccessAnalysis: {
+          AccessPermissions: [
+            {
+              PrincipalID: 'arn:aws:iam::123456789012:role/path/to/MyRole',
+              TargetResourceID: 'arn:aws:s3:::bucket/prefix/my-object',
+              Added: ['s3:GetObject'],
+            },
+          ],
+        },
+      });
 
-    // it('should extract last part of ARN for principals and resources', () => {
-    //   const accessRiskSummary = JSON.stringify([
-    //     {
-    //       principalId: 'arn:aws:iam::123456789012:role/path/to/MyRole',
-    //       targetResource: 'arn:aws:s3:::bucket/prefix/my-object',
-    //       riskAssessment: {
-    //         riskLevel: 'MEDIUM',
-    //       },
-    //     },
-    //   ]);
+      const result = formatScanResult(scanResult, commitSha);
 
-    //   const scanResult = JSON.stringify({
-    //     accessRiskSummary: accessRiskSummary,
-    //   });
-
-    //   const result = formatScanResult(scanResult, commitSha);
-
-    //   expect(result).toContain('**Principal**: `MyRole`');
-    //   expect(result).toContain('**Target Resource**: `my-object`');
-    // });
+      expect(result).toContain('Assessment 1: `MyRole` → `my-object`');
+      expect(result).toContain('**➕ Added Permissions:**');
+    });
 
     it('should use correct severity emojis', () => {
       const riskSummary = JSON.stringify([
@@ -522,22 +512,21 @@ describe('pr-comment.ts', () => {
       expect(hasRisksInResult(scanResult)).toBe(true);
     });
 
-    // it('should return true when there are access risks', () => {
-    //   const accessRiskSummary = JSON.stringify([
-    //     {
-    //       principalId: 'principal1',
-    //       riskAssessment: {
-    //         riskLevel: 'MEDIUM',
-    //       },
-    //     },
-    //   ]);
+    it('should return true when there are access risks', () => {
+      const scanResult = JSON.stringify({
+        AccessAnalysis: {
+          AccessPermissions: [
+            {
+              PrincipalID: 'arn:aws:iam::123456789012:role/principal1',
+              TargetResourceID: 'arn:aws:s3:::test-bucket',
+              Added: ['s3:GetObject'],
+            },
+          ],
+        },
+      });
 
-    //   const scanResult = JSON.stringify({
-    //     accessRiskSummary: accessRiskSummary,
-    //   });
-
-    //   expect(hasRisksInResult(scanResult)).toBe(true);
-    // });
+      expect(hasRisksInResult(scanResult)).toBe(true);
+    });
 
     it('should return false when there are no risks', () => {
       const scanResult = JSON.stringify({
@@ -565,7 +554,11 @@ describe('pr-comment.ts', () => {
             RiskSummary: JSON.stringify([]),
           },
         },
-        accessRiskSummary: JSON.stringify([]),
+        AccessAnalysis: {
+          Summary: {
+            RiskSummary: JSON.stringify([]),
+          },
+        },
       });
 
       expect(hasRisksInResult(scanResult)).toBe(false);
@@ -589,14 +582,55 @@ describe('pr-comment.ts', () => {
       expect(hasRisksInResult(scanResult)).toBe(true);
     });
 
-    // it('should handle invalid accessRiskSummary JSON gracefully', () => {
-    //   const scanResult = JSON.stringify({
-    //     accessRiskSummary: 'invalid-json',
-    //   });
+    it('should return true when there are access permission changes (added permissions)', () => {
+      const scanResult = JSON.stringify({
+        AccessAnalysis: {
+          AccessPermissions: [
+            {
+              PrincipalID: 'arn:aws:iam::123456789012:role/test-role',
+              TargetResourceID: 'arn:aws:s3:::test-bucket',
+              Added: ['s3:GetObject'],
+            },
+          ],
+        },
+      });
 
-    //   // When accessRiskSummary can't be parsed as JSON, returns true if the string has content
-    //   expect(hasRisksInResult(scanResult)).toBe(true);
-    // });
+      expect(hasRisksInResult(scanResult)).toBe(true);
+    });
+
+    it('should return true when there are access permission changes (removed permissions)', () => {
+      const scanResult = JSON.stringify({
+        AccessAnalysis: {
+          AccessPermissions: [
+            {
+              PrincipalID: 'arn:aws:iam::123456789012:role/test-role',
+              TargetResourceID: 'arn:aws:s3:::test-bucket',
+              Removed: ['s3:DeleteObject'],
+            },
+          ],
+        },
+      });
+
+      expect(hasRisksInResult(scanResult)).toBe(true);
+    });
+
+    it('should return false when access permissions only have unchanged permissions', () => {
+      const scanResult = JSON.stringify({
+        AccessAnalysis: {
+          AccessPermissions: [
+            {
+              PrincipalID: 'arn:aws:iam::123456789012:role/test-role',
+              TargetResourceID: 'arn:aws:s3:::test-bucket',
+              Unchanged: ['s3:ListBucket'],
+              Added: [],
+              Removed: [],
+            },
+          ],
+        },
+      });
+
+      expect(hasRisksInResult(scanResult)).toBe(false);
+    });
 
     it('should check ReachabilityAnalysis.Summary format', () => {
       const scanResult = JSON.stringify({
@@ -634,7 +668,11 @@ describe('pr-comment.ts', () => {
             RiskSummary: riskSummary,
           },
         },
-        accessRiskSummary: accessRiskSummary,
+        AccessAnalysis: {
+          Summary: {
+            RiskSummary: accessRiskSummary,
+          },
+        },
       });
 
       expect(hasRisksInResult(scanResult)).toBe(true);

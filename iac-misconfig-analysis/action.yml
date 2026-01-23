@@ -16,7 +16,7 @@ inputs:
     required: false
   commit:
     description: 'Commit SHA to scan'
-    required: true
+    required: false
   plan-path:
     description: 'Path to the Terraform plan file'
     required: true
@@ -45,6 +45,10 @@ inputs:
       Example: "aws_s3_bucket,aws_lambda_function"
       If not specified, all resource types are included.
     required: false
+  include-resources-without-issues:
+    description: "If true, will get the resources present in terraform plan file with or without issues. Default is false."
+    required: false
+    default: "false"
 runs:
   using: 'node20'
   main: 'dist/main.js'

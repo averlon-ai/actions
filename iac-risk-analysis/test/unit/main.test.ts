@@ -39,6 +39,7 @@ const mockGetAnalyzeTerraformResult = mock(() =>
     ReachabilityAnalysis: {
       TextSummary: 'test-result',
     } as TerraformReachabilityAnalysis,
+    AccessAnalysis: undefined,
   })
 );
 
@@ -155,7 +156,10 @@ describe('main.ts', () => {
       expect(mockGetAnalyzeTerraformResult).toHaveBeenCalled();
 
       // Check that scan result is set as output
-      expect(setOutputSpy).toHaveBeenCalledWith('scan-result', '{"TextSummary":"test-result"}');
+      expect(setOutputSpy).toHaveBeenCalledWith(
+        'scan-result',
+        '{"ReachabilityAnalysis":{"TextSummary":"test-result"}}'
+      );
 
       // Check that some info logging happened
       expect(infoSpy.mock.calls.length).toBeGreaterThanOrEqual(1);
@@ -207,7 +211,10 @@ describe('main.ts', () => {
       expect(mockAuthenticate).toHaveBeenCalled();
 
       // Despite auth failure in getCallerInfo, the function should still complete
-      expect(setOutputSpy).toHaveBeenCalledWith('scan-result', '{"TextSummary":"test-result"}');
+      expect(setOutputSpy).toHaveBeenCalledWith(
+        'scan-result',
+        '{"ReachabilityAnalysis":{"TextSummary":"test-result"}}'
+      );
     });
 
     it('should handle getCallerInfo failure gracefully', async () => {
@@ -230,7 +237,10 @@ describe('main.ts', () => {
       expect(mockGetCallerInfo).toHaveBeenCalled();
 
       // Despite caller info failure, the function should still complete
-      expect(setOutputSpy).toHaveBeenCalledWith('scan-result', '{"TextSummary":"test-result"}');
+      expect(setOutputSpy).toHaveBeenCalledWith(
+        'scan-result',
+        '{"ReachabilityAnalysis":{"TextSummary":"test-result"}}'
+      );
     });
 
     it('should complete without errors', async () => {
@@ -404,7 +414,10 @@ describe('main.ts', () => {
       expect(stringErrorCalls.length).toBeGreaterThanOrEqual(1);
 
       // Despite string error in getCallerInfo, the function should still complete
-      expect(setOutputSpy).toHaveBeenCalledWith('scan-result', '{"TextSummary":"test-result"}');
+      expect(setOutputSpy).toHaveBeenCalledWith(
+        'scan-result',
+        '{"ReachabilityAnalysis":{"TextSummary":"test-result"}}'
+      );
     });
 
     it('should handle undefined errors in catch blocks', async () => {
@@ -424,7 +437,10 @@ describe('main.ts', () => {
       expect(undefinedErrorCalls.length).toBeGreaterThanOrEqual(1);
 
       // Despite undefined error in getCallerInfo, the function should still complete
-      expect(setOutputSpy).toHaveBeenCalledWith('scan-result', '{"TextSummary":"test-result"}');
+      expect(setOutputSpy).toHaveBeenCalledWith(
+        'scan-result',
+        '{"ReachabilityAnalysis":{"TextSummary":"test-result"}}'
+      );
     });
   });
 });
