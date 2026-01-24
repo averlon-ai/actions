@@ -138,6 +138,7 @@ export enum OpenSearchNamedQueryEnum {
   Any = 0,
   Asset = 1,
   Issue = 2,
+  Image = 15,
 }
 
 export enum IssueSeverityEnum {
