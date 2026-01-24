@@ -38,6 +38,8 @@ RUN npm install`,
     // Create test directory and files
     await fs.promises.mkdir(`${testDir}/cmd`, { recursive: true });
     await fs.promises.mkdir(`${testDir}/api`, { recursive: true });
+    // Ensure base testDir exists for files written directly to it
+    await fs.promises.mkdir(testDir, { recursive: true });
 
     for (const file of testFiles) {
       await fs.promises.writeFile(file.path, file.content);
@@ -503,22 +505,33 @@ valid/Dockerfile=myregistry/valid:latest`;
 
   // Tests for internal functions through public API
   describe('normalizeAndJoinContinuedLines (internal)', () => {
-    it('should handle line continuations through buildDockerfileRequests', () => {
-      // Create a Dockerfile with line continuations
-      const dockerfileWithContinuations = `FROM node:18 \\
-  AS builder \\
-  WORKDIR /app \\
-  COPY package*.json ./ \\
-  RUN npm install`;
+    it('should handle line continuations through buildDockerfileRequests', async () => {
+      // Create a Dockerfile with line continuations in LABEL instructions
+      // This tests that normalizeAndJoinContinuedLines properly joins continued lines
+      // so that parseDockerLabels can parse multi-line labels correctly
+      const dockerfileWithContinuations = `FROM node:18
+LABEL maintainer="John Doe" \\
+    version="2.0.0" \\
+    description="Application with line continuations"
+RUN echo "test"`;
 
       // Write the file and test through buildDockerfileRequests
       const testFile = `${testDir}/continued.Dockerfile`;
-      fs.writeFileSync(testFile, dockerfileWithContinuations);
+      await fs.promises.writeFile(testFile, dockerfileWithContinuations);
 
       const result = buildDockerfileRequests([testFile], {});
 
       expect(result).toHaveLength(1);
       expect(result[0].Path).toContain('continued.Dockerfile');
+
+      // Verify that labels from continued lines are properly parsed
+      // This proves that normalizeAndJoinContinuedLines worked correctly
+      expect(result[0].Metadata).toContainEqual({ Key: 'label:maintainer', Value: 'John Doe' });
+      expect(result[0].Metadata).toContainEqual({ Key: 'label:version', Value: '2.0.0' });
+      expect(result[0].Metadata).toContainEqual({
+        Key: 'label:description',
+        Value: 'Application with line continuations',
+      });
     });
   });
 
@@ -535,14 +548,14 @@ valid/Dockerfile=myregistry/valid:latest`;
       });
     });
 
-    it('should handle multi-line labels through buildDockerfileRequests', () => {
+    it('should handle multi-line labels through buildDockerfileRequests', async () => {
       const multiLineDockerfile = `FROM node:18
 LABEL maintainer="John Doe" \\
     version="1.0.0" \\
     description="My application"`;
 
       const testFile = `${testDir}/multiline.Dockerfile`;
-      fs.writeFileSync(testFile, multiLineDockerfile);
+      await fs.promises.writeFile(testFile, multiLineDockerfile);
 
       const result = buildDockerfileRequests([testFile], {});
 
@@ -554,13 +567,13 @@ LABEL maintainer="John Doe" \\
       });
     });
 
-    it('should handle quoted values through buildDockerfileRequests', () => {
+    it('should handle quoted values through buildDockerfileRequests', async () => {
       const quotedDockerfile = `FROM node:18
 LABEL description="My application with spaces"
 LABEL maintainer="John Doe"`;
 
       const testFile = `${testDir}/quoted.Dockerfile`;
-      fs.writeFileSync(testFile, quotedDockerfile);
+      await fs.promises.writeFile(testFile, quotedDockerfile);
 
       const result = buildDockerfileRequests([testFile], {});
 
@@ -571,13 +584,13 @@ LABEL maintainer="John Doe"`;
       expect(result[0].Metadata).toContainEqual({ Key: 'label:maintainer', Value: 'John Doe' });
     });
 
-    it('should handle unquoted values through buildDockerfileRequests', () => {
+    it('should handle unquoted values through buildDockerfileRequests', async () => {
       const unquotedDockerfile = `FROM node:18
 LABEL version=1.0.0
 LABEL maintainer=JohnDoe`;
 
       const testFile = `${testDir}/unquoted.Dockerfile`;
-      fs.writeFileSync(testFile, unquotedDockerfile);
+      await fs.promises.writeFile(testFile, unquotedDockerfile);
 
       const result = buildDockerfileRequests([testFile], {});
 
@@ -585,14 +598,14 @@ LABEL maintainer=JohnDoe`;
       expect(result[0].Metadata).toContainEqual({ Key: 'label:maintainer', Value: 'JohnDoe' });
     });
 
-    it('should handle complex label syntax through buildDockerfileRequests', () => {
+    it('should handle complex label syntax through buildDockerfileRequests', async () => {
       const complexDockerfile = `FROM node:18
 LABEL com.example.vendor="ACME Incorporated"
 LABEL com.example.label-with-value="foo"
 LABEL version="1.0"`;
 
       const testFile = `${testDir}/complex.Dockerfile`;
-      fs.writeFileSync(testFile, complexDockerfile);
+      await fs.promises.writeFile(testFile, complexDockerfile);
 
       const result = buildDockerfileRequests([testFile], {});
 
