@@ -230,15 +230,31 @@ export interface OpenSearchIssue {
   ID?: string;
   ResourceID?: string;
   Severity?: number;
+  /** Preferred: severity from OpenSearch field issue.SeverityV2.Severity */
+  SeverityV2?: { Severity?: number };
   Classification?: number;
   Title?: string;
   Summary?: string;
   Type?: number;
   Status?: number;
+  Artifact?: string;
+  Repository?: string;
+  ImageRepository?: string;
+  ImageID?: string;
+}
+
+export interface OpenSearchImage {
+  ID?: string;
+  Repository?: string;
+  IsPublic?: boolean;
+  Tag?: string;
+  Age?: string;
+  Digest?: string;
 }
 
 export interface OpenSearchResponse {
   Issues?: OpenSearchIssue[];
+  Images?: OpenSearchImage[];
   NextOffset?: number;
 }
 

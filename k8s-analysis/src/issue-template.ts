@@ -137,24 +137,29 @@ function buildImageIssuesSection(resources: ParsedResource[]): string {
 
   const imageIssueIds: string[] = [];
   const imageToResourcesMap = new Map<string, string[]>();
+  const imageToImageIDsMap = new Map<string, string[]>();
 
   for (const data of imageIssuesMap.values()) {
     if (data.issues.length === 0) {
       continue;
     }
 
-    // Collect issue IDs
+    const issueImageIds = data.issues.map(i => i.imageId).filter((id): id is string => Boolean(id));
+    const resourceList = data.resources.map(r => r.kind + '/' + r.namespace + '/' + r.name);
+
     for (const issue of data.issues) {
       if (issue.id) {
         imageIssueIds.push(issue.id);
       }
     }
 
-    // Map images to resources
-    const resourceList = data.resources.map(r => `${r.kind}/${r.namespace}/${r.name}`);
     for (const image of data.images) {
-      const existing = imageToResourcesMap.get(image) || [];
-      imageToResourcesMap.set(image, [...new Set([...existing, ...resourceList])]);
+      const existingResources = imageToResourcesMap.get(image) || [];
+      imageToResourcesMap.set(image, [...new Set([...existingResources, ...resourceList])]);
+      if (issueImageIds.length > 0) {
+        const existingIds = imageToImageIDsMap.get(image) || [];
+        imageToImageIDsMap.set(image, [...new Set([...existingIds, ...issueImageIds])]);
+      }
     }
   }
 
@@ -165,14 +170,19 @@ function buildImageIssuesSection(resources: ParsedResource[]): string {
   const lines: string[] = [
     '### 🐳 Container Image Issues',
     '',
-    `🔍 **Image Issue IDs:** ${imageIssueIds.join(', ')}`,
+    '🔍 **Image Issue IDs:** ' + imageIssueIds.join(', '),
     '',
     '**Images used:**',
   ];
 
+  const tick = '`';
   for (const image of Array.from(imageToResourcesMap.keys()).sort()) {
     const resourcesForImage = imageToResourcesMap.get(image) || [];
-    lines.push(`- \`${image}\` (used in: ${resourcesForImage.join(', ')})`);
+    const imageIDsForImage = imageToImageIDsMap.get(image) || [];
+    const usedIn = '(used in: ' + resourcesForImage.join(', ') + ')';
+    const imageIdsPart =
+      imageIDsForImage.length > 0 ? '(Image IDs: ' + imageIDsForImage.sort().join(', ') + ') ' : '';
+    lines.push(`- ${tick}${image}${tick} ${imageIdsPart}${usedIn}`);
   }
 
   return lines.join('\n') + '\n';

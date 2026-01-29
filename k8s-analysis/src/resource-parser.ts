@@ -108,6 +108,7 @@ export interface ResourceIssue {
   classification?: string[];
   status?: string;
   imageRepository?: string; // For image/CVE issues, indicates which image repository the issue belongs to
+  imageId?: string; // For image/CVE issues, the image asset ID from the backend
 }
 
 // ============================================================================
