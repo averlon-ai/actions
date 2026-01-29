@@ -183,6 +183,8 @@ export function buildConsolidatedIssuesJson(args: {
         severity: issue.severity ?? 'Unknown',
         title: issue.title,
         summary: issue.summary,
+        ...(issue.imageRepository != null && { imageRepository: issue.imageRepository }),
+        ...(issue.imageId != null && issue.imageId !== '' && { imageId: issue.imageId }),
       })),
     });
 
@@ -207,6 +209,8 @@ export function buildConsolidatedIssuesJson(args: {
           summary: issue.summary,
           type: issue.type,
           status: issue.status,
+          ...(issue.imageRepository != null && { imageRepository: issue.imageRepository }),
+          ...(issue.imageId != null && issue.imageId !== '' && { imageId: issue.imageId }),
           affectedResources: [
             {
               kind: resource.kind,

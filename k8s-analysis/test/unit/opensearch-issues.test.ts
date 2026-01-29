@@ -14,6 +14,13 @@ import {
   type ImageIssueGroup,
 } from '../../src/opensearch-issues';
 
+/** Canonical repo keys from image-utils (parse-docker-image-name + default registry) */
+const CANONICAL = {
+  nginx: 'docker.io/library/nginx',
+  redis: 'docker.io/library/redis',
+  ghcrRepo: 'ghcr.io/org/repo',
+} as const;
+
 // Mock @actions/core
 const mockCoreInfo = mock(() => {});
 const mockCoreWarning = mock(() => {});
@@ -102,8 +109,9 @@ describe('opensearch-issues', () => {
 
       // Function returns image repos even without issues (caller filters empty issues)
       expect(result.size).toBe(1);
-      const nginxGroup = result.get('nginx')!;
-      expect(nginxGroup.images).toContain('nginx:1.19');
+      const nginxGroup = result.get(CANONICAL.nginx)!;
+      expect(nginxGroup.imageRepository).toBe(CANONICAL.nginx);
+      expect(nginxGroup.images).toEqual(['nginx:1.19']); // One per repo (latest)
       expect(nginxGroup.issues.length).toBe(0); // No vulnerability issues
       expect(nginxGroup.resources.length).toBe(1);
     });
@@ -137,12 +145,12 @@ describe('opensearch-issues', () => {
       const result = extractImageIssuesForDisplay(resources);
 
       expect(result.size).toBe(2);
-      expect(result.has('nginx')).toBe(true);
-      expect(result.has('redis')).toBe(true);
+      expect(result.has(CANONICAL.nginx)).toBe(true);
+      expect(result.has(CANONICAL.redis)).toBe(true);
 
-      const nginxGroup = result.get('nginx')!;
-      expect(nginxGroup.imageRepository).toBe('nginx');
-      expect(nginxGroup.images).toContain('nginx:1.19');
+      const nginxGroup = result.get(CANONICAL.nginx)!;
+      expect(nginxGroup.imageRepository).toBe(CANONICAL.nginx);
+      expect(nginxGroup.images).toEqual(['nginx:1.19']);
       expect(nginxGroup.issues).toHaveLength(1);
       expect(nginxGroup.issues[0].id).toBe('img-issue-1');
       expect(nginxGroup.resources).toHaveLength(1);
@@ -153,7 +161,7 @@ describe('opensearch-issues', () => {
       });
     });
 
-    it('should group multiple images by repository', () => {
+    it('should group multiple images by repository and use latest tag', () => {
       const resources: ParsedResource[] = [
         createResource(
           'Deployment',
@@ -174,10 +182,10 @@ describe('opensearch-issues', () => {
       const result = extractImageIssuesForDisplay(resources);
 
       expect(result.size).toBe(1);
-      const nginxGroup = result.get('nginx')!;
-      expect(nginxGroup.images).toContain('nginx:1.19');
-      expect(nginxGroup.images).toContain('nginx:1.20');
-      expect(nginxGroup.images.length).toBe(2);
+      const nginxGroup = result.get(CANONICAL.nginx)!;
+      expect(nginxGroup.imageRepository).toBe(CANONICAL.nginx);
+      // One image per repo: latest tag (1.20 > 1.19)
+      expect(nginxGroup.images).toEqual(['nginx:1.20']);
     });
 
     it('should handle images with tags and digests', () => {
@@ -186,7 +194,10 @@ describe('opensearch-issues', () => {
           'Pod',
           'my-pod',
           'default',
-          ['ghcr.io/org/repo:latest', 'nginx@sha256:abc123'],
+          [
+            'ghcr.io/org/repo:latest',
+            'nginx@sha256:aaaaf56b44807c64d294e6c8059b479f35350b454492398225034174808d1726',
+          ],
           [
             {
               id: 'img-issue-1',
@@ -207,8 +218,8 @@ describe('opensearch-issues', () => {
       const result = extractImageIssuesForDisplay(resources);
 
       expect(result.size).toBe(2);
-      expect(result.has('ghcr.io/org/repo')).toBe(true);
-      expect(result.has('nginx')).toBe(true);
+      expect(result.has(CANONICAL.ghcrRepo)).toBe(true);
+      expect(result.has(CANONICAL.nginx)).toBe(true);
     });
 
     it('should aggregate issues from multiple resources using same image', () => {
@@ -252,7 +263,7 @@ describe('opensearch-issues', () => {
       const result = extractImageIssuesForDisplay(resources);
 
       expect(result.size).toBe(1);
-      const nginxGroup = result.get('nginx')!;
+      const nginxGroup = result.get(CANONICAL.nginx)!;
       // Should have 2 unique issues (img-issue-1 deduplicated, img-issue-2 added)
       expect(nginxGroup.issues.length).toBe(2);
       expect(nginxGroup.issues.map(i => i.id).sort()).toEqual(['img-issue-1', 'img-issue-2']);
@@ -287,7 +298,7 @@ describe('opensearch-issues', () => {
       const result = extractImageIssuesForDisplay(resources);
 
       expect(result.size).toBe(1);
-      const nginxGroup = result.get('nginx')!;
+      const nginxGroup = result.get(CANONICAL.nginx)!;
       expect(nginxGroup.issues.length).toBe(1);
       expect(nginxGroup.issues[0].id).toBe('vuln-1');
     });
@@ -314,18 +325,19 @@ describe('opensearch-issues', () => {
       const result = extractImageIssuesForDisplay(resources);
 
       expect(result.size).toBe(kinds.length);
-      // Verify each kind is processed correctly
+      // Verify each kind is processed correctly (canonical repo = docker.io/library/image-N)
       for (let i = 0; i < kinds.length; i++) {
-        const group = result.get(`image-${i}`);
+        const canonicalRepo = `docker.io/library/image-${i}`;
+        const group = result.get(canonicalRepo);
         expect(group).toBeDefined();
-        expect(group!.imageRepository).toBe(`image-${i}`);
+        expect(group!.imageRepository).toBe(canonicalRepo);
         expect(group!.issues.length).toBe(1);
         expect(group!.issues[0].id).toBe(`issue-${i}`);
         expect(group!.resources[0].kind).toBe(kinds[i]);
       }
     });
 
-    it('should sort images alphabetically within each repository group', () => {
+    it('should use latest tag per repository when multiple tags exist', () => {
       const resources: ParsedResource[] = [
         createResource(
           'Deployment',
@@ -345,9 +357,9 @@ describe('opensearch-issues', () => {
 
       const result = extractImageIssuesForDisplay(resources);
 
-      const nginxGroup = result.get('nginx')!;
-      // Images should be sorted alphabetically
-      expect(nginxGroup.images).toEqual(['nginx:1.18', 'nginx:1.19', 'nginx:1.20', 'nginx:latest']);
+      const nginxGroup = result.get(CANONICAL.nginx)!;
+      // One image per repo: latest tag ("latest" is greatest in compareTags)
+      expect(nginxGroup.images).toEqual(['nginx:latest']);
     });
   });
 
@@ -396,7 +408,7 @@ describe('opensearch-issues', () => {
       });
 
       expect(mockCoreWarning).toHaveBeenCalledWith(
-        '⚠️  No resource ARNs available for issue lookup'
+        '⚠️  No resource ARNs available for issue lookup (region/cluster may be missing)'
       );
       expect(client.orgOpenSearchQuery).not.toHaveBeenCalled();
     });
@@ -409,7 +421,7 @@ describe('opensearch-issues', () => {
               ID: 'issue-1',
               ResourceID:
                 'arn:aws:eks:us-west-2:123456789012:cluster/test-cluster/Deployment/default/app',
-              Severity: IssueSeverityEnum.High,
+              SeverityV2: { Severity: IssueSeverityEnum.High },
               Title: 'Test Issue',
               Summary: 'Test Summary',
               Type: IssueTypeEnum.Misconfiguration,
@@ -435,7 +447,6 @@ describe('opensearch-issues', () => {
       expect(mockQuery).toHaveBeenCalled();
       const callArgs = mockQuery.mock.calls[0][0];
       expect(callArgs.QueryID).toBe(OpenSearchNamedQueryEnum.Issue);
-      expect(callArgs.CloudIDs).toEqual(['123']);
       expect(resources[0].issues).toBeDefined();
       expect(resources[0].issues!.length).toBe(1);
       expect(resources[0].issues![0].id).toBe('issue-1');
@@ -459,11 +470,13 @@ describe('opensearch-issues', () => {
       expect(mockQuery).toHaveBeenCalled();
       const filterQuery = JSON.parse(mockQuery.mock.calls[0][0].FilterQuery);
       const severityFilter = filterQuery.bool.filter.find(
-        (f: any) => f.terms && f.terms['issue.Severity']
+        (f: any) => f.terms && f.terms['issue.SeverityV2.Severity']
       );
       expect(severityFilter).toBeDefined();
-      expect(severityFilter.terms['issue.Severity']).toContain(IssueSeverityEnum.High.toString());
-      expect(severityFilter.terms['issue.Severity']).toContain(
+      expect(severityFilter.terms['issue.SeverityV2.Severity']).toContain(
+        IssueSeverityEnum.High.toString()
+      );
+      expect(severityFilter.terms['issue.SeverityV2.Severity']).toContain(
         IssueSeverityEnum.Critical.toString()
       );
     });
@@ -518,7 +531,7 @@ describe('opensearch-issues', () => {
       const mockQuery = mock((params: any) => {
         if (params.QueryID === OpenSearchNamedQueryEnum.Image) {
           return Promise.resolve({
-            Assets: [{ RepositoryName: 'nginx' }],
+            Images: [{ Repository: 'nginx' }],
           });
         }
         return Promise.resolve({ Issues: [] });
@@ -545,12 +558,291 @@ describe('opensearch-issues', () => {
       expect(imageQueryCall).toBeDefined();
     });
 
+    it('should skip image issues when getPublicImages returns empty', async () => {
+      const queryCalls: any[] = [];
+      const mockQuery = mock((params: any) => {
+        queryCalls.push(params);
+        if (params.QueryID === OpenSearchNamedQueryEnum.Image) {
+          return Promise.resolve({ Images: [] });
+        }
+        return Promise.resolve({ Issues: [] });
+      });
+      const client = { orgOpenSearchQuery: mockQuery } as unknown as ApiClient;
+      const resources: ParsedResource[] = [createResourceWithArn('Deployment', 'app', 'default')];
+      resources[0].metadata = { images: ['nginx:1.19'] };
+
+      await annotateIssuesFromOpenSearch({
+        client,
+        cloudId: '123',
+        resources,
+        severityFilters: [],
+      });
+
+      const imageCalls = queryCalls.filter(c => c.QueryID === OpenSearchNamedQueryEnum.Image);
+      const issueCalls = queryCalls.filter(c => c.QueryID === OpenSearchNamedQueryEnum.Issue);
+      expect(imageCalls.length).toBe(1);
+      expect(mockCoreInfo).toHaveBeenCalledWith(
+        expect.stringContaining('No public images found in system')
+      );
+      expect(issueCalls.length).toBe(1);
+    });
+
+    it('should skip image section when no container resources', async () => {
+      const queryCalls: any[] = [];
+      const mockQuery = mock((params: any) => {
+        queryCalls.push(params);
+        return Promise.resolve({ Issues: [] });
+      });
+      const client = { orgOpenSearchQuery: mockQuery } as unknown as ApiClient;
+      const resources: ParsedResource[] = [
+        createResourceWithArn('Service', 'api', 'default'),
+        createResourceWithArn('ConfigMap', 'config', 'default'),
+      ];
+
+      await annotateIssuesFromOpenSearch({
+        client,
+        cloudId: '123',
+        resources,
+        severityFilters: [],
+      });
+
+      const imageCalls = queryCalls.filter(c => c.QueryID === OpenSearchNamedQueryEnum.Image);
+      expect(imageCalls.length).toBe(0);
+    });
+
+    it('should skip image section when container resources have no image repos', async () => {
+      const queryCalls: any[] = [];
+      const mockQuery = mock((params: any) => {
+        queryCalls.push(params);
+        return Promise.resolve({ Issues: [] });
+      });
+      const client = { orgOpenSearchQuery: mockQuery } as unknown as ApiClient;
+      const resources: ParsedResource[] = [createResourceWithArn('Deployment', 'app', 'default')];
+      resources[0].metadata = {};
+
+      await annotateIssuesFromOpenSearch({
+        client,
+        cloudId: '123',
+        resources,
+        severityFilters: [],
+      });
+
+      const imageCalls = queryCalls.filter(c => c.QueryID === OpenSearchNamedQueryEnum.Image);
+      expect(imageCalls.length).toBe(0);
+    });
+
+    it('should handle getPublicImages failure gracefully', async () => {
+      const mockQuery = mock((params: any) => {
+        if (params.QueryID === OpenSearchNamedQueryEnum.Image) {
+          return Promise.reject(new Error('OpenSearch unavailable'));
+        }
+        return Promise.resolve({ Issues: [] });
+      });
+      const client = { orgOpenSearchQuery: mockQuery } as unknown as ApiClient;
+      const resources: ParsedResource[] = [createResourceWithArn('Deployment', 'app', 'default')];
+      resources[0].metadata = { images: ['nginx:1.19'] };
+
+      await annotateIssuesFromOpenSearch({
+        client,
+        cloudId: '123',
+        resources,
+        severityFilters: [],
+      });
+
+      expect(mockCoreWarning).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to query public images')
+      );
+    });
+
+    it('should log "no indices provided" hints when OpenSearch returns that error', async () => {
+      const mockQuery = mock((params: any) => Promise.reject(new Error('no indices provided')));
+      const client = { orgOpenSearchQuery: mockQuery } as unknown as ApiClient;
+      const resources: ParsedResource[] = [createResourceWithArn('Deployment', 'app')];
+
+      await annotateIssuesFromOpenSearch({
+        client,
+        cloudId: '123',
+        resources,
+        severityFilters: [],
+      });
+
+      expect(mockCoreWarning).toHaveBeenCalledWith(
+        expect.stringContaining('CloudID "123" may not exist or has no scan data')
+      );
+      expect(mockCoreWarning).toHaveBeenCalledWith(
+        expect.stringContaining('CloudID does not exist')
+      );
+    });
+
+    it('should attach only issues whose ResourceID matches a resource ARN', async () => {
+      const deploymentArn =
+        'arn:aws:eks:us-west-2:123456789012:cluster/test-cluster/Deployment/default/app';
+      const mockQuery = mock((params: any) => {
+        if (params.QueryID === OpenSearchNamedQueryEnum.Image) {
+          return Promise.resolve({ Images: [{ Repository: 'nginx' }] });
+        }
+        if (
+          params.QueryID === OpenSearchNamedQueryEnum.Issue &&
+          params.IncludeFields?.includes('issue.ImageRepository')
+        ) {
+          return Promise.resolve({
+            Issues: [
+              {
+                ID: 'vuln-1',
+                ResourceID: deploymentArn,
+                ImageRepository: 'nginx',
+                SeverityV2: { Severity: IssueSeverityEnum.High },
+                Title: 'CVE-1',
+                Type: IssueTypeEnum.Vulnerability,
+                Status: 2,
+              },
+              {
+                ID: 'vuln-2',
+                ResourceID: 'arn:unknown/other/resource',
+                ImageRepository: 'nginx',
+                SeverityV2: { Severity: IssueSeverityEnum.High },
+                Title: 'CVE-2',
+                Type: IssueTypeEnum.Vulnerability,
+                Status: 2,
+              },
+            ],
+          });
+        }
+        return Promise.resolve({ Issues: [] });
+      });
+      const client = { orgOpenSearchQuery: mockQuery } as unknown as ApiClient;
+      const resources: ParsedResource[] = [createResourceWithArn('Deployment', 'app', 'default')];
+      resources[0].arn = deploymentArn;
+      resources[0].metadata = { images: ['nginx:1.19'] };
+
+      await annotateIssuesFromOpenSearch({
+        client,
+        cloudId: '123',
+        resources,
+        severityFilters: [],
+      });
+
+      expect(resources[0].issues).toBeDefined();
+      const vulnIssues = resources[0].issues!.filter(i => i.type === 'Vulnerability');
+      expect(vulnIssues.length).toBe(1);
+      expect(vulnIssues[0].id).toBe('vuln-1');
+    });
+
+    it('should map issue with missing Severity to severity Unknown', async () => {
+      const deploymentArn =
+        'arn:aws:eks:us-west-2:123456789012:cluster/test-cluster/Deployment/default/app';
+      const mockQuery = mock(() =>
+        Promise.resolve({
+          Issues: [
+            {
+              ID: 'issue-no-severity',
+              ResourceID: deploymentArn,
+              Title: 'Test',
+              Summary: 'Summary',
+              Type: IssueTypeEnum.Misconfiguration,
+              Status: 2,
+            },
+          ],
+        })
+      );
+      const client = { orgOpenSearchQuery: mockQuery } as unknown as ApiClient;
+      const resources: ParsedResource[] = [createResourceWithArn('Deployment', 'app')];
+      resources[0].arn = deploymentArn;
+
+      await annotateIssuesFromOpenSearch({
+        client,
+        cloudId: '123',
+        resources,
+        severityFilters: [],
+      });
+
+      expect(resources[0].issues?.length).toBe(1);
+      expect(resources[0].issues![0].severity).toBe('Unknown');
+    });
+
+    it('should map issue Severity enum to string (Invalid, Unknown, Low, Medium, High, Critical)', async () => {
+      const deploymentArn =
+        'arn:aws:eks:us-west-2:123456789012:cluster/test-cluster/Deployment/default/app';
+      const mockQuery = mock(() =>
+        Promise.resolve({
+          Issues: [
+            {
+              ID: 'i1',
+              ResourceID: deploymentArn,
+              SeverityV2: { Severity: IssueSeverityEnum.Invalid },
+              Title: 'A',
+              Type: IssueTypeEnum.Misconfiguration,
+              Status: 2,
+            },
+            {
+              ID: 'i2',
+              ResourceID: deploymentArn,
+              SeverityV2: { Severity: IssueSeverityEnum.Unknown },
+              Title: 'B',
+              Type: IssueTypeEnum.Misconfiguration,
+              Status: 2,
+            },
+            {
+              ID: 'i3',
+              ResourceID: deploymentArn,
+              SeverityV2: { Severity: IssueSeverityEnum.Low },
+              Title: 'C',
+              Type: IssueTypeEnum.Misconfiguration,
+              Status: 2,
+            },
+            {
+              ID: 'i4',
+              ResourceID: deploymentArn,
+              SeverityV2: { Severity: IssueSeverityEnum.Medium },
+              Title: 'D',
+              Type: IssueTypeEnum.Misconfiguration,
+              Status: 2,
+            },
+            {
+              ID: 'i5',
+              ResourceID: deploymentArn,
+              SeverityV2: { Severity: IssueSeverityEnum.High },
+              Title: 'E',
+              Type: IssueTypeEnum.Misconfiguration,
+              Status: 2,
+            },
+            {
+              ID: 'i6',
+              ResourceID: deploymentArn,
+              SeverityV2: { Severity: IssueSeverityEnum.Critical },
+              Title: 'F',
+              Type: IssueTypeEnum.Misconfiguration,
+              Status: 2,
+            },
+          ],
+        })
+      );
+      const client = { orgOpenSearchQuery: mockQuery } as unknown as ApiClient;
+      const resources: ParsedResource[] = [createResourceWithArn('Deployment', 'app')];
+      resources[0].arn = deploymentArn;
+
+      await annotateIssuesFromOpenSearch({
+        client,
+        cloudId: '123',
+        resources,
+        severityFilters: [],
+      });
+
+      const severities = (resources[0].issues ?? []).map(i => i.severity);
+      expect(severities).toContain('Invalid');
+      expect(severities).toContain('Unknown');
+      expect(severities).toContain('Low');
+      expect(severities).toContain('Medium');
+      expect(severities).toContain('High');
+      expect(severities).toContain('Critical');
+    });
+
     it('should respect MAX_ISSUES_PER_RESOURCE limit', async () => {
       const issues: OpenSearchIssue[] = Array.from({ length: 60 }, (_, i) => ({
         ID: `issue-${i}`,
         ResourceID:
           'arn:aws:eks:us-west-2:123456789012:cluster/test-cluster/Deployment/default/app',
-        Severity: IssueSeverityEnum.High,
+        SeverityV2: { Severity: IssueSeverityEnum.High },
         Title: `Issue ${i}`,
         Summary: `Summary ${i}`,
         Type: IssueTypeEnum.Misconfiguration,
@@ -593,7 +885,7 @@ describe('opensearch-issues', () => {
       });
 
       expect(mockCoreInfo).toHaveBeenCalledWith(
-        expect.stringContaining('Type of params.resources')
+        expect.stringContaining('Annotating issues from OpenSearch')
       );
     });
 
@@ -651,14 +943,10 @@ describe('opensearch-issues', () => {
       const mockQuery = mock((params: any) => {
         queryCalls.push(params);
 
-        // Query 1: Public images query (Image query)
+        // Query 1: Public images query (Image query) — response.Images with Repository
         if (params.QueryID === OpenSearchNamedQueryEnum.Image) {
           return Promise.resolve({
-            Assets: [
-              { RepositoryName: 'nginx' },
-              { RepositoryName: 'redis' },
-              // postgres is not public, so it won't have image issues
-            ],
+            Images: [{ Repository: 'nginx' }, { Repository: 'redis' }],
           });
         }
 
@@ -673,7 +961,7 @@ describe('opensearch-issues', () => {
               {
                 ID: 'misconfig-deploy-1',
                 ResourceID: deploymentArn,
-                Severity: IssueSeverityEnum.High,
+                SeverityV2: { Severity: IssueSeverityEnum.High },
                 Title: 'Deployment Security Issue',
                 Summary: 'Missing security context',
                 Type: IssueTypeEnum.Misconfiguration,
@@ -683,7 +971,7 @@ describe('opensearch-issues', () => {
               {
                 ID: 'misconfig-deploy-2',
                 ResourceID: deploymentArn,
-                Severity: IssueSeverityEnum.Critical,
+                SeverityV2: { Severity: IssueSeverityEnum.Critical },
                 Title: 'Critical Deployment Issue',
                 Summary: 'Privileged container',
                 Type: IssueTypeEnum.Misconfiguration,
@@ -704,7 +992,7 @@ describe('opensearch-issues', () => {
           // Check if severity filter is applied - if so, Medium issues won't be returned
           const filterQuery = JSON.parse(params.FilterQuery);
           const hasSeverityFilter = filterQuery.bool.filter.some(
-            (f: any) => f.terms && f.terms['issue.Severity']
+            (f: any) => f.terms && f.terms['issue.SeverityV2.Severity']
           );
           if (hasSeverityFilter) {
             // Severity filter is applied, so Medium issues are filtered out
@@ -716,7 +1004,7 @@ describe('opensearch-issues', () => {
               {
                 ID: 'misconfig-stateful-1',
                 ResourceID: statefulSetArn,
-                Severity: IssueSeverityEnum.Medium,
+                SeverityV2: { Severity: IssueSeverityEnum.Medium },
                 Title: 'StatefulSet Issue',
                 Summary: 'Volume mount issue',
                 Type: IssueTypeEnum.Misconfiguration,
@@ -737,7 +1025,7 @@ describe('opensearch-issues', () => {
           // Check if severity filter is applied - if so, Low issues won't be returned
           const filterQuery = JSON.parse(params.FilterQuery);
           const hasSeverityFilter = filterQuery.bool.filter.some(
-            (f: any) => f.terms && f.terms['issue.Severity']
+            (f: any) => f.terms && f.terms['issue.SeverityV2.Severity']
           );
           if (hasSeverityFilter) {
             // Severity filter is applied, so Low issues are filtered out
@@ -749,7 +1037,7 @@ describe('opensearch-issues', () => {
               {
                 ID: 'misconfig-svc-1',
                 ResourceID: serviceArn,
-                Severity: IssueSeverityEnum.Low,
+                SeverityV2: { Severity: IssueSeverityEnum.Low },
                 Title: 'Service Issue',
                 Summary: 'Service configuration issue',
                 Type: IssueTypeEnum.Misconfiguration,
@@ -773,11 +1061,12 @@ describe('opensearch-issues', () => {
 
           const issues: any[] = [];
 
-          if (imageRepos.includes('nginx')) {
+          if (imageRepos.includes(CANONICAL.nginx)) {
             issues.push({
               ID: 'vuln-nginx-1',
+              ResourceID: deploymentArn,
               ImageRepository: 'nginx',
-              Severity: IssueSeverityEnum.Critical,
+              SeverityV2: { Severity: IssueSeverityEnum.Critical },
               Title: 'CVE-2023-1234 in nginx',
               Summary: 'Critical vulnerability in nginx image',
               Type: IssueTypeEnum.Vulnerability,
@@ -786,8 +1075,9 @@ describe('opensearch-issues', () => {
             });
             issues.push({
               ID: 'vuln-nginx-2',
+              ResourceID: deploymentArn,
               ImageRepository: 'nginx',
-              Severity: IssueSeverityEnum.High,
+              SeverityV2: { Severity: IssueSeverityEnum.High },
               Title: 'CVE-2023-5678 in nginx',
               Summary: 'High severity vulnerability',
               Type: IssueTypeEnum.Vulnerability,
@@ -796,11 +1086,12 @@ describe('opensearch-issues', () => {
             });
           }
 
-          if (imageRepos.includes('redis')) {
+          if (imageRepos.includes(CANONICAL.redis)) {
             issues.push({
               ID: 'vuln-redis-1',
+              ResourceID: deploymentArn,
               ImageRepository: 'redis',
-              Severity: IssueSeverityEnum.High,
+              SeverityV2: { Severity: IssueSeverityEnum.High },
               Title: 'CVE-2023-9999 in redis',
               Summary: 'High severity vulnerability in redis',
               Type: IssueTypeEnum.Vulnerability,
@@ -836,8 +1127,6 @@ describe('opensearch-issues', () => {
         call => call.QueryID === OpenSearchNamedQueryEnum.Image
       );
       expect(imageQueryCall).toBeDefined();
-      // Image queries now include CloudIDs
-      expect(imageQueryCall.CloudIDs).toEqual(['test-cloud-123']);
 
       // Verify: Resource misconfiguration queries were made for each resource type
       const deploymentQuery = queryCalls.find(
@@ -908,26 +1197,26 @@ describe('opensearch-issues', () => {
       // Verify: Severity filtering is applied in queries
       const deploymentFilterQuery = JSON.parse(deploymentQuery.FilterQuery);
       const deploymentSeverityFilter = deploymentFilterQuery.bool.filter.find(
-        (f: any) => f.terms && f.terms['issue.Severity']
+        (f: any) => f.terms && f.terms['issue.SeverityV2.Severity']
       );
       expect(deploymentSeverityFilter).toBeDefined();
-      expect(deploymentSeverityFilter.terms['issue.Severity']).toContain(
+      expect(deploymentSeverityFilter.terms['issue.SeverityV2.Severity']).toContain(
         IssueSeverityEnum.Critical.toString()
       );
-      expect(deploymentSeverityFilter.terms['issue.Severity']).toContain(
+      expect(deploymentSeverityFilter.terms['issue.SeverityV2.Severity']).toContain(
         IssueSeverityEnum.High.toString()
       );
 
       // Verify: Image vulnerability query also has severity filter
       const imageVulnFilterQuery = JSON.parse(imageVulnQuery.FilterQuery);
       const imageVulnSeverityFilter = imageVulnFilterQuery.bool.filter.find(
-        (f: any) => f.terms && f.terms['issue.Severity']
+        (f: any) => f.terms && f.terms['issue.SeverityV2.Severity']
       );
       expect(imageVulnSeverityFilter).toBeDefined();
-      expect(imageVulnSeverityFilter.terms['issue.Severity']).toContain(
+      expect(imageVulnSeverityFilter.terms['issue.SeverityV2.Severity']).toContain(
         IssueSeverityEnum.Critical.toString()
       );
-      expect(imageVulnSeverityFilter.terms['issue.Severity']).toContain(
+      expect(imageVulnSeverityFilter.terms['issue.SeverityV2.Severity']).toContain(
         IssueSeverityEnum.High.toString()
       );
 

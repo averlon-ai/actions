@@ -17,6 +17,7 @@ import {
   logDeploymentMetadata,
 } from './deployment-metadata';
 import { GithubIssuesService } from './github-issues';
+import { generateIssueTitle, generateIssueBody } from './issue-template';
 import {
   buildAnalysisResult,
   buildConsolidatedIssuesJson,
@@ -373,6 +374,46 @@ async function main(): Promise<void> {
     });
   } else {
     core.info('\nSkipping issue creation (SKIP_ISSUE_CREATION is set)');
+    // Preview how the GitHub issue would look
+    const issueIds = new Set<string>();
+    let resourcesWithIssues = 0;
+    for (const resource of resources) {
+      if (resource.issues && resource.issues.length > 0) {
+        resourcesWithIssues++;
+        for (const issue of resource.issues) {
+          if (issue.id) issueIds.add(issue.id);
+        }
+      }
+    }
+    const runId = process.env['GITHUB_RUN_ID'];
+    const serverUrl = (process.env['GITHUB_SERVER_URL'] || 'https://github.com').replace(
+      /\/+$/,
+      ''
+    );
+    const workflowRunUrl =
+      runId && inputs.githubOwner && inputs.githubRepo
+        ? `${serverUrl}/${inputs.githubOwner}/${inputs.githubRepo}/actions/runs/${runId}`
+        : undefined;
+    const artifactsUrl = workflowRunUrl ? `${workflowRunUrl}#artifacts` : undefined;
+    const title = generateIssueTitle(chartName);
+    const body = generateIssueBody({
+      chartName,
+      releaseName,
+      namespace,
+      issueIds: Array.from(issueIds),
+      totalResources: resources.length,
+      resourcesWithIssues,
+      resources,
+      workflowRunUrl,
+      artifactsUrl,
+    });
+    core.info('\n════════════════════════════════════════════════════════════════');
+    core.info('📋 GitHub Issue Preview (would be created if SKIP_ISSUE_CREATION were unset)');
+    core.info('════════════════════════════════════════════════════════════════\n');
+    core.info(`Title:\n${title}\n`);
+    core.info('Body:\n');
+    core.info(body);
+    core.info('\n════════════════════════════════════════════════════════════════');
   }
 
   // Step 4: Create action summary
