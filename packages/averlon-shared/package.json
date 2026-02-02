@@ -12,10 +12,10 @@
   },
   "devDependencies": {
     "@types/bun": "latest",
-    "@actions/core": "^2.0.1"
+    "@actions/core": "^3.0.0"
   },
   "peerDependencies": {
-    "@actions/core": "^2.0.1",
+    "@actions/core": "^3.0.0",
     "typescript": "^5.0.0"
   }
 }
