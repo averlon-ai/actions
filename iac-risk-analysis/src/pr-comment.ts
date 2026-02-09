@@ -1,208 +1,87 @@
 import * as core from '@actions/core';
 import * as github from '@actions/github';
-import type { AnalyzeTerraformResult, RiskAssessment } from '@averlon/shared';
+import type { AnalyzeTerraformResult, AccessRiskAssessment, RiskAssessment } from '@averlon/shared';
+
+/** API may return targetResources (array) or targetResource (string) */
+type AccessRiskItem = AccessRiskAssessment & { targetResources?: string[] };
 
 export type CommentMode = 'always' | 'update' | 'on-security-risks';
 
 /**
- * HTML comment marker used to identify Averlon scan comments for updates
- * This allows us to find and update existing comments instead of creating duplicates
+ * HTML comment markers used to identify Averlon scan comments for updates.
+ * Separate markers for reachability vs access so we can post/update two comments.
  */
-const COMMENT_MARKER = '<!-- averlon-terraform-scan-comment -->';
+const COMMENT_MARKER_REACHABILITY = '<!-- averlon-terraform-reachability -->';
+const COMMENT_MARKER_ACCESS = '<!-- averlon-terraform-access -->';
+
+/** GitHub API limit for issue/PR comment body (characters). */
+export const GITHUB_COMMENT_BODY_MAX_LENGTH = 65_536;
+
+const TRUNCATION_FOOTER_NO_LINK = '\n\n---\n_Full report available in workflow artifacts._';
+
+function buildTruncationFooter(workflowRunUrl?: string): string {
+  if (workflowRunUrl?.trim()) {
+    return `\n\n---\n**[Show detailed summary (logs & artifacts)](${workflowRunUrl.trim()})**`;
+  }
+  return TRUNCATION_FOOTER_NO_LINK;
+}
 
 /**
- * Format the scan result into a readable PR comment
- *
- * This function parses the JSON scan results and formats them into a structured markdown
- * comment with sections for summary, internet exposures, risk assessments, and access risks.
- *
- * @param scanResult - JSON string containing the scan results from the API
- * @param commitSha - The commit SHA for which the scan was performed (for tracking)
- * @returns Formatted markdown string ready to be posted as a PR comment
+ * Truncate comment body to fit GitHub's limit and append a footer.
+ * Cuts at the last newline before the limit to avoid breaking mid-line.
+ * When workflowRunUrl is provided, footer includes a link to the run (logs & artifacts).
  */
-export function formatScanResult(scanResult: string, commitSha: string): string {
-  let parsedResult: AnalyzeTerraformResult;
-  let resultSummary = '';
-  let hasRisks = false; // Track whether any risks were found
+export function enforceCommentBodyLimit(
+  body: string,
+  maxLength: number = GITHUB_COMMENT_BODY_MAX_LENGTH,
+  workflowRunUrl?: string
+): string {
+  if (body.length <= maxLength) return body;
+  const footer = buildTruncationFooter(workflowRunUrl);
+  const maxContentLength = maxLength - footer.length;
+  const slice = body.slice(0, maxContentLength);
+  const lastNewline = slice.lastIndexOf('\n');
+  const cutIndex = lastNewline >= 0 ? lastNewline + 1 : maxContentLength;
+  return body.slice(0, cutIndex).trimEnd() + footer;
+}
 
-  try {
-    core.debug(`Parsing scan result (length: ${scanResult.length} chars)`);
-    parsedResult = JSON.parse(scanResult);
+/**
+ * Format impactAssessment text: split on " N) " at start or after a period, render as bold label + body.
+ * Example: "1) Attack Vector: ... 2) Exploitation Path: ..." → markdown list with **Label**: body.
+ * If the text does not contain the numbered pattern, return it as-is.
+ * Splits only on "1) " at start or " . N) " so we don't break "(1 of 1)" or "of 1)" in sentences.
+ */
+function formatImpactAssessment(text: string): string {
+  if (!text?.trim()) return '';
+  // Only apply when we see "1) " at start or " . 2) " etc. (number at start or after period)
+  if (!/^\d+\)\s+/.test(text) && !/\.\s+\d+\)\s+/.test(text)) return text;
+  // Split on "N) " at start or after ". " so "(1 of 1)" and "of 1)" are not split.
+  // (?<=^) anchors the match at the start of the string; (?<=\.) anchors it immediately after a period.
+  const listPattern = /(?<=^)\d+\)\s+|(?<=\.)\s+\d+\)\s+/;
+  const segments = text.split(listPattern).filter(s => s.trim().length > 0);
+  return segments
+    .map(seg => {
+      const s = seg.trim();
+      const colonIndex = s.indexOf(': ');
+      if (colonIndex === -1) return `- ${s}`;
+      const label = s.slice(0, colonIndex).trim();
+      const body = s.slice(colonIndex + 2).trim();
+      return `- **${label}**: ${body}`;
+    })
+    .join('\n\n');
+}
 
-    // Handle Reachability section - use TerraformReachabilityAnalysis.Summary
-    // This is accessed via ReachabilityResult.Summary (TerraformReachabilityAnalysisSummary)
-    const summaryData = parsedResult.ReachabilityAnalysis?.Summary;
-
-    if (summaryData) {
-      core.debug('Found summary data in scan results');
-
-      // === Text Summary Section ===
-      // High-level overview of the scan findings
-      if (summaryData.TextSummary) {
-        core.debug('Adding text summary to comment');
-        resultSummary += `### 📝 Summary\n\n${summaryData.TextSummary}\n\n`;
-      }
-
-      // === New Internet Exposures Section ===
-      // Highlights resources that will become publicly accessible after this change
-      if (summaryData.NewInternetExposures && summaryData.NewInternetExposures.length > 0) {
-        hasRisks = true; // Any internet exposure is considered a risk
-        core.info(`Found ${summaryData.NewInternetExposures.length} new internet exposure(s)`);
-        resultSummary += `### 🌐 New Internet Exposures\n\n`;
-        resultSummary += `The following resources will be exposed to the internet:\n\n`;
-        summaryData.NewInternetExposures.forEach((resource, index) => {
-          resultSummary += `${index + 1}. \`${resource}\`\n`;
-        });
-        resultSummary += `\n`;
-      }
-
-      // === Risk Summary Section ===
-      // Detailed risk assessment for each affected resource
-      if (summaryData.RiskSummary) {
-        core.debug('Parsing risk summary data');
-        try {
-          const riskData: RiskAssessment[] = JSON.parse(summaryData.RiskSummary);
-          if (Array.isArray(riskData) && riskData.length > 0) {
-            hasRisks = true;
-            core.info(`Found ${riskData.length} risk assessment(s)`);
-            resultSummary += `### ⚠️ Risk Assessment\n\n`;
-            riskData.forEach((risk, index) => {
-              const riskLevel = risk.riskAssessment?.riskLevel || 'Unknown';
-              const riskEmoji = getSeverityEmoji(riskLevel);
-
-              core.debug(`Processing risk ${index + 1}: ${risk.terraformResource} (${riskLevel})`);
-
-              resultSummary += `#### ${riskEmoji} Resource ${index + 1}: \`${risk.terraformResource || 'Unknown'}\`\n\n`;
-              resultSummary += `- **Cloud Resource**: \`${risk.cloudResource || 'Unknown'}\`\n`;
-              resultSummary += `- **Risk Level**: **${riskLevel}**\n`;
-
-              // Add issues summary if available
-              if (risk.riskAssessment?.issuesSummary) {
-                resultSummary += `- **Issues**: ${risk.riskAssessment.issuesSummary}\n`;
-              }
-
-              // Add impact assessment if available
-              if (risk.riskAssessment?.impactAssessment) {
-                resultSummary += `- **Impact**: ${risk.riskAssessment.impactAssessment}\n`;
-              }
-
-              // === Vulnerabilities Subsection ===
-              // List any known vulnerabilities (CVEs) associated with this resource
-              if (
-                risk.riskAssessment?.vulnerabilities &&
-                risk.riskAssessment.vulnerabilities.length > 0
-              ) {
-                core.debug(
-                  `Found ${risk.riskAssessment.vulnerabilities.length} vulnerabilities for resource ${index + 1}`
-                );
-                resultSummary += `\n**Vulnerabilities:**\n`;
-                risk.riskAssessment.vulnerabilities.forEach(vuln => {
-                  const severityEmoji = getSeverityEmoji(vuln.severity);
-                  resultSummary += `- ${severityEmoji} **${vuln.cve || 'Unknown CVE'}** (${vuln.severity || 'Unknown'})\n`;
-                  if (vuln.riskAnalysis) {
-                    resultSummary += `  - ${vuln.riskAnalysis}\n`;
-                  }
-                });
-              }
-              resultSummary += `\n`;
-            });
-          }
-        } catch {
-          // Don't fail the entire comment if risk summary parsing fails
-          // Fall back to displaying the raw risk summary as text
-          core.warning('Failed to parse RiskSummary as JSON, displaying as text');
-          resultSummary += `### ⚠️ Risk Assessment\n\n${summaryData.RiskSummary}\n\n`;
-        }
-      }
-    } else {
-      core.debug('No summary data found in scan results');
-    }
-
-    // === Access Risk Summary Section ===
-    // IAM/Access control risks (who has access to what)
-    const accessPermissions = parsedResult.AccessAnalysis?.AccessPermissions;
-    if (accessPermissions && accessPermissions.length > 0) {
-      // Check if there are any actual changes (added/removed)
-      const hasActualChanges = accessPermissions.some(
-        perm => (perm.Added && perm.Added.length > 0) || (perm.Removed && perm.Removed.length > 0)
-      );
-
-      if (hasActualChanges) {
-        hasRisks = true;
-        core.info(`Found ${accessPermissions.length} access permission change(s)`);
-        resultSummary += `### 🛡️ Access Risk Assessment\n\n`;
-
-        accessPermissions.forEach((perm, index) => {
-          const principalId = perm.PrincipalID || 'Unknown Principal';
-          const targetResource = perm.TargetResourceID || 'Unknown Resource';
-          const hasChanges =
-            (perm.Added && perm.Added.length > 0) || (perm.Removed && perm.Removed.length > 0);
-
-          if (hasChanges) {
-            core.debug(`Processing access change ${index + 1}: ${principalId} → ${targetResource}`);
-
-            resultSummary += `#### Assessment ${index + 1}: \`${principalId.split('/').pop()}\` → \`${targetResource.split('/').pop()}\`\n\n`;
-
-            if (perm.Added && perm.Added.length > 0) {
-              resultSummary += `**➕ Added Permissions:**\n`;
-              perm.Added.forEach(p => {
-                resultSummary += `- \`${p}\`\n`;
-              });
-              resultSummary += `\n`;
-            }
-
-            if (perm.Removed && perm.Removed.length > 0) {
-              resultSummary += `**➖ Removed Permissions:**\n`;
-              perm.Removed.forEach(p => {
-                resultSummary += `- \`${p}\`\n`;
-              });
-              resultSummary += `\n`;
-            }
-
-            if (perm.Unchanged && perm.Unchanged.length > 0) {
-              resultSummary += `**➡️ Unchanged Permissions:**\n`;
-              perm.Unchanged.forEach(p => {
-                resultSummary += `- \`${p}\`\n`;
-              });
-              resultSummary += `\n`;
-            }
-          }
-        });
-      }
-    }
-
-    // === Generic Summary Section ===
-    // Handle any additional summary data not covered by specific sections
-    if (
-      parsedResult.ReachabilityAnalysis?.Summary &&
-      Object.keys(parsedResult.ReachabilityAnalysis?.Summary).length > 0
-    ) {
-      core.debug('Adding generic summary section');
-      resultSummary += `### 📊 Summary\n\n`;
-      resultSummary += Object.entries(parsedResult.ReachabilityAnalysis?.Summary)
-        .map(([key, value]) => `- **${key}**: ${value}`)
-        .join('\n');
-      resultSummary += `\n\n`;
-    }
-  } catch (error) {
-    // === Top-level Error Handling ===
-    // If JSON parsing completely fails, show a fallback message
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    core.error(`Failed to parse scan result: ${errorMessage}`);
-    core.debug(`Scan result that failed to parse: ${scanResult.substring(0, 500)}...`);
-    resultSummary = `\n⚠️ Unable to parse the detailed results. Please check the raw output below.\n\n`;
-    hasRisks = true; // Treat parse errors as requiring attention
-  }
-
-  // === Build Final Comment ===
-  // Construct the complete markdown comment with header, content, and footer
-  const statusEmoji = hasRisks ? '⚠️' : '✅';
-  const statusText = hasRisks ? 'Security Issues Detected' : 'No Security Issues Detected';
-
-  core.debug(`Comment status: ${statusText} (hasRisks: ${hasRisks})`);
-
-  const commentBody = `${COMMENT_MARKER}
-## ${statusEmoji} Terraform Security Analysis
+function buildCommentShell(
+  marker: string,
+  title: string,
+  statusEmoji: string,
+  statusText: string,
+  resultSummary: string,
+  detailsJson: string,
+  commitSha: string
+): string {
+  return `${marker}
+## ${statusEmoji} ${title}
 
 **Status**: ${statusText}
 
@@ -212,7 +91,7 @@ ${resultSummary || '*No significant changes detected.*'}
 <summary>📋 Full Scan Results (Click to expand)</summary>
 
 \`\`\`json
-${scanResult}
+${detailsJson}
 \`\`\`
 
 </details>
@@ -221,9 +100,243 @@ ${scanResult}
 *Analysis performed on commit: \`${commitSha}\`*
 *Powered by [Averlon Security](https://averlon.io)*
 `;
+}
 
-  core.debug(`Generated comment body (length: ${commentBody.length} chars)`);
-  return commentBody;
+/**
+ * Format reachability analysis only (Summary, New Internet Exposures, Risk Assessment).
+ * Used for the first of two PR comments (reachability).
+ */
+export function formatReachabilityComment(scanResult: string, commitSha: string): string {
+  let parsedResult: AnalyzeTerraformResult;
+  let resultSummary = '';
+  let hasRisks = false;
+
+  try {
+    parsedResult = JSON.parse(scanResult);
+    const summaryData = parsedResult.ReachabilityAnalysis?.Summary;
+
+    if (summaryData) {
+      if (summaryData.TextSummary) {
+        resultSummary += `### 📝 Summary\n\n${summaryData.TextSummary}\n\n`;
+      }
+      if (summaryData.NewInternetExposures && summaryData.NewInternetExposures.length > 0) {
+        hasRisks = true;
+        core.info(`Found ${summaryData.NewInternetExposures.length} new internet exposure(s)`);
+        resultSummary += `### 🌐 New Internet Exposures\n\n`;
+        resultSummary += `The following resources will be exposed to the internet:\n\n`;
+        summaryData.NewInternetExposures.forEach((resource, index) => {
+          resultSummary += `${index + 1}. \`${resource}\`\n`;
+        });
+        resultSummary += `\n`;
+      }
+      if (summaryData.RiskSummary) {
+        try {
+          const riskData: RiskAssessment[] = JSON.parse(summaryData.RiskSummary);
+          if (Array.isArray(riskData) && riskData.length > 0) {
+            hasRisks = true;
+            core.info(`Found ${riskData.length} risk assessment(s)`);
+            resultSummary += `### ⚠️ Risk Assessment\n\n`;
+            riskData.forEach((risk, index) => {
+              const riskLevel = risk.riskAssessment?.riskLevel || 'Unknown';
+              const riskEmoji = getSeverityEmoji(riskLevel);
+              resultSummary += `#### ${riskEmoji} Resource ${index + 1}: \`${risk.terraformResource || 'Unknown'}\`\n\n`;
+              resultSummary += `- **Cloud Resource**: \`${risk.cloudResource || 'Unknown'}\`\n`;
+              resultSummary += `- **Risk Level**: **${riskLevel}**\n\n`;
+              if (risk.riskAssessment?.issuesSummary) {
+                resultSummary += `**Issues summary:**\n\n${risk.riskAssessment.issuesSummary}\n\n`;
+              }
+              if (risk.riskAssessment?.impactAssessment) {
+                resultSummary += `**Impact:**\n\n${formatImpactAssessment(risk.riskAssessment.impactAssessment)}\n\n`;
+              }
+              if (
+                risk.riskAssessment?.vulnerabilities &&
+                risk.riskAssessment.vulnerabilities.length > 0
+              ) {
+                resultSummary += `\n**Vulnerabilities:**\n`;
+                risk.riskAssessment.vulnerabilities.forEach(vuln => {
+                  const severityEmoji = getSeverityEmoji(vuln.severity);
+                  resultSummary += `- ${severityEmoji} **${vuln.cve || 'Unknown CVE'}** (${vuln.severity || 'Unknown'})\n`;
+                  if (vuln.riskAnalysis) resultSummary += `  - ${vuln.riskAnalysis}\n`;
+                });
+              }
+              resultSummary += `\n`;
+            });
+          }
+        } catch {
+          core.warning('Failed to parse RiskSummary as JSON, displaying as text');
+          resultSummary += `### ⚠️ Risk Assessment\n\n${summaryData.RiskSummary}\n\n`;
+        }
+      }
+    }
+
+    const statusEmoji = hasRisks ? '⚠️' : '✅';
+    const statusText = hasRisks ? 'Security Issues Detected' : 'No Security Issues Detected';
+    const detailsJson = JSON.stringify(
+      { ReachabilityAnalysis: parsedResult.ReachabilityAnalysis },
+      null,
+      2
+    );
+    return buildCommentShell(
+      COMMENT_MARKER_REACHABILITY,
+      'Terraform Reachability Analysis',
+      statusEmoji,
+      statusText,
+      resultSummary,
+      detailsJson,
+      commitSha
+    );
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    core.error(`Failed to parse scan result for reachability: ${errorMessage}`);
+    return buildCommentShell(
+      COMMENT_MARKER_REACHABILITY,
+      'Terraform Reachability Analysis',
+      '⚠️',
+      'Security Issues Detected',
+      `\n⚠️ Unable to parse the detailed results. Please check the raw output below.\n\n`,
+      scanResult,
+      commitSha
+    );
+  }
+}
+
+/**
+ * Format access analysis only (Access Risk Assessment: permissions + Summary.RiskSummary).
+ * Used for the second of two PR comments (access).
+ */
+export function formatAccessComment(scanResult: string, commitSha: string): string {
+  let parsedResult: AnalyzeTerraformResult;
+  let resultSummary = '';
+  let hasRisks = false;
+
+  try {
+    parsedResult = JSON.parse(scanResult);
+    const accessAnalysis = parsedResult.AccessAnalysis;
+    const accessPermissions = accessAnalysis?.AccessPermissions;
+
+    if (accessPermissions && accessPermissions.length > 0) {
+      const hasActualChanges = accessPermissions.some(
+        perm => (perm.Added && perm.Added.length > 0) || (perm.Removed && perm.Removed.length > 0)
+      );
+      if (hasActualChanges) {
+        hasRisks = true;
+        core.info(`Found ${accessPermissions.length} access permission change(s)`);
+        resultSummary += `### 🔑 Permission Changes\n\n`;
+        accessPermissions.forEach(perm => {
+          const principalId = perm.PrincipalID || 'Unknown Principal';
+          const targetResource = perm.TargetResourceID || 'Unknown Resource';
+          const hasChanges =
+            (perm.Added && perm.Added.length > 0) || (perm.Removed && perm.Removed.length > 0);
+          if (hasChanges) {
+            resultSummary += `#### \`${principalId}\` → \`${targetResource}\`\n\n`;
+            if (perm.Added && perm.Added.length > 0) {
+              resultSummary += `**➕ Added Permissions:**\n`;
+              perm.Added.forEach(p => {
+                resultSummary += `- \`${p}\`\n`;
+              });
+              resultSummary += `\n`;
+            }
+            if (perm.Removed && perm.Removed.length > 0) {
+              resultSummary += `**➖ Removed Permissions:**\n`;
+              perm.Removed.forEach(p => {
+                resultSummary += `- \`${p}\`\n`;
+              });
+              resultSummary += `\n`;
+            }
+          }
+        });
+      }
+    }
+
+    const accessSummary = accessAnalysis?.Summary;
+    if (accessSummary?.RiskSummary) {
+      try {
+        const accessRiskData: AccessRiskItem[] = JSON.parse(accessSummary.RiskSummary);
+        if (Array.isArray(accessRiskData) && accessRiskData.length > 0) {
+          hasRisks = true;
+          core.info(`Found ${accessRiskData.length} access risk assessment(s)`);
+          resultSummary += `### 🛡️ Risk Assessment\n\n`;
+          accessRiskData.forEach(risk => {
+            const riskLevel = risk.riskAssessment?.riskLevel || 'Unknown';
+            const riskEmoji = getSeverityEmoji(riskLevel);
+            const principalDisplay = risk.principalId
+              ? risk.principalId.split('/').pop()
+              : 'Unknown Principal';
+            const targets = risk.targetResources?.length
+              ? risk.targetResources
+              : risk.targetResource
+                ? [risk.targetResource]
+                : [];
+            const targetDisplay =
+              targets.length > 0
+                ? targets.map(t => t.split('/').pop() ?? t).join(', ')
+                : 'Unknown Resource';
+            resultSummary += `#### ${riskEmoji} \`${principalDisplay}\` → \`${targetDisplay}\`\n\n`;
+            resultSummary += `- **Principal**: \`${risk.principalId || 'Unknown'}\`\n`;
+            resultSummary += `- **Target(s)**: \`${targetDisplay}\`\n`;
+            resultSummary += `- **Risk Level**: **${riskLevel}**\n\n`;
+            if (risk.riskAssessment?.issuesSummary) {
+              resultSummary += `**Issues summary:**\n\n${risk.riskAssessment.issuesSummary}\n\n`;
+            }
+            if (risk.riskAssessment?.impactAssessment) {
+              resultSummary += `**Impact:**\n\n${formatImpactAssessment(risk.riskAssessment.impactAssessment)}\n\n`;
+            }
+            if (
+              risk.riskAssessment?.vulnerabilities &&
+              risk.riskAssessment.vulnerabilities.length > 0
+            ) {
+              resultSummary += `\n**Vulnerabilities:**\n`;
+              risk.riskAssessment.vulnerabilities.forEach(vuln => {
+                const severityEmoji = getSeverityEmoji(vuln.severity);
+                resultSummary += `- ${severityEmoji} **${vuln.cve || 'Unknown CVE'}** (${vuln.severity || 'Unknown'})\n`;
+                if (vuln.riskAnalysis) resultSummary += `  - ${vuln.riskAnalysis}\n`;
+              });
+            }
+            resultSummary += `\n`;
+          });
+        }
+      } catch {
+        core.warning(
+          'Failed to parse AccessAnalysis.Summary.RiskSummary as JSON, skipping access risk details'
+        );
+      }
+    }
+
+    const statusEmoji = hasRisks ? '⚠️' : '✅';
+    const statusText = hasRisks ? 'Security Issues Detected' : 'No Security Issues Detected';
+    const detailsJson = JSON.stringify({ AccessAnalysis: parsedResult.AccessAnalysis }, null, 2);
+    return buildCommentShell(
+      COMMENT_MARKER_ACCESS,
+      'Terraform Access Risk Analysis',
+      statusEmoji,
+      statusText,
+      resultSummary,
+      detailsJson,
+      commitSha
+    );
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    core.error(`Failed to parse scan result for access: ${errorMessage}`);
+    return buildCommentShell(
+      COMMENT_MARKER_ACCESS,
+      'Terraform Access Risk Analysis',
+      '⚠️',
+      'Security Issues Detected',
+      `\n⚠️ Unable to parse the detailed results. Please check the raw output below.\n\n`,
+      scanResult,
+      commitSha
+    );
+  }
+}
+
+/**
+ * Format the full scan result into a single combined PR comment (legacy).
+ * Prefer posting two separate comments via formatReachabilityComment and formatAccessComment.
+ */
+export function formatScanResult(scanResult: string, commitSha: string): string {
+  const reach = formatReachabilityComment(scanResult, commitSha);
+  const access = formatAccessComment(scanResult, commitSha);
+  return reach + '\n\n---\n\n' + access;
 }
 
 /**
@@ -248,8 +361,63 @@ function getSeverityEmoji(level?: string): string {
   }
 }
 
+function hasReachabilityRisksInParsed(parsed: AnalyzeTerraformResult): boolean {
+  const summaryData = parsed.ReachabilityAnalysis?.Summary;
+  if (summaryData?.NewInternetExposures && summaryData.NewInternetExposures.length > 0) {
+    return true;
+  }
+  if (summaryData?.RiskSummary) {
+    try {
+      const riskData = JSON.parse(summaryData.RiskSummary);
+      if (Array.isArray(riskData) && riskData.length > 0) return true;
+    } catch {
+      if (summaryData.RiskSummary.trim().length > 0) return true;
+    }
+  }
+  return false;
+}
+
+function hasAccessRisksInParsed(parsed: AnalyzeTerraformResult): boolean {
+  const accessPermissions = parsed.AccessAnalysis?.AccessPermissions;
+  if (accessPermissions && accessPermissions.length > 0) {
+    for (const perm of accessPermissions) {
+      if ((perm.Added && perm.Added.length > 0) || (perm.Removed && perm.Removed.length > 0)) {
+        return true;
+      }
+    }
+  }
+  const accessRiskSummary = parsed.AccessAnalysis?.Summary?.RiskSummary;
+  if (accessRiskSummary) {
+    try {
+      const accessRiskData = JSON.parse(accessRiskSummary);
+      if (Array.isArray(accessRiskData) && accessRiskData.length > 0) return true;
+    } catch {
+      if (accessRiskSummary.trim().length > 0) return true;
+    }
+  }
+  return false;
+}
+
+/** True if reachability analysis has any risks (exposures or risk summary). */
+export function hasReachabilityRisks(scanResult: string): boolean {
+  try {
+    return hasReachabilityRisksInParsed(JSON.parse(scanResult));
+  } catch {
+    return true;
+  }
+}
+
+/** True if access analysis has any risks (permission changes or risk summary). */
+export function hasAccessRisks(scanResult: string): boolean {
+  try {
+    return hasAccessRisksInParsed(JSON.parse(scanResult));
+  } catch {
+    return true;
+  }
+}
+
 /**
- * Check if the scan result has any risks
+ * Check if the scan result has any risks (reachability or access).
  *
  * @param scanResult - JSON string containing the scan results
  * @returns True if risks are detected, false otherwise
@@ -257,46 +425,51 @@ function getSeverityEmoji(level?: string): string {
 export function hasRisksInResult(scanResult: string): boolean {
   try {
     const parsed: AnalyzeTerraformResult = JSON.parse(scanResult);
-
-    // Check for new internet exposures using TerraformReachabilityAnalysis.Summary
-    const summaryData = parsed.ReachabilityAnalysis?.Summary;
-    if (summaryData?.NewInternetExposures && summaryData.NewInternetExposures.length > 0) {
-      return true;
-    }
-
-    // Check for risk summary
-    if (summaryData?.RiskSummary) {
-      try {
-        const riskData = JSON.parse(summaryData.RiskSummary);
-        if (Array.isArray(riskData) && riskData.length > 0) {
-          return true;
-        }
-      } catch {
-        // If it's a string with content, assume it's a risk
-        return summaryData.RiskSummary.trim().length > 0;
-      }
-    }
-
-    // Check for access permission changes
-    const accessPermissions = parsed.AccessAnalysis?.AccessPermissions;
-    if (accessPermissions && accessPermissions.length > 0) {
-      // If any permission has Added or Removed changes, it's a risk
-      for (const perm of accessPermissions) {
-        if ((perm.Added && perm.Added.length > 0) || (perm.Removed && perm.Removed.length > 0)) {
-          return true;
-        }
-      }
-    }
-
-    return false;
+    return hasReachabilityRisksInParsed(parsed) || hasAccessRisksInParsed(parsed);
   } catch {
-    // If we can't parse, assume there might be risks to be safe
     return true;
   }
 }
 
+async function postOrUpdateSingleComment(
+  octokit: ReturnType<typeof github.getOctokit>,
+  repo: { owner: string; repo: string },
+  prNumber: number,
+  marker: string,
+  body: string,
+  mode: CommentMode
+): Promise<void> {
+  if (mode === 'update') {
+    try {
+      const { data: comments } = await octokit.rest.issues.listComments({
+        ...repo,
+        issue_number: prNumber,
+      });
+      const existing = comments.find(c => c.body?.includes(marker));
+      if (existing) {
+        await octokit.rest.issues.updateComment({
+          ...repo,
+          comment_id: existing.id,
+          body,
+        });
+        core.info(`✓ Updated existing comment (${marker})`);
+        return;
+      }
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      core.warning(`Failed to update comment (${marker}): ${msg}. Creating new.`);
+    }
+  }
+  await octokit.rest.issues.createComment({
+    ...repo,
+    issue_number: prNumber,
+    body,
+  });
+  core.info(`Created PR comment (${marker})`);
+}
+
 /**
- * Post or update a PR comment with the scan results
+ * Post or update two PR comments: one for reachability analysis, one for access analysis.
  *
  * @param token - GitHub token for authentication
  * @param scanResult - JSON string containing the scan results
@@ -311,85 +484,94 @@ export async function postOrUpdateComment(
   mode: CommentMode
 ): Promise<void> {
   try {
-    core.info('Preparing to post/update PR comment...');
+    core.info('Preparing to post/update PR comments (reachability + access)...');
     const context = github.context;
 
-    // === Context Validation ===
-    // Ensure we're running in a pull request, not a push or other event
     if (!context.payload.pull_request) {
       core.warning('Not in a pull request context. Skipping PR comment.');
       return;
     }
 
-    core.debug(`PR context detected: PR #${context.payload.pull_request.number}`);
-
-    // === Mode-based Filtering ===
-    // Check if we should skip commenting based on mode and results
-    if (mode === 'on-security-risks' && !hasRisksInResult(scanResult)) {
-      core.info('No risks detected and comment-mode is "on-security-risks". Skipping PR comment.');
+    let parsed: AnalyzeTerraformResult;
+    try {
+      parsed = JSON.parse(scanResult);
+    } catch {
+      core.warning('Failed to parse scan result. Skipping PR comments.');
       return;
     }
 
-    // Initialize GitHub API client
+    const hasReachability = !!parsed.ReachabilityAnalysis;
+    const hasAccess = !!parsed.AccessAnalysis;
+    const shouldPostReachability =
+      hasReachability && (mode !== 'on-security-risks' || hasReachabilityRisksInParsed(parsed));
+    const shouldPostAccess =
+      hasAccess && (mode !== 'on-security-risks' || hasAccessRisksInParsed(parsed));
+
+    if (!shouldPostReachability && !shouldPostAccess) {
+      core.info(
+        'No reachability/access data to post or mode is on-security-risks with no risks. Skipping.'
+      );
+      return;
+    }
+
     const octokit = github.getOctokit(token);
     const prNumber = context.payload.pull_request.number;
     const repo = context.repo;
+    const serverUrl = (process.env['GITHUB_SERVER_URL'] || 'https://github.com').replace(
+      /\/+$/,
+      ''
+    );
+    const repository = process.env['GITHUB_REPOSITORY'] || `${repo.owner}/${repo.repo}`;
+    const runId = process.env['GITHUB_RUN_ID'];
+    const workflowRunUrl =
+      runId && repository ? `${serverUrl}/${repository}/actions/runs/${runId}` : undefined;
 
-    core.debug(`Repository: ${repo.owner}/${repo.repo}, PR: ${prNumber}`);
-
-    // Format the scan results into a markdown comment
-    const commentBody = formatScanResult(scanResult, commitSha);
-
-    // === Update Mode: Find and update existing comment ===
-    if (mode === 'update') {
-      core.info('Attempting to find and update existing comment...');
-      try {
-        // Fetch all comments on the PR
-        const { data: comments } = await octokit.rest.issues.listComments({
-          ...repo,
-          issue_number: prNumber,
-        });
-
-        core.debug(`Found ${comments.length} existing comments on PR`);
-
-        // Find our comment using the unique marker
-        const existingComment = comments.find(comment => comment.body?.includes(COMMENT_MARKER));
-
-        if (existingComment) {
-          // Update the existing comment in place
-          core.info(`Updating existing comment (ID: ${existingComment.id})`);
-          await octokit.rest.issues.updateComment({
-            ...repo,
-            comment_id: existingComment.id,
-            body: commentBody,
-          });
-          core.info('✓ PR comment updated successfully');
-          return;
-        } else {
-          // No existing comment found, will create a new one below
-          core.info('No existing comment found, creating new comment...');
-        }
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        core.warning(
-          `Failed to fetch or update existing comment: ${errorMessage}. Will create a new comment instead.`
+    if (shouldPostReachability) {
+      const commentBody = formatReachabilityComment(scanResult, commitSha);
+      const finalBody = enforceCommentBodyLimit(
+        commentBody,
+        GITHUB_COMMENT_BODY_MAX_LENGTH,
+        workflowRunUrl
+      );
+      if (finalBody.length < commentBody.length) {
+        core.info(
+          `Reachability comment truncated (${commentBody.length} → ${finalBody.length} chars)`
         );
-        // Fall through to create new comment
       }
+      await postOrUpdateSingleComment(
+        octokit,
+        repo,
+        prNumber,
+        COMMENT_MARKER_REACHABILITY,
+        finalBody,
+        mode
+      );
     }
 
-    // Create new comment (for 'always' mode or when no existing comment found in 'update' mode)
-    core.info('Creating new PR comment');
-    await octokit.rest.issues.createComment({
-      ...repo,
-      issue_number: prNumber,
-      body: commentBody,
-    });
-    core.info('PR comment created successfully');
+    if (shouldPostAccess) {
+      const commentBody = formatAccessComment(scanResult, commitSha);
+      const finalBody = enforceCommentBodyLimit(
+        commentBody,
+        GITHUB_COMMENT_BODY_MAX_LENGTH,
+        workflowRunUrl
+      );
+      if (finalBody.length < commentBody.length) {
+        core.info(`Access comment truncated (${commentBody.length} → ${finalBody.length} chars)`);
+      }
+      await postOrUpdateSingleComment(
+        octokit,
+        repo,
+        prNumber,
+        COMMENT_MARKER_ACCESS,
+        finalBody,
+        mode
+      );
+    }
+
+    core.info('PR comments (reachability + access) completed');
   } catch (error) {
-    // Don't fail the action if commenting fails
     const errorMessage = error instanceof Error ? error.message : String(error);
-    core.error(`Failed to post PR comment: ${errorMessage}`);
+    core.error(`Failed to post PR comments: ${errorMessage}`);
     core.warning('Continuing action despite PR comment failure');
   }
 }

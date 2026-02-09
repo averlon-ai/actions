@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.9] - 2026-02-09
+- Update pre-cog agent, iac and k8s-analysis for better issue management
+
 ## [1.0.8] - 2026-01-29
 - Update k8s-analysis for external image
 

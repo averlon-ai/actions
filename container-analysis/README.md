@@ -57,7 +57,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Run Averlon Remediation Agent for Containers
-        uses: averlon-ai/actions/container-analysis@v1.0.8
+        uses: averlon-ai/actions/container-analysis@v1.0.9
         with:
           averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
           averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -91,7 +91,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Run Averlon Remediation Agent for Containers
-        uses: averlon-ai/actions/container-analysis@v1.0.8
+        uses: averlon-ai/actions/container-analysis@v1.0.9
         with:
           averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
           averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -136,7 +136,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Run Averlon Remediation Agent for Containers
-        uses: averlon-ai/actions/container-analysis@v1.0.8
+        uses: averlon-ai/actions/container-analysis@v1.0.9
         with:
           averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
           averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -195,7 +195,7 @@ While Averlon attempts to automatically map Dockerfiles to image repositories, t
 ```yaml
 # Solution: Provide explicit image mapping (recommended)
 - name: Run Averlon Remediation Agent for Containers
-  uses: averlon-ai/actions/container-analysis@v1.0.8
+  uses: averlon-ai/actions/container-analysis@v1.0.9
   with:
     averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
     averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -221,7 +221,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Run Averlon Remediation Agent for Containers
-        uses: averlon-ai/actions/container-analysis@v1.0.8
+        uses: averlon-ai/actions/container-analysis@v1.0.9
         with:
           averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
           averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -242,7 +242,7 @@ If the action is detecting files that aren't actual Dockerfiles (e.g., test data
 ```yaml
 # Solution: Exclude specific paths from Dockerfile detection
 - name: Run Averlon Remediation Agent for Containers
-  uses: averlon-ai/actions/container-analysis@v1.0.8
+  uses: averlon-ai/actions/container-analysis@v1.0.9
   with:
     averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
     averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -259,7 +259,7 @@ You can also ignore a specific file in the root folder:
 ```yaml
 # Solution: Ignore a specific Dockerfile in the root folder
 - name: Run Averlon Remediation Agent for Containers
-  uses: averlon-ai/actions/container-analysis@v1.0.8
+  uses: averlon-ai/actions/container-analysis@v1.0.9
   with:
     averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
     averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -276,7 +276,7 @@ Adjust the filters to focus on critical vulnerabilities.
 ```yaml
 # Solution: Use stricter filters
 - name: Run Averlon Remediation Agent for Containers
-  uses: averlon-ai/actions/container-analysis@v1.0.8
+  uses: averlon-ai/actions/container-analysis@v1.0.9
   with:
     averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
     averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -305,7 +305,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Run Averlon Remediation Agent for Containers
-        uses: averlon-ai/actions/container-analysis@v1.0.8
+        uses: averlon-ai/actions/container-analysis@v1.0.9
         with:
           averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
           averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
