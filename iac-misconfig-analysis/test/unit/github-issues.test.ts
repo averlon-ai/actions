@@ -54,9 +54,6 @@ describe('GithubIssuesService', () => {
   let mockCreateIssue: ReturnType<typeof mock>;
   let mockUpdateIssue: ReturnType<typeof mock>;
   let mockCreateComment: ReturnType<typeof mock>;
-  let mockGetGist: ReturnType<typeof mock>;
-  let mockCreateGist: ReturnType<typeof mock>;
-  let mockUpdateGist: ReturnType<typeof mock>;
 
   const createMockResource = (
     id: string,
@@ -112,40 +109,7 @@ describe('GithubIssuesService', () => {
 
     mockCreateComment = mock(() => Promise.resolve({ data: {} }));
 
-    mockGetGist = mock(() =>
-      Promise.resolve({
-        data: {
-          id: 'test-gist-id',
-          files: {
-            'terraform-resources-batch-1.json': {
-              filename: 'terraform-resources-batch-1.json',
-              type: 'application/json',
-              content: '[]',
-            },
-          },
-        },
-      })
-    );
-
-    mockCreateGist = mock(() =>
-      Promise.resolve({
-        data: {
-          id: 'new-gist-id',
-          html_url: 'https://gist.github.com/test-owner/new-gist-id',
-        },
-      })
-    );
-
-    mockUpdateGist = mock(() =>
-      Promise.resolve({
-        data: {
-          id: 'test-gist-id',
-          html_url: 'https://gist.github.com/test-owner/test-gist-id',
-        },
-      })
-    );
-
-    // Create mock Octokit instance
+    // Create mock Octokit instance (no Gist — state in issue body)
     mockOctokit = {
       rest: {
         issues: {
@@ -153,11 +117,6 @@ describe('GithubIssuesService', () => {
           create: mockCreateIssue as any,
           update: mockUpdateIssue as any,
           createComment: mockCreateComment as any,
-        },
-        gists: {
-          get: mockGetGist as any,
-          create: mockCreateGist as any,
-          update: mockUpdateGist as any,
         },
       },
     } as any;
@@ -185,9 +144,6 @@ describe('GithubIssuesService', () => {
     mockCreateIssue.mockClear();
     mockUpdateIssue.mockClear();
     mockCreateComment.mockClear();
-    mockGetGist.mockClear();
-    mockCreateGist.mockClear();
-    mockUpdateGist.mockClear();
     mockAssignCopilot.mockClear();
     mockHandleCopilotAssignmentForUpdatedIssue.mockClear();
     mockHandleCopilotAssignmentForUnchangedIssue.mockClear();
@@ -211,10 +167,8 @@ describe('GithubIssuesService', () => {
 
       await issuesService.createBatchedIssues(resources, 'test-repo', 'abc123', false);
 
-      // Should create 3 issues (batches of 10, 10, 5)
+      // Should create 3 issues (batches of 10, 10, 5) — state in body, no Gist
       expect(mockCreateIssue).toHaveBeenCalledTimes(3);
-      // Should create 3 Gists (one per batch)
-      expect(mockCreateGist).toHaveBeenCalledTimes(3);
 
       // Verify first batch
       const firstCall = mockCreateIssue.mock.calls[0][0];
@@ -225,7 +179,7 @@ describe('GithubIssuesService', () => {
         'averlon-created',
         'averlon-iac-misconfiguration-analysis',
       ]);
-      expect(firstCall.body).toContain('View Resources JSON');
+      expect(firstCall.body).toContain('averlon-batch-state');
 
       // Verify second batch
       const secondCall = mockCreateIssue.mock.calls[1][0];
@@ -256,7 +210,6 @@ describe('GithubIssuesService', () => {
 
       // Should create 1 issue with only 2 resources (those with issues)
       expect(mockCreateIssue).toHaveBeenCalledTimes(1);
-      expect(mockCreateGist).toHaveBeenCalledTimes(1);
       const createCall = mockCreateIssue.mock.calls[0][0];
       expect(createCall.body).toContain('resource-1');
       expect(createCall.body).toContain('resource-3');
@@ -324,10 +277,12 @@ describe('GithubIssuesService', () => {
 
       await issuesService.createBatchedIssues(resources, 'test-repo', 'abc123', false);
 
-      // Should attempt to create all 3 batches
+      // Should attempt to create all 3 batches; package logs error for failed batch
       expect(mockCreateIssue).toHaveBeenCalledTimes(3);
       expect(errorSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Failed to create/update issue for batch 2')
+        expect.stringContaining(
+          'Failed to create/update issue for Batch 2 of 3 (10 item(s)): API Error'
+        )
       );
     });
 
@@ -428,57 +383,16 @@ describe('GithubIssuesService', () => {
         ],
       };
 
-      // Mock 1: filterResourcesNeedingNewIssues - fetchAllOpenIssuesWithGists
-      // This finds existing issues with Gists - the body must contain the Gist URL in the correct format
-      // Gist IDs are typically hex strings, so use a valid format like 'a1b2c3d4e5f6'
-      const gistId = 'a1b2c3d4e5f6';
+      // Mock: existing issue with embedded state (asset-1 has fingerprint issue-1,issue-2)
+      const existingStateBody =
+        'Content\n<!-- averlon-batch-state\n{"v":1,"keys":["asset:asset-1"],"fingerprints":{"asset:asset-1":"issue-1,issue-2"}}\n-->';
       mockListForRepo.mockResolvedValueOnce({
         data: [
           {
             number: 1,
             title: 'Averlon Misconfiguration Remediation Agent for IaC: Batch 1',
             state: 'open',
-            body:
-              'Some content\n### 📄 Resources JSON\n\n📦 [View Resources JSON](https://gist.github.com/test-owner/' +
-              gistId +
-              ')',
-          },
-        ],
-      } as any);
-
-      // Mock: get Gist content - use text/plain as Gist API may return that for JSON
-      // This is called by downloadGistJson in filterResourcesNeedingNewIssues
-      mockGetGist.mockResolvedValueOnce({
-        data: {
-          id: gistId,
-          files: {
-            'terraform-resources-batch-1.json': {
-              filename: 'terraform-resources-batch-1.json',
-              type: 'text/plain',
-              content: JSON.stringify([existingResource]),
-            },
-          },
-        },
-      });
-
-      // Mock 2: getAllExistingBatchNumbers - finds batch 1
-      mockListForRepo.mockResolvedValueOnce({
-        data: [
-          {
-            number: 1,
-            title: 'Averlon Misconfiguration Remediation Agent for IaC: Batch 1',
-            state: 'open',
-          },
-        ],
-      } as any);
-
-      // Mock 3: findExistingBatchIssue - check for existing batch (won't find batch 2, will create new)
-      mockListForRepo.mockResolvedValueOnce({
-        data: [
-          {
-            number: 1,
-            title: 'Averlon Misconfiguration Remediation Agent for IaC: Batch 1',
-            state: 'open',
+            body: existingStateBody,
           },
         ],
       } as any);
@@ -490,19 +404,15 @@ describe('GithubIssuesService', () => {
         false
       );
 
-      // Should only create issue for resource-2 (new asset)
-      // resource-1 should be skipped (no new issue IDs)
+      // asset-1 with same fingerprint (issue-1,issue-2) is skipped; asset-1 with fewer issues
+      // (issue-1 only) has different fingerprint so included; asset-2 is new. One batch created.
       expect(mockCreateIssue).toHaveBeenCalledTimes(1);
       const createCall = mockCreateIssue.mock.calls[0][0];
       expect(createCall.body).toContain('resource-2');
-      expect(createCall.body).not.toContain('resource-1');
     });
 
-    it('should create new issue for existing assets with new issue IDs', async () => {
-      const existingResource = createMockResource('resource-1', 'aws_s3_bucket', 'bucket-1', [
-        'issue-1',
-      ]);
-      // Same asset but with new issue IDs (issue-2 and issue-3 are new)
+    it('should create a new issue when asset has new issue IDs (create-only, not update)', async () => {
+      // Same asset but with new issue IDs (issue-2 and issue-3 are new); we create a new batch with only new issues
       const newResourceWithNewIssueIds = createMockResource(
         'resource-1',
         'aws_s3_bucket',
@@ -510,39 +420,15 @@ describe('GithubIssuesService', () => {
         ['issue-1', 'issue-2', 'issue-3']
       );
 
-      // Mock: existing issue with Gist containing resource-1 with 1 issue
+      const existingStateBody =
+        'Content\n<!-- averlon-batch-state\n{"v":1,"keys":["asset:asset-resource-1"],"fingerprints":{"asset:asset-resource-1":"issue-1"}}\n-->';
       mockListForRepo.mockResolvedValueOnce({
         data: [
           {
             number: 1,
             title: 'Averlon Misconfiguration Remediation Agent for IaC: Batch 1',
             state: 'open',
-            body: '[View Resources JSON](https://gist.github.com/test-owner/gist-1)',
-          },
-        ],
-      } as any);
-
-      // Mock: get Gist content
-      mockGetGist.mockResolvedValueOnce({
-        data: {
-          id: 'gist-1',
-          files: {
-            'terraform-resources-batch-1.json': {
-              filename: 'terraform-resources-batch-1.json',
-              type: 'application/json',
-              content: JSON.stringify([existingResource]),
-            },
-          },
-        },
-      });
-
-      // Mock: getAllExistingBatchNumbers - finds batch 1
-      mockListForRepo.mockResolvedValueOnce({
-        data: [
-          {
-            number: 1,
-            title: 'Averlon Misconfiguration Remediation Agent for IaC: Batch 1',
-            state: 'open',
+            body: existingStateBody,
           },
         ],
       } as any);
@@ -554,22 +440,13 @@ describe('GithubIssuesService', () => {
         false
       );
 
-      // Should create new issue for resource-1 (has new issue IDs: issue-2 and issue-3)
       expect(mockCreateIssue).toHaveBeenCalledTimes(1);
-      const createCall = mockCreateIssue.mock.calls[0][0];
-      expect(createCall.title).toBe(
-        'Averlon Misconfiguration Remediation Agent for IaC: Batch 2 of 2'
-      );
-      expect(createCall.body).toContain('resource-1');
+      expect(mockCreateIssue.mock.calls[0][0].body).toContain('resource-1');
+      expect(mockUpdateIssue).not.toHaveBeenCalled();
     });
 
-    it('should create new issue for existing assets with different issue IDs (same count)', async () => {
-      // Existing asset with issues [issue-1, issue-2]
-      const existingResource = createMockResource('resource-1', 'aws_s3_bucket', 'bucket-1', [
-        'issue-1',
-        'issue-2',
-      ]);
-      // Same asset, same count, but different issue IDs (issue-3 and issue-4 are new)
+    it('should create a new issue when asset has different issue IDs (new IDs, create-only)', async () => {
+      // Same asset, different issue IDs (issue-3 and issue-4 are new); we create a new batch with only new issues
       const newResourceDifferentIssueIds = createMockResource(
         'resource-1',
         'aws_s3_bucket',
@@ -577,39 +454,15 @@ describe('GithubIssuesService', () => {
         ['issue-3', 'issue-4']
       );
 
-      // Mock: existing issue with Gist
+      const existingStateBody =
+        'Content\n<!-- averlon-batch-state\n{"v":1,"keys":["asset:asset-resource-1"],"fingerprints":{"asset:asset-resource-1":"issue-1,issue-2"}}\n-->';
       mockListForRepo.mockResolvedValueOnce({
         data: [
           {
             number: 1,
             title: 'Averlon Misconfiguration Remediation Agent for IaC: Batch 1',
             state: 'open',
-            body: '[View Resources JSON](https://gist.github.com/test-owner/gist-1)',
-          },
-        ],
-      } as any);
-
-      // Mock: get Gist content
-      mockGetGist.mockResolvedValueOnce({
-        data: {
-          id: 'gist-1',
-          files: {
-            'terraform-resources-batch-1.json': {
-              filename: 'terraform-resources-batch-1.json',
-              type: 'application/json',
-              content: JSON.stringify([existingResource]),
-            },
-          },
-        },
-      });
-
-      // Mock: getAllExistingBatchNumbers - finds batch 1
-      mockListForRepo.mockResolvedValueOnce({
-        data: [
-          {
-            number: 1,
-            title: 'Averlon Misconfiguration Remediation Agent for IaC: Batch 1',
-            state: 'open',
+            body: existingStateBody,
           },
         ],
       } as any);
@@ -621,13 +474,9 @@ describe('GithubIssuesService', () => {
         false
       );
 
-      // Should create new issue for resource-1 (has new issue IDs: issue-3 and issue-4)
       expect(mockCreateIssue).toHaveBeenCalledTimes(1);
-      const createCall = mockCreateIssue.mock.calls[0][0];
-      expect(createCall.title).toBe(
-        'Averlon Misconfiguration Remediation Agent for IaC: Batch 2 of 2'
-      );
-      expect(createCall.body).toContain('resource-1');
+      expect(mockCreateIssue.mock.calls[0][0].body).toContain('resource-1');
+      expect(mockUpdateIssue).not.toHaveBeenCalled();
     });
   });
 
@@ -801,8 +650,7 @@ async function generateExpectedBody(
   batchNumber: number,
   totalBatches: number,
   repoName: string,
-  commit: string,
-  gistUrl?: string
+  commit: string
 ): Promise<string> {
   const { generateIssueBody } = await import('../../src/issue-template');
   const issueIds = new Set<string>();
@@ -822,6 +670,5 @@ async function generateExpectedBody(
     repoName,
     commit,
     issueIds: Array.from(issueIds),
-    gistUrl,
   });
 }

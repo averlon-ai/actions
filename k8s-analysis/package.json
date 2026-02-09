@@ -11,9 +11,10 @@
     "format": "prettier --write \"**/*.ts\""
   },
   "dependencies": {
-    "@actions/core": "^2.0.1",
-    "@actions/exec": "^2.0.0",
-    "@actions/github": "^7.0.0",
+    "@actions/core": "^3.0.0",
+    "@actions/exec": "^3.0.0",
+    "@actions/github": "^9.0.0",
+    "@averlon/copilot-issue-batching": "workspace:*",
     "@averlon/github-actions-utils": "workspace:*",
     "@averlon/github-copilot-utils": "workspace:*",
     "@averlon/shared": "workspace:*",

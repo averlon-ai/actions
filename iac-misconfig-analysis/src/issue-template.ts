@@ -12,7 +12,6 @@ export interface IssueTemplateData {
   commit: string;
   issueIds: string[];
   workflowRunUrl?: string;
-  gistUrl?: string;
 }
 
 const ISSUE_TEMPLATE_BODY = `
@@ -33,8 +32,6 @@ const ISSUE_TEMPLATE_BODY = `
 - Unique issues found: [UNIQUE_ISSUES_COUNT]
 
 [DETAILED_RESOURCES]
-
-[GIST_LINK]
 
 [WORKFLOW_RUN_NOTE]
 
@@ -69,16 +66,7 @@ export function generateIssueTitle(batchNumber: number, totalBatches: number): s
  * Generates a GitHub issue body using the embedded template
  */
 export function generateIssueBody(data: IssueTemplateData): string {
-  const {
-    batchNumber,
-    totalBatches,
-    resources,
-    repoName,
-    commit,
-    issueIds,
-    workflowRunUrl,
-    gistUrl,
-  } = data;
+  const { batchNumber, totalBatches, resources, repoName, commit, issueIds, workflowRunUrl } = data;
 
   // Calculate summary statistics
   const totalResources = resources.length;
@@ -94,11 +82,6 @@ export function generateIssueBody(data: IssueTemplateData): string {
   const workflowRunNote = workflowRunUrl
     ? `   - [View logs & artifacts](${workflowRunUrl})`
     : 'Workflow run: Logs & artifacts are available in the GitHub Actions run that generated this issue.';
-
-  // Build Gist link section
-  const gistLink = gistUrl
-    ? `\n### 📄 Resources JSON\n\n📦 [View Resources JSON](${gistUrl})\n\nThis JSON file contains the complete Terraform resource data for this batch, including all resource details, issues, and metadata.\n`
-    : '';
 
   // Build detailed resources section
   let detailedResources = '';
@@ -161,7 +144,6 @@ export function generateIssueBody(data: IssueTemplateData): string {
     .replace(/\[RESOURCES_WITH_ISSUES\]/g, String(resourcesWithIssues))
     .replace(/\[UNIQUE_ISSUES_COUNT\]/g, String(uniqueIssueCount))
     .replace('[DETAILED_RESOURCES]', detailedResources)
-    .replace('[GIST_LINK]', gistLink)
     .replace('[WORKFLOW_RUN_NOTE]', workflowRunNote);
 
   return body;

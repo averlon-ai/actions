@@ -1,6 +1,11 @@
 import { describe, it, expect, spyOn, beforeEach, afterEach } from 'bun:test';
 import * as core from '@actions/core';
-import { formatScanResult, hasRisksInResult } from '../../src/pr-comment.ts';
+import {
+  formatScanResult,
+  hasRisksInResult,
+  enforceCommentBodyLimit,
+  GITHUB_COMMENT_BODY_MAX_LENGTH,
+} from '../../src/pr-comment.ts';
 
 describe('pr-comment.ts', () => {
   let infoSpy: ReturnType<typeof spyOn>;
@@ -101,14 +106,74 @@ describe('pr-comment.ts', () => {
       expect(result).toContain('Resource 1: `aws_instance.web_server`');
       expect(result).toContain('**Cloud Resource**: `i-1234567890abcdef0`');
       expect(result).toContain('**Risk Level**: **HIGH**');
-      expect(result).toContain('**Issues**: Security group allows unrestricted access');
-      expect(result).toContain('**Impact**: High risk of unauthorized access');
+      expect(result).toContain('**Issues summary:**');
+      expect(result).toContain('Security group allows unrestricted access');
+      expect(result).toContain('**Impact:**');
+      expect(result).toContain('High risk of unauthorized access');
       expect(result).toContain('**Vulnerabilities:**');
       expect(result).toContain('**CVE-2024-1234** (CRITICAL)');
       expect(result).toContain('Remote code execution vulnerability');
       expect(result).toContain('**CVE-2024-5678** (HIGH)');
       expect(result).toContain('Privilege escalation possible');
       expect(infoSpy).toHaveBeenCalledWith('Found 1 risk assessment(s)');
+    });
+
+    it('should format impact assessment with bold labels', () => {
+      const impactText =
+        '1) Attack Vector: Instance is on 18 attack chains. 2) Exploitation Path: Attacker can assume the role. 3) Data Exposure: Bucket may contain sensitive data.';
+      const riskSummary = JSON.stringify([
+        {
+          terraformResource: 'arn:aws:s3:::my-bucket',
+          cloudResource: 'arn:aws:s3:::my-bucket',
+          riskAssessment: {
+            riskLevel: 'High',
+            issuesSummary: 'S3 access risk',
+            impactAssessment: impactText,
+          },
+        },
+      ]);
+
+      const scanResult = JSON.stringify({
+        ReachabilityAnalysis: {
+          Summary: {
+            RiskSummary: riskSummary,
+          },
+        },
+      });
+
+      const result = formatScanResult(scanResult, commitSha);
+
+      expect(result).toContain('**Impact:**');
+      expect(result).toContain('- **Attack Vector**:');
+      expect(result).toContain('Instance is on 18 attack chains');
+      expect(result).toContain('- **Exploitation Path**:');
+      expect(result).toContain('Attacker can assume the role');
+      expect(result).toContain('- **Data Exposure**:');
+      expect(result).toContain('Bucket may contain sensitive data');
+    });
+
+    it('should not split impact on "(1 of 1)" or "of 1)" in sentences', () => {
+      const impactText =
+        '1) Attack Vector: Direct. 2) Data Exposure: The bucket (1 of 1) — loss of confidentiality. 3) Blast Radius: Single target.';
+      const riskSummary = JSON.stringify([
+        {
+          terraformResource: 'aws_s3_bucket.data',
+          cloudResource: 'bucket',
+          riskAssessment: {
+            riskLevel: 'High',
+            impactAssessment: impactText,
+          },
+        },
+      ]);
+      const scanResult = JSON.stringify({
+        ReachabilityAnalysis: { Summary: { RiskSummary: riskSummary } },
+      });
+      const result = formatScanResult(scanResult, commitSha);
+      // Should have 3 bullets; Data Exposure paragraph must keep "(1 of 1)" intact (no spurious split)
+      expect(result).toContain('- **Attack Vector**:');
+      expect(result).toContain('- **Data Exposure**:');
+      expect(result).toContain('(1 of 1) — loss of confidentiality');
+      expect(result).toContain('- **Blast Radius**:');
     });
 
     it('should handle multiple risk assessments', () => {
@@ -174,15 +239,15 @@ describe('pr-comment.ts', () => {
 
       const result = formatScanResult(scanResult, commitSha);
 
-      expect(result).toContain('### 🛡️ Access Risk Assessment');
-      expect(result).toContain('Assessment 1: `AdminRole` → `sensitive-bucket`');
+      expect(result).toContain('### 🔑 Permission Changes');
+      expect(result).toContain(
+        '`arn:aws:iam::123456789012:role/path/to/AdminRole` → `arn:aws:s3:::bucket-name/path/to/sensitive-bucket`'
+      );
       expect(result).toContain('**➕ Added Permissions:**');
       expect(result).toContain('`s3:GetObject`');
       expect(result).toContain('`s3:PutObject`');
       expect(result).toContain('**➖ Removed Permissions:**');
       expect(result).toContain('`s3:DeleteObject`');
-      expect(result).toContain('**➡️ Unchanged Permissions:**');
-      expect(result).toContain('`s3:ListBucket`');
       expect(infoSpy).toHaveBeenCalledWith('Found 1 access permission change(s)');
     });
 
@@ -211,8 +276,10 @@ describe('pr-comment.ts', () => {
 
       const result = formatScanResult(scanResult, commitSha);
 
-      expect(result).toContain('Assessment 1: `Role1` → `arn:aws:s3:::bucket1`');
-      expect(result).toContain('Assessment 2: `User2` → `Table2`');
+      expect(result).toContain('`arn:aws:iam::123456789012:role/Role1` → `arn:aws:s3:::bucket1`');
+      expect(result).toContain(
+        '`arn:aws:iam::123456789012:user/User2` → `arn:aws:dynamodb:us-east-1:123456789012:table/Table2`'
+      );
       expect(result).toContain('**➕ Added Permissions:**');
       expect(result).toContain('`s3:GetObject`');
       expect(result).toContain('**➖ Removed Permissions:**');
@@ -261,7 +328,8 @@ describe('pr-comment.ts', () => {
 
       const result = formatScanResult(scanResult, commitSha);
 
-      expect(result).toContain('## ✅ Terraform Security Analysis');
+      expect(result).toContain('## ✅ Terraform Reachability Analysis');
+      expect(result).toContain('## ✅ Terraform Access Risk Analysis');
       expect(result).toContain('**Status**: No Security Issues Detected');
       expect(result).toContain(commitSha);
     });
@@ -278,7 +346,8 @@ describe('pr-comment.ts', () => {
       const result = formatScanResult(scanResult, commitSha);
 
       expect(result).toContain('All checks passed');
-      expect(result).toContain('## ✅ Terraform Security Analysis');
+      expect(result).toContain('## ✅ Terraform Reachability Analysis');
+      expect(result).toContain('## ✅ Terraform Access Risk Analysis');
       expect(result).toContain('**Status**: No Security Issues Detected');
     });
 
@@ -305,7 +374,8 @@ describe('pr-comment.ts', () => {
 
       expect(result).toContain('⚠️ Unable to parse the detailed results');
       expect(result).toContain('not-json-at-all');
-      expect(result).toContain('## ⚠️ Terraform Security Analysis');
+      expect(result).toContain('## ⚠️ Terraform Reachability Analysis');
+      expect(result).toContain('## ⚠️ Terraform Access Risk Analysis');
       expect(result).toContain('**Status**: Security Issues Detected');
     });
 
@@ -320,8 +390,10 @@ describe('pr-comment.ts', () => {
 
       const result = formatScanResult(scanResult, commitSha);
 
-      expect(result).toContain('<!-- averlon-terraform-scan-comment -->');
-      expect(result).toContain('## ✅ Terraform Security Analysis');
+      expect(result).toContain('<!-- averlon-terraform-reachability -->');
+      expect(result).toContain('<!-- averlon-terraform-access -->');
+      expect(result).toContain('## ✅ Terraform Reachability Analysis');
+      expect(result).toContain('## ✅ Terraform Access Risk Analysis');
       expect(result).toContain('*Analysis performed on commit: `abc123def456`*');
     });
 
@@ -349,8 +421,8 @@ describe('pr-comment.ts', () => {
 
       expect(result).toContain('Resource 1: `aws_instance.web`');
       expect(result).toContain('**Risk Level**: **LOW**');
-      expect(result).not.toContain('**Issues**:');
-      expect(result).not.toContain('**Impact**:');
+      expect(result).not.toContain('**Issues summary:**');
+      expect(result).not.toContain('**Impact:**');
       expect(result).not.toContain('**Vulnerabilities:**');
     });
 
@@ -403,12 +475,12 @@ describe('pr-comment.ts', () => {
 
       const result = formatScanResult(scanResult, commitSha);
 
-      expect(result).toContain('Assessment 1: `Unknown Principal` → `Unknown Resource`');
+      expect(result).toContain('`Unknown Principal` → `Unknown Resource`');
       expect(result).toContain('**➕ Added Permissions:**');
       expect(result).toContain('`s3:GetObject`');
     });
 
-    it('should extract last part of ARN for principals and resources', () => {
+    it('should display full PrincipalID and TargetResourceID in access assessments', () => {
       const scanResult = JSON.stringify({
         AccessAnalysis: {
           AccessPermissions: [
@@ -423,8 +495,49 @@ describe('pr-comment.ts', () => {
 
       const result = formatScanResult(scanResult, commitSha);
 
-      expect(result).toContain('Assessment 1: `MyRole` → `my-object`');
+      expect(result).toContain(
+        '`arn:aws:iam::123456789012:role/path/to/MyRole` → `arn:aws:s3:::bucket/prefix/my-object`'
+      );
       expect(result).toContain('**➕ Added Permissions:**');
+    });
+
+    it('should format AccessAnalysis.Summary.RiskSummary with risk level and impact', () => {
+      const accessRiskSummary = JSON.stringify([
+        {
+          principalId: 'arn:aws:iam::945236499471:role/chatbot-iam-s3-read',
+          targetResources: ['arn:aws:s3:::chatbot-chatbot-data'],
+          groupSize: 1,
+          riskAssessment: {
+            riskLevel: 'High',
+            issuesSummary:
+              'EC2 instance is part of 18 attack chains; IAM role was granted s3:DeleteBucket.',
+            impactAssessment:
+              'Attacker can use s3:PutBucketPolicy to alter access and s3:DeleteBucket.',
+          },
+        },
+      ]);
+
+      const scanResult = JSON.stringify({
+        AccessAnalysis: {
+          Summary: {
+            RiskSummary: accessRiskSummary,
+          },
+        },
+      });
+
+      const result = formatScanResult(scanResult, commitSha);
+
+      expect(result).toContain('### 🛡️ Risk Assessment');
+      expect(result).toContain('`chatbot-iam-s3-read`');
+      expect(result).toContain('chatbot-chatbot-data');
+      expect(result).toContain(
+        '**Principal**: `arn:aws:iam::945236499471:role/chatbot-iam-s3-read`'
+      );
+      expect(result).toContain('**Risk Level**: **High**');
+      expect(result).toContain('**Issues summary:**');
+      expect(result).toContain('EC2 instance is part of 18 attack chains');
+      expect(result).toContain('**Impact:**');
+      expect(result).toContain('Attacker can use s3:PutBucketPolicy');
     });
 
     it('should use correct severity emojis', () => {
@@ -460,7 +573,7 @@ describe('pr-comment.ts', () => {
       expect(result).toContain('**Risk Level**: **CRITICAL**');
     });
 
-    it('should log debug messages during parsing', () => {
+    it('should log when formatting reachability with exposures', () => {
       const scanResult = JSON.stringify({
         ReachabilityAnalysis: {
           Summary: {
@@ -470,11 +583,11 @@ describe('pr-comment.ts', () => {
         },
       });
 
-      formatScanResult(scanResult, commitSha);
+      const result = formatScanResult(scanResult, commitSha);
 
-      expect(debugSpy).toHaveBeenCalledWith(expect.stringContaining('Parsing scan result'));
-      expect(debugSpy).toHaveBeenCalledWith('Found summary data in scan results');
-      expect(debugSpy).toHaveBeenCalledWith('Adding text summary to comment');
+      expect(result).toContain('res1');
+      expect(result).toContain('Terraform Reachability Analysis');
+      expect(infoSpy).toHaveBeenCalledWith('Found 1 new internet exposure(s)');
     });
   });
 
@@ -632,6 +745,24 @@ describe('pr-comment.ts', () => {
       expect(hasRisksInResult(scanResult)).toBe(false);
     });
 
+    it('should return true when AccessAnalysis.Summary.RiskSummary has entries', () => {
+      const accessRiskSummary = JSON.stringify([
+        {
+          principalId: 'arn:aws:iam::123:role/test',
+          targetResources: ['arn:aws:s3:::bucket'],
+          riskAssessment: { riskLevel: 'High' },
+        },
+      ]);
+      const scanResult = JSON.stringify({
+        AccessAnalysis: {
+          AccessPermissions: [], // no permission changes
+          Summary: { RiskSummary: accessRiskSummary },
+        },
+      });
+
+      expect(hasRisksInResult(scanResult)).toBe(true);
+    });
+
     it('should check ReachabilityAnalysis.Summary format', () => {
       const scanResult = JSON.stringify({
         ReachabilityAnalysis: {
@@ -676,6 +807,45 @@ describe('pr-comment.ts', () => {
       });
 
       expect(hasRisksInResult(scanResult)).toBe(true);
+    });
+  });
+
+  describe('enforceCommentBodyLimit', () => {
+    it('returns body unchanged when under limit', () => {
+      const short = 'Hello world';
+      expect(enforceCommentBodyLimit(short)).toBe(short);
+      expect(enforceCommentBodyLimit(short, 100)).toBe(short);
+    });
+
+    it('truncates and appends footer when over limit', () => {
+      const longBody = 'x'.repeat(GITHUB_COMMENT_BODY_MAX_LENGTH + 1000);
+      const result = enforceCommentBodyLimit(longBody);
+      expect(result.length).toBeLessThanOrEqual(GITHUB_COMMENT_BODY_MAX_LENGTH);
+      expect(result).toContain('Full report available in workflow artifacts');
+    });
+
+    it('truncates at a newline boundary when possible', () => {
+      const line = 'First line\nSecond line\nThird line\n';
+      const longBody = line.repeat(5000);
+      const result = enforceCommentBodyLimit(longBody);
+      expect(result.length).toBeLessThanOrEqual(GITHUB_COMMENT_BODY_MAX_LENGTH);
+      expect(result.endsWith('workflow artifacts._')).toBe(true);
+    });
+
+    it('respects custom maxLength when limit fits content + footer', () => {
+      const maxLength = 300;
+      const body = 'a'.repeat(500);
+      const result = enforceCommentBodyLimit(body, maxLength);
+      expect(result.length).toBeLessThanOrEqual(maxLength);
+      expect(result).toContain('workflow artifacts');
+    });
+
+    it('includes link to workflow run when workflowRunUrl is provided', () => {
+      const longBody = 'x'.repeat(GITHUB_COMMENT_BODY_MAX_LENGTH + 1000);
+      const runUrl = 'https://github.com/owner/repo/actions/runs/12345';
+      const result = enforceCommentBodyLimit(longBody, GITHUB_COMMENT_BODY_MAX_LENGTH, runUrl);
+      expect(result).toContain('Show detailed summary (logs & artifacts)');
+      expect(result).toContain(runUrl);
     });
   });
 });
