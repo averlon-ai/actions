@@ -1,20 +1,6 @@
-/**
- * Resource Parser - Unified resource processing module
- *
- * This module handles:
- * - Parsing Helm-rendered YAML input (parseHelmDryRunOutput)
- * - Parsing YAML manifests into resources (parseHelmManifest)
- * - Annotating resources with ARNs (annotateResourceArns)
- * - Resource utilities (grouping, filtering, summaries)
- */
-
 import * as core from '@actions/core';
 import * as yaml from 'js-yaml';
 import { DeploymentMetadata } from './deployment-metadata';
-
-// ============================================================================
-// Type Definitions
-// ============================================================================
 
 export interface HelmTemplateResult {
   manifestYaml: string;
@@ -44,57 +30,34 @@ export interface ParsedResource {
   labels: Record<string, string>;
   annotations: Record<string, string>;
   rawYaml: string;
-  arn?: string;
+  resourceId?: string;
   issues?: ResourceIssue[];
   metadata?: ResourceMetadata;
-  data?: Record<string, string>; // ConfigMap data
+  data?: Record<string, string>;
 }
 
 export interface ResourceMetadata {
-  // Core identifiers
   uid?: string;
   resourceVersion?: string;
   generation?: number;
-
-  // Topology/Location metadata
   region?: string;
   zone?: string;
   cluster?: string;
   awsRegion?: string;
   accountId?: string;
-
-  // Container metadata
   images?: string[];
   containerNames?: string[];
-
-  // Deployment/workload metadata
   replicas?: number;
-
-  // Service metadata
   serviceType?: string;
   serviceName?: string;
   loadBalancerClass?: string;
-
-  // Ingress metadata
   ingressClass?: string;
-
-  // Storage metadata
   storageClass?: string;
-
-  // References to other resources
   configMapRefs?: string[];
   secretRefs?: string[];
   volumeClaims?: string[];
-  referencedArns?: string[];
-
-  // Ownership and relationships
-  ownerReferences?: Array<{
-    kind: string;
-    name: string;
-    uid: string;
-  }>;
-
-  // Selector (for matching pods, etc.)
+  referencedResourceIds?: string[];
+  ownerReferences?: Array<{ kind: string; name: string; uid: string }>;
   selector?: Record<string, string>;
 }
 
@@ -111,15 +74,6 @@ export interface ResourceIssue {
   imageId?: string; // For image/CVE issues, the image asset ID from the backend
 }
 
-// ============================================================================
-// Helm YAML Parsing
-// ============================================================================
-
-/**
- * Parse YAML format input from helm template output
- * Accepts one or more YAML documents separated by ---
- * Normalizes and returns a single YAML string for downstream processing
- */
 export function parseHelmDryRunOutput(input: string): HelmTemplateResult {
   if (!input || input.trim() === '') {
     throw new Error('Input is empty');
@@ -157,27 +111,17 @@ function getStringValue(record: Record<string, unknown>, key: string): string | 
   return typeof value === 'string' ? value : undefined;
 }
 
-// ============================================================================
-// YAML Manifest Parsing
-// ============================================================================
-
-/**
- * Parse Helm template output (which contains multiple YAML documents) into individual resources
- */
 export function parseHelmManifest(manifestYaml: string): ParsedResource[] {
   const resources: ParsedResource[] = [];
 
   try {
-    // Split by YAML document separator
     const documents = manifestYaml.split(/^---$/m).filter(doc => doc.trim() !== '');
-
     core.info(`Found ${documents.length} YAML documents in manifest`);
 
     for (const doc of documents) {
       try {
         const parsed = yaml.load(doc) as K8sResource;
 
-        // Skip empty documents or documents without required fields
         if (!parsed || !parsed.kind || !parsed.metadata?.name) {
           continue;
         }
@@ -190,9 +134,7 @@ export function parseHelmManifest(manifestYaml: string): ParsedResource[] {
           labels: parsed.metadata.labels || {},
           annotations: parsed.metadata.annotations || {},
           rawYaml: doc,
-          // Extract comprehensive metadata
           metadata: extractResourceMetadata(parsed),
-          // Include ConfigMap data for metadata extraction
           data: parsed.data,
         };
 
@@ -216,9 +158,6 @@ export function parseHelmManifest(manifestYaml: string): ParsedResource[] {
   }
 }
 
-/**
- * Extract comprehensive metadata from a Kubernetes resource
- */
 function extractResourceMetadata(resource: K8sResource): ResourceMetadata {
   const metadata: ResourceMetadata = {};
 
@@ -226,7 +165,6 @@ function extractResourceMetadata(resource: K8sResource): ResourceMetadata {
     const spec = resource.spec as Record<string, unknown>;
     const resMetadata = resource.metadata as Record<string, unknown>;
 
-    // Extract core metadata
     if (resMetadata.uid) metadata.uid = resMetadata.uid as string;
     if (resMetadata.resourceVersion) {
       metadata.resourceVersion = resMetadata.resourceVersion as string;
@@ -235,28 +173,19 @@ function extractResourceMetadata(resource: K8sResource): ResourceMetadata {
       metadata.generation = resMetadata.generation as number;
     }
 
-    // Extract topology/location from labels
     if (resMetadata.labels) {
       const labelRecord = resMetadata.labels as Record<string, unknown>;
-      // Region
       metadata.region =
         getStringValue(labelRecord, 'topology.kubernetes.io/region') ||
         getStringValue(labelRecord, 'failure-domain.beta.kubernetes.io/region');
-
-      // Zone
       metadata.zone =
         getStringValue(labelRecord, 'topology.kubernetes.io/zone') ||
         getStringValue(labelRecord, 'failure-domain.beta.kubernetes.io/zone');
-
-      // Cluster
       metadata.cluster =
         getStringValue(labelRecord, 'cluster') ||
         getStringValue(labelRecord, 'eks.amazonaws.com/cluster') ||
         getStringValue(labelRecord, 'eks.amazonaws.com/cluster-name');
-
-      // Extract region from zone if not already set
       if (!metadata.region && metadata.zone) {
-        // Match AWS zone format: region (e.g., us-east-1) + zone letter (a-z)
         const zoneMatch = (metadata.zone as string).match(/^([a-z]{2}-[a-z]+-\d+)[a-z]$/);
         if (zoneMatch) {
           metadata.region = zoneMatch[1];
@@ -264,7 +193,6 @@ function extractResourceMetadata(resource: K8sResource): ResourceMetadata {
       }
     }
 
-    // Extract AWS-specific metadata from annotations
     if (resMetadata.annotations) {
       const annotationRecord = resMetadata.annotations as Record<string, unknown>;
       metadata.awsRegion = getStringValue(annotationRecord, 'aws.amazon.com/region');
@@ -275,19 +203,16 @@ function extractResourceMetadata(resource: K8sResource): ResourceMetadata {
         metadata.cluster = eksCluster;
       }
 
-      // Extract ARNs from annotations
-      const arnMatches = extractArnsFromText(JSON.stringify(resMetadata.annotations));
-      if (arnMatches.length > 0) {
-        metadata.referencedArns = arnMatches;
+      const awsArnMatches = extractAwsArnStringsFromText(JSON.stringify(resMetadata.annotations));
+      if (awsArnMatches.length > 0) {
+        metadata.referencedResourceIds = awsArnMatches;
       }
     }
 
-    // Extract container and image metadata
     const containerData = extractContainerData(spec);
-    metadata.images = containerData.images; // Always set, even if empty array
-    metadata.containerNames = containerData.names; // Always set, even if empty array
+    metadata.images = containerData.images;
+    metadata.containerNames = containerData.names;
 
-    // Extract service metadata
     if (resource.kind === 'Service' && spec) {
       metadata.serviceType = spec.type as string;
       metadata.serviceName = resMetadata.name as string;
@@ -299,7 +224,6 @@ function extractResourceMetadata(resource: K8sResource): ResourceMetadata {
       }
     }
 
-    // Extract ingress metadata
     if (resource.kind === 'Ingress' && resMetadata.annotations) {
       const annotationRecord = resMetadata.annotations as Record<string, unknown>;
       metadata.ingressClass =
@@ -307,21 +231,17 @@ function extractResourceMetadata(resource: K8sResource): ResourceMetadata {
         getStringValue(annotationRecord, 'ingressClassName');
     }
 
-    // Extract storage metadata
     if (resource.kind === 'PersistentVolumeClaim' && spec) {
       metadata.storageClass = (spec as { storageClassName?: string }).storageClassName;
     }
 
-    // Extract volume claims
     const volumeClaims = extractVolumeClaims(spec);
     if (volumeClaims.length > 0) metadata.volumeClaims = volumeClaims;
 
-    // Extract ConfigMap and Secret references
     const refs = extractConfigMapSecretRefs(spec);
     if (refs.configMaps.length > 0) metadata.configMapRefs = refs.configMaps;
     if (refs.secrets.length > 0) metadata.secretRefs = refs.secrets;
 
-    // Extract owner references
     if (resMetadata.ownerReferences) {
       metadata.ownerReferences = (
         resMetadata.ownerReferences as Array<Record<string, unknown>>
@@ -332,12 +252,10 @@ function extractResourceMetadata(resource: K8sResource): ResourceMetadata {
       }));
     }
 
-    // Extract replicas
     if (spec && typeof spec.replicas === 'number') {
       metadata.replicas = spec.replicas;
     }
 
-    // Extract selector
     if (spec && spec.selector && typeof spec.selector === 'object') {
       const selectorRecord = (spec.selector as { matchLabels?: Record<string, string> })
         ?.matchLabels;
@@ -346,18 +264,16 @@ function extractResourceMetadata(resource: K8sResource): ResourceMetadata {
       }
     }
 
-    // Extract additional ARNs from environment variables
-    const envArns = extractArnsFromEnvVars(spec);
-    if (envArns.length > 0) {
-      metadata.referencedArns = [...(metadata.referencedArns || []), ...envArns];
-      metadata.referencedArns = Array.from(new Set(metadata.referencedArns)); // Remove duplicates
+    const envAwsArns = extractAwsArnStringsFromEnvVars(spec);
+    if (envAwsArns.length > 0) {
+      metadata.referencedResourceIds = [...(metadata.referencedResourceIds || []), ...envAwsArns];
+      metadata.referencedResourceIds = Array.from(new Set(metadata.referencedResourceIds));
     }
 
-    // Try to extract account ID from any ARNs we found
-    if (metadata.referencedArns && metadata.referencedArns.length > 0) {
-      const accountIds = extractAccountIdsFromArns(metadata.referencedArns);
+    if (metadata.referencedResourceIds && metadata.referencedResourceIds.length > 0) {
+      const accountIds = extractAccountIdsFromAwsArnStrings(metadata.referencedResourceIds);
       if (accountIds.length > 0 && !metadata.accountId) {
-        metadata.accountId = accountIds[0]; // Use first found account ID
+        metadata.accountId = accountIds[0];
       }
     }
   } catch (error) {
@@ -380,7 +296,6 @@ function extractContainerData(spec: Record<string, unknown>): {
   const names: string[] = [];
 
   try {
-    // For Deployment, StatefulSet, DaemonSet, Job, CronJob
     const templateSpec = (spec?.template as Record<string, unknown>)?.spec as Record<
       string,
       unknown
@@ -395,7 +310,6 @@ function extractContainerData(spec: Record<string, unknown>): {
       }
     }
 
-    // For Pod
     if (spec && !templateSpec) {
       const containers = (spec.containers || []) as Array<Record<string, unknown>>;
       const initContainers = (spec.initContainers || []) as Array<Record<string, unknown>>;
@@ -415,9 +329,6 @@ function extractContainerData(spec: Record<string, unknown>): {
   };
 }
 
-/**
- * Extract volume claim references
- */
 function extractVolumeClaims(spec: Record<string, unknown>): string[] {
   const claims: string[] = [];
 
@@ -436,7 +347,6 @@ function extractVolumeClaims(spec: Record<string, unknown>): string[] {
       }
     }
 
-    // For StatefulSet volumeClaimTemplates
     if (spec?.volumeClaimTemplates) {
       for (const template of spec.volumeClaimTemplates as Array<Record<string, unknown>>) {
         if ((template.metadata as Record<string, unknown>)?.name) {
@@ -451,9 +361,6 @@ function extractVolumeClaims(spec: Record<string, unknown>): string[] {
   return Array.from(new Set(claims));
 }
 
-/**
- * Extract ConfigMap and Secret references from resource spec
- */
 function extractConfigMapSecretRefs(spec: Record<string, unknown>): {
   configMaps: string[];
   secrets: string[];
@@ -467,7 +374,6 @@ function extractConfigMapSecretRefs(spec: Record<string, unknown>): {
       unknown
     >;
 
-    // From volumes
     if (templateSpec && templateSpec.volumes) {
       for (const volume of templateSpec.volumes as Array<Record<string, unknown>>) {
         if ((volume.configMap as Record<string, unknown>)?.name)
@@ -477,10 +383,8 @@ function extractConfigMapSecretRefs(spec: Record<string, unknown>): {
       }
     }
 
-    // From env and envFrom
     if (templateSpec && templateSpec.containers) {
       for (const container of templateSpec.containers as Array<Record<string, unknown>>) {
-        // From env
         if (container.env) {
           for (const envVar of container.env as Array<Record<string, unknown>>) {
             if (
@@ -520,7 +424,6 @@ function extractConfigMapSecretRefs(spec: Record<string, unknown>): {
           }
         }
 
-        // From envFrom
         if (container.envFrom) {
           for (const envFrom of container.envFrom as Array<Record<string, unknown>>) {
             if ((envFrom.configMapRef as Record<string, unknown>)?.name)
@@ -541,11 +444,8 @@ function extractConfigMapSecretRefs(spec: Record<string, unknown>): {
   };
 }
 
-/**
- * Extract ARNs from environment variables
- */
-function extractArnsFromEnvVars(spec: Record<string, unknown>): string[] {
-  const arns: string[] = [];
+function extractAwsArnStringsFromEnvVars(spec: Record<string, unknown>): string[] {
+  const out: string[] = [];
 
   try {
     const templateSpec = ((spec?.template as Record<string, unknown>)?.spec || spec) as Record<
@@ -558,40 +458,31 @@ function extractArnsFromEnvVars(spec: Record<string, unknown>): string[] {
         if (container.env) {
           for (const envVar of container.env as Array<Record<string, unknown>>) {
             if (envVar.value && typeof envVar.value === 'string') {
-              const foundArns = extractArnsFromText(envVar.value);
-              arns.push(...foundArns);
+              const found = extractAwsArnStringsFromText(envVar.value);
+              out.push(...found);
             }
           }
         }
       }
     }
   } catch (error) {
-    core.debug(`Failed to extract ARNs from env vars: ${error}`);
+    core.debug(`Failed to extract AWS ARN strings from env vars: ${error}`);
   }
 
-  return Array.from(new Set(arns));
+  return Array.from(new Set(out));
 }
 
-/**
- * Extract AWS ARNs from text using regex
- * Handles both standard ARNs with account IDs and S3-style ARNs without account IDs
- */
-function extractArnsFromText(text: string): string[] {
-  // Account ID is optional (e.g., S3: arn:aws:s3:::bucket/path)
-  // Also allow * for wildcards (e.g., arn:aws:s3:::bucket/*)
-  const arnPattern = /arn:aws:[\w-]+:[\w-]*:(?:\d{12})?:[\w\-\/:.*]+/g;
-  const matches = text.match(arnPattern);
+function extractAwsArnStringsFromText(text: string): string[] {
+  const pattern = /arn:aws:[\w-]+:[\w-]*:(?:\d{12})?:[\w\-\/:.*]+/g;
+  const matches = text.match(pattern);
   return matches ? Array.from(new Set(matches)) : [];
 }
 
-/**
- * Extract AWS account IDs from ARNs
- */
-function extractAccountIdsFromArns(arns: string[]): string[] {
+function extractAccountIdsFromAwsArnStrings(awsArnStrings: string[]): string[] {
   const accountIds: string[] = [];
 
-  for (const arn of arns) {
-    const match = arn.match(/arn:aws:[\w-]+:[\w-]*:(\d{12}):/);
+  for (const s of awsArnStrings) {
+    const match = s.match(/arn:aws:[\w-]+:[\w-]*:(\d{12}):/);
     if (match) {
       accountIds.push(match[1]);
     }
@@ -600,9 +491,6 @@ function extractAccountIdsFromArns(arns: string[]): string[] {
   return Array.from(new Set(accountIds));
 }
 
-/**
- * Group resources by kind for easier processing
- */
 export function groupResourcesByKind(resources: ParsedResource[]): Map<string, ParsedResource[]> {
   const grouped = new Map<string, ParsedResource[]>();
 
@@ -632,9 +520,6 @@ export function filterResourcesByKind(
   return resources.filter(resource => kinds.includes(resource.kind));
 }
 
-/**
- * Get resource summary statistics
- */
 export function getResourceSummary(resources: ParsedResource[]): Record<string, number> {
   const summary: Record<string, number> = {};
 
@@ -665,7 +550,6 @@ export function extractContainerImages(resource: ParsedResource): string[] {
 
     const images: string[] = [];
 
-    // For Deployment, StatefulSet, DaemonSet, Job, CronJob
     const templateSpec = parsed.spec?.template?.spec;
     if (templateSpec) {
       const containers = templateSpec.containers || [];
@@ -674,7 +558,6 @@ export function extractContainerImages(resource: ParsedResource): string[] {
       images.push(...(initContainers.map(c => c.image).filter(Boolean) as string[]));
     }
 
-    // For Pod
     const podSpec = parsed.spec;
     if (podSpec && !templateSpec) {
       const containers = podSpec.containers || [];
@@ -690,45 +573,60 @@ export function extractContainerImages(resource: ParsedResource): string[] {
   }
 }
 
-// ============================================================================
-// ARN Annotation
-// ============================================================================
-
-/**
- * Annotate resources with ARNs based on deployment metadata
- */
-export function annotateResourceArns(
+export function annotateResourceIds(
   resources: ParsedResource[],
   metadata: DeploymentMetadata | null
 ): void {
-  core.info(`Annotating ARNs for ${resources.length} resources`);
-  core.info(`Metadata: region=${metadata?.region}, cluster=${metadata?.cluster}`);
-
-  if (!metadata?.region || !metadata?.cluster) {
-    core.warning('Cannot generate ARNs: missing region or cluster in metadata');
+  if (!metadata?.cluster) {
+    core.warning('Cannot generate resource IDs: missing cluster in metadata');
     return;
   }
 
-  let annotatedCount = 0;
-  for (const resource of resources) {
-    resource.arn = buildResourceArn(metadata.region, metadata.cluster, resource);
-    annotatedCount++;
+  const provider = metadata.provider;
+  core.info(
+    `Annotating resource IDs for ${resources.length} resources (provider: ${provider ?? 'auto'})`
+  );
+
+  if (provider === 'azure') {
+    if (!metadata.region || !metadata.cluster) {
+      core.warning('Azure: missing region or cluster; cannot build resource IDs');
+      return;
+    }
+    let count = 0;
+    for (const resource of resources) {
+      resource.resourceId = buildResourceId(metadata, resource);
+      count++;
+    }
+    core.info(
+      `✓ Annotated ${count} resources with Azure resource IDs (region:cluster:namespace:Kind:name)`
+    );
+  } else {
+    if (!metadata.region) {
+      core.warning('AWS: missing region; cannot build resource IDs');
+      return;
+    }
+    let count = 0;
+    for (const resource of resources) {
+      resource.resourceId = buildResourceId(metadata, resource);
+      count++;
+    }
+    core.info(
+      `✓ Annotated ${count} resources with AWS resource IDs (region:cluster:namespace:Kind:name)`
+    );
   }
 
-  core.info(`✓ Annotated ${annotatedCount} resources with ARNs`);
-  if (resources.length > 0) {
-    core.info(`Sample ARN: ${resources[0].arn}`);
+  if (resources.length > 0 && resources[0].resourceId) {
+    core.info(`Sample: ${resources[0].resourceId}`);
   }
 }
 
-function buildResourceArn(region: string, cluster: string, resource: ParsedResource): string {
+function buildResourceId(metadata: DeploymentMetadata, resource: ParsedResource): string {
+  const region = metadata.region!;
+  const cluster = metadata.cluster!;
   const namespace = resource.namespace || 'default';
   return `${region}:${cluster}:${namespace}:${resource.kind}:${resource.name}`;
 }
 
-/**
- * Log resource metadata summary
- */
 export function logResourceMetadataSummary(resources: ParsedResource[]): void {
   core.info('\n═══ Resource Metadata Summary ═══');
   core.info(`Total resources: ${resources.length}`);

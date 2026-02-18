@@ -405,3 +405,5 @@ export interface AccessRiskAssessment {
     }>;
   };
 }
+
+export * from './source-control.types';

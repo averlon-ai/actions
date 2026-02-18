@@ -16,7 +16,7 @@ export interface AnalysisResult {
     kind: string;
     name: string;
     namespace: string;
-    arn?: string;
+    resourceId?: string;
     labels: Record<string, string>;
     annotations: Record<string, string>;
     issues: ResourceIssue[];
@@ -32,7 +32,7 @@ export interface AnalysisResult {
       configMapRefs?: string[];
       secretRefs?: string[];
       volumeClaims?: string[];
-      referencedArns?: string[];
+      referencedResourceIds?: string[];
     };
   }>;
 }
@@ -49,7 +49,7 @@ export interface ConsolidatedIssue {
     kind: string;
     name: string;
     namespace: string;
-    arn?: string;
+    resourceId?: string;
   }>;
 }
 
@@ -73,7 +73,7 @@ export interface ConsolidatedIssuesJson {
     kind: string;
     name: string;
     namespace: string;
-    arn?: string;
+    resourceId?: string;
     issueCount: number;
     issues: Array<{
       id: string;
@@ -107,7 +107,7 @@ export function buildAnalysisResult(args: {
       kind: resource.kind,
       name: resource.name,
       namespace: resource.namespace,
-      arn: resource.arn,
+      resourceId: resource.resourceId,
       labels: resource.labels,
       annotations: resource.annotations,
       issues: resource.issues ?? [],
@@ -124,7 +124,7 @@ export function buildAnalysisResult(args: {
             configMapRefs: resource.metadata.configMapRefs,
             secretRefs: resource.metadata.secretRefs,
             volumeClaims: resource.metadata.volumeClaims,
-            referencedArns: resource.metadata.referencedArns,
+            referencedResourceIds: resource.metadata.referencedResourceIds,
           }
         : undefined,
     })),
@@ -176,7 +176,7 @@ export function buildConsolidatedIssuesJson(args: {
       kind: resource.kind,
       name: resource.name,
       namespace: resource.namespace,
-      arn: resource.arn,
+      resourceId: resource.resourceId,
       issueCount: resource.issues.length,
       issues: resource.issues.map(issue => ({
         id: issue.id,
@@ -198,7 +198,7 @@ export function buildConsolidatedIssuesJson(args: {
           kind: resource.kind,
           name: resource.name,
           namespace: resource.namespace,
-          arn: resource.arn,
+          resourceId: resource.resourceId,
         });
       } else {
         issueMap.set(issue.id, {
@@ -216,7 +216,7 @@ export function buildConsolidatedIssuesJson(args: {
               kind: resource.kind,
               name: resource.name,
               namespace: resource.namespace,
-              arn: resource.arn,
+              resourceId: resource.resourceId,
             },
           ],
         });

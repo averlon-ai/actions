@@ -12,9 +12,25 @@ import { selectItemsNeedingUpdateSplit } from './diff';
 
 const OPEN_STATE = 'open';
 
+/** Parse comma-separated fingerprint into sorted set of IDs; merge as union. */
+function mergeFingerprints(existing: string, incoming: string): string {
+  const ids = new Set<string>();
+  for (const s of [existing, incoming]) {
+    if (!s) continue;
+    for (const part of s
+      .split(',')
+      .map(p => p.trim())
+      .filter(Boolean)) {
+      ids.add(part);
+    }
+  }
+  return [...ids].sort().join(',');
+}
+
 /**
  * Fetches all open issues with the given label and parses embedded state from each body.
  * Returns aggregated state for diffing and matching batches.
+ * When the same key appears in multiple issues, fingerprints are merged (union of issue IDs).
  */
 export async function getExistingState(
   octokit: SyncBatchedIssuesOptions<unknown>['octokit'],
@@ -48,7 +64,9 @@ export async function getExistingState(
     for (const key of state.keys) {
       const fp = state.fingerprints[key];
       if (fp !== undefined) {
-        byKey.set(key, { fingerprint: fp, issueNumber: issue.number });
+        const prev = byKey.get(key);
+        const merged = prev ? mergeFingerprints(prev.fingerprint, fp) : fp;
+        byKey.set(key, { fingerprint: merged, issueNumber: prev?.issueNumber ?? issue.number });
       }
     }
   }

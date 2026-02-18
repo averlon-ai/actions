@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'bun:test';
-import { parseHelmManifest, type ParsedResource } from '../../src/resource-parser';
+import {
+  parseHelmManifest,
+  annotateResourceIds,
+  type ParsedResource,
+} from '../../src/resource-parser';
+import type { DeploymentMetadata } from '../../src/deployment-metadata';
 
 describe('Resource-Level Metadata Detection', () => {
   describe('extractMetadataFromResources', () => {
@@ -346,50 +351,69 @@ spec:
     });
   });
 
-  describe('ARN Building with Metadata', () => {
-    it('should use detected metadata for ARN formation', () => {
-      const yaml = `---
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: web-app
-  namespace: production
-  labels:
-    topology.kubernetes.io/region: us-west-2
-    cluster: prod-cluster
-spec:
-  replicas: 3`;
+  describe('Resource ID building with Metadata', () => {
+    it('should build AWS EKS-style resource ID when provider is AWS', () => {
+      const resource: ParsedResource = {
+        kind: 'Deployment',
+        name: 'web-app',
+        namespace: 'production',
+        apiVersion: 'apps/v1',
+        labels: {},
+        annotations: {},
+        rawYaml: '',
+      };
+      const metadata: DeploymentMetadata = {
+        provider: 'aws',
+        region: 'us-west-2',
+        cluster: 'prod-cluster',
+        accountId: '123456789012',
+      };
 
-      const resources = parseHelmManifest(yaml);
-      const resource = resources[0];
+      annotateResourceIds([resource], metadata);
 
-      // Simulate ARN building
-      const region = resource.metadata?.region || 'unknown';
-      const cluster = resource.metadata?.cluster || 'unknown';
-      const namespace = resource.namespace || 'default';
-      const arn = `${region}:${cluster}:${namespace}:${resource.kind}:${resource.name}`;
-
-      expect(arn).toBe('us-west-2:prod-cluster:production:Deployment:web-app');
+      expect(resource.resourceId).toBe('us-west-2:prod-cluster:production:Deployment:web-app');
     });
 
-    it('should handle missing metadata gracefully in ARN building', () => {
-      const yaml = `---
-apiVersion: v1
-kind: Service
-metadata:
-  name: simple-service
-spec:
-  type: ClusterIP`;
+    it('should build Azure resource ID (region:cluster:namespace:Kind:name) when provider is Azure', () => {
+      const resource: ParsedResource = {
+        kind: 'ConfigMap',
+        name: 'app-config',
+        namespace: 'secdi',
+        apiVersion: 'v1',
+        labels: {},
+        annotations: {},
+        rawYaml: '',
+      };
+      const metadata: DeploymentMetadata = {
+        provider: 'azure',
+        region: 'eastus',
+        cluster: 'secdi-azure-dev',
+      };
 
-      const resources = parseHelmManifest(yaml);
-      const resource = resources[0];
+      annotateResourceIds([resource], metadata);
 
-      const region = resource.metadata?.region || 'unknown';
-      const cluster = resource.metadata?.cluster || 'unknown';
-      const namespace = resource.namespace || 'default';
-      const arn = `${region}:${cluster}:${namespace}:${resource.kind}:${resource.name}`;
+      expect(resource.resourceId).toBe('eastus:secdi-azure-dev:secdi:ConfigMap:app-config');
+    });
 
-      expect(arn).toBe('unknown:unknown:default:Service:simple-service');
+    it('should not set resourceId when metadata is missing required fields (e.g. AWS without region)', () => {
+      const resource: ParsedResource = {
+        kind: 'Service',
+        name: 'simple-service',
+        namespace: 'default',
+        apiVersion: 'v1',
+        labels: {},
+        annotations: {},
+        rawYaml: '',
+      };
+      const metadata: DeploymentMetadata = {
+        provider: 'aws',
+        cluster: 'my-cluster',
+        // no region
+      };
+
+      annotateResourceIds([resource], metadata);
+
+      expect(resource.resourceId).toBeUndefined();
     });
   });
 

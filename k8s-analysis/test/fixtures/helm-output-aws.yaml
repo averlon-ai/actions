@@ -1,0 +1,56 @@
+# Simulated helm template output (EKS / AWS)
+# helm template my-release ./chart --namespace demo -f values.yaml
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: demo
+  labels:
+    app.kubernetes.io/name: demo
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: demo-etc
+  namespace: demo
+  labels:
+    app.kubernetes.io/name: demo
+data:
+  app-config-yaml: |
+    hub_region: us-west-2
+    region: ${AWS_REGION}
+    environment: prod
+    service: demo
+    cluster: demo-prod-eks
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: demo-backend
+  namespace: demo
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::111222333444:role/demo-prod-backend
+  labels:
+    app.kubernetes.io/name: demo
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-backend
+  namespace: demo
+  labels:
+    app.kubernetes.io/name: demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: demo-backend
+  template:
+    metadata:
+      labels:
+        app: demo-backend
+    spec:
+      serviceAccountName: demo-backend
+      containers:
+        - name: backend
+          image: myrepo/backend:1.0.0

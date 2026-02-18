@@ -114,7 +114,7 @@ describe('output', () => {
         kind: 'Deployment',
         name: 'app-1',
         namespace: 'production',
-        arn: undefined,
+        resourceId: undefined,
         labels: { app: 'app-1' },
         annotations: { 'deployment.kubernetes.io/revision': '1' },
         issues: [{ id: 'issue-1', severity: 'High', title: 'Test Issue' }],
@@ -156,15 +156,15 @@ describe('output', () => {
         configMapRefs: undefined,
         secretRefs: undefined,
         volumeClaims: undefined,
-        referencedArns: undefined,
+        referencedResourceIds: undefined,
       });
     });
 
-    it('should include ARN when present', () => {
+    it('should include resourceId when present', () => {
       const resources: ParsedResource[] = [
         {
           ...createResource('Deployment', 'app-1'),
-          arn: 'arn:aws:eks:us-west-2:123456789012:cluster/test-cluster/Deployment/production/app-1',
+          resourceId: 'us-west-2:test-cluster:production:Deployment:app-1',
         },
       ];
 
@@ -178,8 +178,8 @@ describe('output', () => {
         filtersRaw: '',
       });
 
-      expect(result.resources[0].arn).toBe(
-        'arn:aws:eks:us-west-2:123456789012:cluster/test-cluster/Deployment/production/app-1'
+      expect(result.resources[0].resourceId).toBe(
+        'us-west-2:test-cluster:production:Deployment:app-1'
       );
     });
 
@@ -439,11 +439,11 @@ describe('output', () => {
       expect(result.resourcesWithIssues[0].issues).toHaveLength(2);
     });
 
-    it('should include ARN in affected resources when present', () => {
+    it('should include resourceId in affected resources when present', () => {
       const resources: ParsedResource[] = [
         {
           ...createResource('Deployment', 'app', 'default', [{ id: 'issue-1', severity: 'High' }]),
-          arn: 'arn:aws:eks:us-west-2:123456789012:cluster/test-cluster/Deployment/default/app',
+          resourceId: 'us-west-2:test-cluster:default:Deployment:app',
         },
       ];
 
@@ -456,8 +456,8 @@ describe('output', () => {
         filtersRaw: '',
       });
 
-      expect(result.issues[0].affectedResources[0].arn).toBe(
-        'arn:aws:eks:us-west-2:123456789012:cluster/test-cluster/Deployment/default/app'
+      expect(result.issues[0].affectedResources[0].resourceId).toBe(
+        'us-west-2:test-cluster:default:Deployment:app'
       );
     });
 

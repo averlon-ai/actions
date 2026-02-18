@@ -113,9 +113,9 @@ async function getPublicImages(
 /**
  * Image issues flow:
  * 1. Filter to public image repos that appear in our resources.
- * 2. Build resourceIdToResource map (resource.arn → resource).
+ * 2. Build resourceIdToResource map (resource.resourceId → resource).
  * 3. Query issues by those repos (chunked); attach each issue to the resource
- *    whose resource.arn equals issue.ResourceID (no fallback).
+ *    whose resource.resourceId equals issue.ResourceID (no fallback).
  */
 async function annotateImageIssues(params: {
   client: ApiClient;
@@ -135,7 +135,7 @@ async function annotateImageIssues(params: {
 
   const resourceIdToResource = new Map<string, ParsedResource>();
   for (const resource of params.resources) {
-    if (resource.arn) resourceIdToResource.set(resource.arn, resource);
+    if (resource.resourceId) resourceIdToResource.set(resource.resourceId, resource);
   }
 
   const chunkSize = getImageRepositoryQueryBatch();
@@ -173,10 +173,10 @@ async function annotateImageIssues(params: {
 
       const issues = response.Issues ?? [];
       for (const issue of issues) {
-        const resourceArn = issue.ResourceID;
-        if (!resourceArn || !resourceIdToResource.has(resourceArn)) continue;
+        const issueResourceId = issue.ResourceID;
+        if (!issueResourceId || !resourceIdToResource.has(issueResourceId)) continue;
 
-        const resource = resourceIdToResource.get(resourceArn)!;
+        const resource = resourceIdToResource.get(issueResourceId)!;
         if (!resource.issues) resource.issues = [];
         if (resource.issues.length >= maxIssuesPerResource) continue;
 
@@ -360,18 +360,18 @@ export async function annotateIssuesFromOpenSearch(params: {
   core.info(`CloudID: ${params.cloudId}`);
   core.info(`Resources received: ${params.resources.length}`);
 
-  const resourcesWithArn = params.resources.filter(resource => resource.arn);
-  if (resourcesWithArn.length === 0) {
-    core.warning('⚠️  No resource ARNs available for issue lookup (region/cluster may be missing)');
+  const resourcesWithResourceId = params.resources.filter(resource => resource.resourceId);
+  if (resourcesWithResourceId.length === 0) {
+    core.warning('⚠️  No resource IDs available for issue lookup (region/cluster may be missing)');
     return;
   }
-  core.info(`Resources with ARN: ${resourcesWithArn.length}`);
+  core.info(`Resources with resource ID: ${resourcesWithResourceId.length}`);
 
-  const arnToResource = new Map<string, ParsedResource>();
+  const resourceIdToResource = new Map<string, ParsedResource>();
   const resourcesByKind = new Map<string, ParsedResource[]>();
-  for (const resource of resourcesWithArn) {
-    const arn = resource.arn!;
-    arnToResource.set(arn, resource);
+  for (const resource of resourcesWithResourceId) {
+    const id = resource.resourceId!;
+    resourceIdToResource.set(id, resource);
     const list = resourcesByKind.get(resource.kind) ?? [];
     list.push(resource);
     resourcesByKind.set(resource.kind, list);
@@ -385,27 +385,27 @@ export async function annotateIssuesFromOpenSearch(params: {
   for (const [kind, resourcesOfKind] of Array.from(resourcesByKind.entries())) {
     const chunks = chunkArray(resourcesOfKind, chunkSize);
     for (const chunk of chunks) {
-      const resourceArns = chunk
-        .map((resource: ParsedResource) => resource.arn)
-        .filter((arn): arn is string => Boolean(arn));
-      if (resourceArns.length === 0) {
+      const resourceIds = chunk
+        .map((resource: ParsedResource) => resource.resourceId)
+        .filter((id): id is string => Boolean(id));
+      if (resourceIds.length === 0) {
         continue;
       }
 
       const filterQuery = buildOpenSearchFilter({
         resourceType: `kubernetes:${kind}`,
-        resourceArns,
+        resourceIds,
         severityValues,
         cloudId: params.cloudId,
         verbose: verboseLogging,
       });
 
-      const limit = Math.min(resourceArns.length * maxIssuesPerResource, 1000);
+      const limit = Math.min(resourceIds.length * maxIssuesPerResource, 1000);
 
       try {
         core.info(`Querying OpenSearch for ${kind}:`);
         core.info(`  CloudID: ${params.cloudId}`);
-        core.info(`  Resources: ${resourceArns.length}`);
+        core.info(`  Resources: ${resourceIds.length}`);
         if (verboseLogging) core.info(`  FilterQuery: ${filterQuery.substring(0, 200)}...`);
 
         const response = await params.client.orgOpenSearchQuery({
@@ -418,11 +418,11 @@ export async function annotateIssuesFromOpenSearch(params: {
 
         const issues = response.Issues ?? [];
         for (const issue of issues) {
-          const resourceArn = issue.ResourceID;
-          if (!resourceArn) {
+          const issueResourceId = issue.ResourceID;
+          if (!issueResourceId) {
             continue;
           }
-          const resource = arnToResource.get(resourceArn);
+          const resource = resourceIdToResource.get(issueResourceId);
           if (!resource) {
             continue;
           }
@@ -490,18 +490,18 @@ export async function annotateIssuesFromOpenSearch(params: {
 function buildOpenSearchFilter(options: {
   cloudId: string;
   resourceType: string;
-  resourceArns: string[];
+  resourceIds: string[];
   severityValues: string[];
   verbose: boolean;
 }): string {
   if (options.verbose) {
-    log('Building OpenSearch filter with options:', options.resourceArns);
+    log('Building OpenSearch filter with options:', options.resourceIds);
   }
   const baseFilters: Array<Record<string, unknown>> = [
     { term: { 'issue.Type': IssueTypeEnum.Misconfiguration } },
     { term: { 'issue.Status': 2 } },
     { term: { 'issue.ResourceType': options.resourceType } },
-    { terms: { 'issue.ResourceID': options.resourceArns } },
+    { terms: { 'issue.ResourceID': options.resourceIds } },
     { terms: { 'issue.CloudID': [options.cloudId] } },
   ];
   pushSeverityFilterIfPresent(baseFilters, options.severityValues);

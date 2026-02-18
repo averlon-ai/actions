@@ -4,16 +4,16 @@ author: 'Averlon'
 
 inputs:
   averlon-api-key:
-    description: "API key for authentication with Averlon"
+    description: 'API key for authentication with Averlon'
     required: true
   averlon-api-secret:
-    description: "API secret for authentication with Averlon"
+    description: 'API secret for authentication with Averlon'
     required: true
   api-key:
-    description: "[Deprecated] API key for authentication (use averlon-api-key instead)"
+    description: '[Deprecated] API key for authentication (use averlon-api-key instead)'
     required: false
   api-secret:
-    description: "[Deprecated] API secret for authentication (use averlon-api-secret instead)"
+    description: '[Deprecated] API secret for authentication (use averlon-api-secret instead)'
     required: false
   manifest-file:
     description: |
@@ -23,23 +23,23 @@ inputs:
       File may contain multiple documents separated by `---`; each must include `kind` and `apiVersion`.
     required: true
   base-url:
-    description: "Base URL for the Averlon API service"
+    description: 'Base URL for the Averlon API service'
     required: false
-    default: "https://wfe.prod.averlon.io/"
+    default: 'https://wfe.prod.averlon.io/'
   cloud-id:
-    description: "secdi Cloud ID for issue lookup. Leave blank to auto-detect."
+    description: 'secdi Cloud ID for issue lookup. Leave blank to auto-detect.'
     required: false
   region:
-    description: "AWS region for ARN generation (e.g., us-west-2). If not provided, will be auto-detected from manifest metadata."
+    description: 'Cloud region for resource ID generation (e.g., us-west-2 for AWS, eastus for Azure). If not provided, will be auto-detected from manifest metadata.'
     required: false
   cluster:
-    description: "Cluster name for ARN generation (e.g., my-cluster). If not provided, will be auto-detected from manifest metadata."
+    description: 'Cluster name for resource ID generation (e.g., my-cluster). If not provided, will be auto-detected from manifest metadata.'
     required: false
   namespace:
-    description: "Kubernetes namespace used for the Helm release (overrides autodetected value from dry run output)"
+    description: 'Kubernetes namespace used for the Helm release (overrides autodetected value from dry run output)'
     required: false
   release-name:
-    description: "Release name used for the Helm release (overrides autodetected value from dry run output)"
+    description: 'Release name used for the Helm release (overrides autodetected value from dry run output)'
     required: false
   github-token:
     description: |
@@ -52,7 +52,7 @@ inputs:
       Severity filters (comma-separated). Supported values: Critical, High, Medium, Low.
       Example: "Critical,High"
     required: false
-    default: "Critical,High"
+    default: 'Critical,High'
   resource-type-filter:
     description: |
       Filter by specific Kubernetes resource types (comma-separated). 
@@ -66,10 +66,9 @@ inputs:
       If not specified, all namespaces are included.
     required: false
   verbose:
-    description: "If true, log full helm output for debugging"
+    description: 'If true, log full helm output for debugging'
     required: false
-    default: "false"
-  
+    default: 'false'
 
 runs:
   using: 'node20'
@@ -77,9 +76,9 @@ runs:
 
 outputs:
   analysis-json:
-    description: "Compact JSON summary (chart, release, namespace, totals)"
+    description: 'Compact JSON summary (chart, release, namespace, totals)'
   analysis-json-path:
-    description: "Path to the JSON file written to disk"
+    description: 'Path to the JSON file written to disk'
 
 branding:
   icon: 'package'

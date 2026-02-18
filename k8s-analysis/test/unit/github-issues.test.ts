@@ -71,6 +71,7 @@ describe('GithubIssuesService', () => {
           number: 1,
           title: 'Test Issue',
           body: 'Test Body',
+          html_url: 'https://github.com/test-owner/test-repo/issues/1',
         },
       })
     );

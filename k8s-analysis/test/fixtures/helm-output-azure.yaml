@@ -1,0 +1,46 @@
+# Simulated helm template output (AKS / Azure)
+# helm template my-release ./chart --namespace demo -f values-azure.yaml
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: demo
+  labels:
+    app.kubernetes.io/name: demo
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: demo-aks-config
+  namespace: demo
+  labels:
+    app.kubernetes.io/name: demo
+data:
+  config.yaml: |
+    location: eastus
+    cluster: demo-azure-prod
+    environment: prod
+    aks_resource_id: /subscriptions/a1b2c3d4-e5f6-7890-abcd-ef1234567890/resourceGroups/rg-prod/providers/Microsoft.ContainerService/managedClusters/demo-azure-prod
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-backend
+  namespace: demo
+  labels:
+    app.kubernetes.io/name: demo
+    kubernetes.azure.com/cluster: demo-azure-prod
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: demo-backend
+  template:
+    metadata:
+      labels:
+        app: demo-backend
+        topology.kubernetes.io/region: eastus
+    spec:
+      containers:
+        - name: backend
+          image: myrepo/backend:1.0.0

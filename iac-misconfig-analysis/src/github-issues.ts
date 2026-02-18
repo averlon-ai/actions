@@ -1,7 +1,9 @@
 import * as core from '@actions/core';
+import * as github from '@actions/github';
 import { CopilotIssueManager } from '@averlon/github-copilot-utils';
-import { AVERLON_CREATED_LABEL } from '@averlon/github-actions-utils';
-import type { TerraformResource } from '@averlon/shared';
+import { AVERLON_CREATED_LABEL, closeIssue } from '@averlon/github-actions-utils';
+import type { TerraformResource, ApiClient } from '@averlon/shared';
+import { SourceControlIssueType } from '@averlon/shared';
 import {
   getExistingState,
   getNewIssueIds,
@@ -51,10 +53,19 @@ function getResourceKey(resource: TerraformResource): string {
   return `terraform:${resource.ID || ''}`;
 }
 
+/** All possible keys for this resource (for looking up existing state). */
+function getResourceKeyVariants(resource: TerraformResource): string[] {
+  const keys: string[] = [];
+  if (resource.Asset?.ID) keys.push(`asset:${resource.Asset.ID}`);
+  if (resource.Asset?.ResourceID) keys.push(`resource:${resource.Asset.ResourceID}`);
+  if (resource.ID) keys.push(`terraform:${resource.ID}`);
+  return keys.length > 0 ? keys : [getResourceKey(resource)];
+}
+
 function getFingerprint(resource: TerraformResource): string {
   const ids = (resource.Issues ?? [])
-    .map(issue => issue.ID)
-    .filter((id): id is string => Boolean(id))
+    .map(issue => (issue.ID != null ? String(issue.ID) : ''))
+    .filter(Boolean)
     .sort();
   return ids.join(',');
 }
@@ -68,6 +79,18 @@ function getWeight(resource: TerraformResource): number {
  * Uses @averlon/copilot-issue-batching for batching and state-in-body sync (no Gist)
  */
 export class GithubIssuesService extends CopilotIssueManager {
+  private apiClient?: ApiClient;
+
+  constructor(
+    octokit: ReturnType<typeof github.getOctokit>,
+    owner: string,
+    repo: string,
+    apiClient?: ApiClient
+  ) {
+    super(octokit, owner, repo);
+    this.apiClient = apiClient;
+  }
+
   /**
    * Create or update GitHub issues for Terraform resources via the shared batching package
    */
@@ -112,12 +135,34 @@ export class GithubIssuesService extends CopilotIssueManager {
     );
     // For changed resources, show only the new issues in the new batch (like main)
     const filteredChanged = changedItems.map(resource => {
-      const existingFp = existing.byKey.get(getResourceKey(resource))?.fingerprint ?? '';
-      const newIds = getNewIssueIds(getFingerprint(resource), existingFp);
-      const newIssues = (resource.Issues ?? []).filter(issue => issue.ID && newIds.has(issue.ID));
+      const currentFp = getFingerprint(resource);
+      let existingFp = '';
+      for (const key of getResourceKeyVariants(resource)) {
+        const entry = existing.byKey.get(key);
+        if (entry?.fingerprint) {
+          existingFp = entry.fingerprint;
+          break;
+        }
+      }
+      const newIds = getNewIssueIds(currentFp, existingFp);
+      const newIssues = (resource.Issues ?? []).filter(
+        issue => issue.ID != null && newIds.has(String(issue.ID))
+      );
+      if (newIssues.length === 0) {
+        core.warning(
+          `Changed resource ${getResourceKey(resource)}: no new issue IDs after filter (current: ${currentFp}, existing: ${existingFp}); skipping`
+        );
+        return null;
+      }
       return { ...resource, Issues: newIssues };
     });
-    const itemsToSync = [...newItems, ...filteredChanged];
+    type ResourceWithIssues = TerraformResource & {
+      Issues: NonNullable<TerraformResource['Issues']>;
+    };
+    const filteredChangedOnly = filteredChanged.filter(
+      (r): r is ResourceWithIssues => r !== null && r !== undefined
+    );
+    const itemsToSync = [...newItems, ...filteredChangedOnly];
 
     if (itemsToSync.length === 0) {
       core.info('No batches to create or update (all items already up to date)');
@@ -170,5 +215,22 @@ export class GithubIssuesService extends CopilotIssueManager {
     }
 
     core.info(`✓ GitHub issues created/updated: #${issueNumbers.join(', #')}`);
+  }
+
+  /**
+   * Close an issue with a comment
+   */
+  private async closeIssue(issueNumber: number, options: { message: string }): Promise<void> {
+    await closeIssue({
+      octokit: this.octokit,
+      owner: this.owner,
+      repo: this.repo,
+      issueNumber,
+      message: options.message,
+      apiClient: this.apiClient,
+      type: SourceControlIssueType.IaC,
+      findPRsLinkedToIssue: (num: number) => this.findPRsLinkedToIssue(num),
+      logMessage: `Closed Terraform scan issue #${issueNumber}`,
+    });
   }
 }

@@ -99,6 +99,7 @@ describe('_runScanTerraformMisconfiguration function', () => {
     githubOwner: 'test-owner',
     githubRepo: 'test-repo',
     autoAssignCopilot: false,
+    IncludeResourcesWithoutIssues: false,
     ...overrides,
   });
 
@@ -142,6 +143,7 @@ describe('_runScanTerraformMisconfiguration function', () => {
       expect(mockStartScanTerraform).toHaveBeenCalledWith({
         RepoName: 'test-owner/test-repo',
         Commit: 'abc123',
+        IncludeResourcesWithoutIssues: false,
       });
       expect(mockGetScanTerraformResult).toHaveBeenCalledWith({
         JobID: 'test-job-123',
@@ -350,6 +352,7 @@ describe('_runScanTerraformMisconfiguration function', () => {
       expect(mockStartScanTerraform).toHaveBeenCalledWith({
         RepoName: 'test-owner/test-repo',
         Commit: 'abc123',
+        IncludeResourcesWithoutIssues: false,
       });
       expect(mockGetScanTerraformResult).not.toHaveBeenCalled();
     });
@@ -739,6 +742,7 @@ describe('_runScanTerraformMisconfiguration function', () => {
       expect(mockStartScanTerraform).toHaveBeenCalledWith({
         RepoName: 'test-owner/custom-repo',
         Commit: 'custom-commit-hash',
+        IncludeResourcesWithoutIssues: false,
       });
     });
 

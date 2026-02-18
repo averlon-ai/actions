@@ -370,11 +370,11 @@ describe('opensearch-issues', () => {
       } as unknown as ApiClient;
     };
 
-    const createResourceWithArn = (
+    const createResourceWithResourceId = (
       kind: string,
       name: string,
       namespace: string = 'default',
-      arn: string = `arn:aws:eks:us-west-2:123456789012:cluster/test-cluster/${kind}/${namespace}/${name}`
+      resourceId: string = `us-west-2:test-cluster:${namespace}:${kind}:${name}`
     ): ParsedResource => ({
       kind,
       name,
@@ -383,10 +383,10 @@ describe('opensearch-issues', () => {
       labels: {},
       annotations: {},
       rawYaml: `apiVersion: v1\nkind: ${kind}\nmetadata:\n  name: ${name}`,
-      arn,
+      resourceId,
     });
 
-    it('should return early when no resources have ARNs', async () => {
+    it('should return early when no resources have resource IDs', async () => {
       const client = createMockClient();
       const resources: ParsedResource[] = [
         {
@@ -408,7 +408,7 @@ describe('opensearch-issues', () => {
       });
 
       expect(mockCoreWarning).toHaveBeenCalledWith(
-        '⚠️  No resource ARNs available for issue lookup (region/cluster may be missing)'
+        '⚠️  No resource IDs available for issue lookup (region/cluster may be missing)'
       );
       expect(client.orgOpenSearchQuery).not.toHaveBeenCalled();
     });
@@ -419,8 +419,7 @@ describe('opensearch-issues', () => {
           Issues: [
             {
               ID: 'issue-1',
-              ResourceID:
-                'arn:aws:eks:us-west-2:123456789012:cluster/test-cluster/Deployment/default/app',
+              ResourceID: 'us-west-2:test-cluster:default:Deployment:app',
               SeverityV2: { Severity: IssueSeverityEnum.High },
               Title: 'Test Issue',
               Summary: 'Test Summary',
@@ -435,7 +434,9 @@ describe('opensearch-issues', () => {
         orgOpenSearchQuery: mockQuery,
       } as unknown as ApiClient;
 
-      const resources: ParsedResource[] = [createResourceWithArn('Deployment', 'app', 'default')];
+      const resources: ParsedResource[] = [
+        createResourceWithResourceId('Deployment', 'app', 'default'),
+      ];
 
       await annotateIssuesFromOpenSearch({
         client,
@@ -458,7 +459,7 @@ describe('opensearch-issues', () => {
         orgOpenSearchQuery: mockQuery,
       } as unknown as ApiClient;
 
-      const resources: ParsedResource[] = [createResourceWithArn('Deployment', 'app')];
+      const resources: ParsedResource[] = [createResourceWithResourceId('Deployment', 'app')];
 
       await annotateIssuesFromOpenSearch({
         client,
@@ -490,10 +491,10 @@ describe('opensearch-issues', () => {
       process.env['RESOURCE_KIND_QUERY_BATCH'] = '2';
 
       const resources: ParsedResource[] = [
-        createResourceWithArn('Deployment', 'app-1'),
-        createResourceWithArn('Deployment', 'app-2'),
-        createResourceWithArn('Deployment', 'app-3'),
-        createResourceWithArn('Service', 'svc-1'),
+        createResourceWithResourceId('Deployment', 'app-1'),
+        createResourceWithResourceId('Deployment', 'app-2'),
+        createResourceWithResourceId('Deployment', 'app-3'),
+        createResourceWithResourceId('Service', 'svc-1'),
       ];
 
       await annotateIssuesFromOpenSearch({
@@ -513,7 +514,7 @@ describe('opensearch-issues', () => {
         orgOpenSearchQuery: mockQuery,
       } as unknown as ApiClient;
 
-      const resources: ParsedResource[] = [createResourceWithArn('Deployment', 'app')];
+      const resources: ParsedResource[] = [createResourceWithResourceId('Deployment', 'app')];
 
       await annotateIssuesFromOpenSearch({
         client,
@@ -541,7 +542,9 @@ describe('opensearch-issues', () => {
         orgOpenSearchQuery: mockQuery,
       } as unknown as ApiClient;
 
-      const resources: ParsedResource[] = [createResourceWithArn('Deployment', 'app', 'default')];
+      const resources: ParsedResource[] = [
+        createResourceWithResourceId('Deployment', 'app', 'default'),
+      ];
       resources[0].metadata = { images: ['nginx:1.19'] };
 
       await annotateIssuesFromOpenSearch({
@@ -568,7 +571,9 @@ describe('opensearch-issues', () => {
         return Promise.resolve({ Issues: [] });
       });
       const client = { orgOpenSearchQuery: mockQuery } as unknown as ApiClient;
-      const resources: ParsedResource[] = [createResourceWithArn('Deployment', 'app', 'default')];
+      const resources: ParsedResource[] = [
+        createResourceWithResourceId('Deployment', 'app', 'default'),
+      ];
       resources[0].metadata = { images: ['nginx:1.19'] };
 
       await annotateIssuesFromOpenSearch({
@@ -595,8 +600,8 @@ describe('opensearch-issues', () => {
       });
       const client = { orgOpenSearchQuery: mockQuery } as unknown as ApiClient;
       const resources: ParsedResource[] = [
-        createResourceWithArn('Service', 'api', 'default'),
-        createResourceWithArn('ConfigMap', 'config', 'default'),
+        createResourceWithResourceId('Service', 'api', 'default'),
+        createResourceWithResourceId('ConfigMap', 'config', 'default'),
       ];
 
       await annotateIssuesFromOpenSearch({
@@ -617,7 +622,9 @@ describe('opensearch-issues', () => {
         return Promise.resolve({ Issues: [] });
       });
       const client = { orgOpenSearchQuery: mockQuery } as unknown as ApiClient;
-      const resources: ParsedResource[] = [createResourceWithArn('Deployment', 'app', 'default')];
+      const resources: ParsedResource[] = [
+        createResourceWithResourceId('Deployment', 'app', 'default'),
+      ];
       resources[0].metadata = {};
 
       await annotateIssuesFromOpenSearch({
@@ -639,7 +646,9 @@ describe('opensearch-issues', () => {
         return Promise.resolve({ Issues: [] });
       });
       const client = { orgOpenSearchQuery: mockQuery } as unknown as ApiClient;
-      const resources: ParsedResource[] = [createResourceWithArn('Deployment', 'app', 'default')];
+      const resources: ParsedResource[] = [
+        createResourceWithResourceId('Deployment', 'app', 'default'),
+      ];
       resources[0].metadata = { images: ['nginx:1.19'] };
 
       await annotateIssuesFromOpenSearch({
@@ -657,7 +666,7 @@ describe('opensearch-issues', () => {
     it('should log "no indices provided" hints when OpenSearch returns that error', async () => {
       const mockQuery = mock((params: any) => Promise.reject(new Error('no indices provided')));
       const client = { orgOpenSearchQuery: mockQuery } as unknown as ApiClient;
-      const resources: ParsedResource[] = [createResourceWithArn('Deployment', 'app')];
+      const resources: ParsedResource[] = [createResourceWithResourceId('Deployment', 'app')];
 
       await annotateIssuesFromOpenSearch({
         client,
@@ -674,9 +683,8 @@ describe('opensearch-issues', () => {
       );
     });
 
-    it('should attach only issues whose ResourceID matches a resource ARN', async () => {
-      const deploymentArn =
-        'arn:aws:eks:us-west-2:123456789012:cluster/test-cluster/Deployment/default/app';
+    it('should attach only issues whose ResourceID matches a resource ID', async () => {
+      const deploymentResourceId = 'us-west-2:test-cluster:default:Deployment:app';
       const mockQuery = mock((params: any) => {
         if (params.QueryID === OpenSearchNamedQueryEnum.Image) {
           return Promise.resolve({ Images: [{ Repository: 'nginx' }] });
@@ -689,7 +697,7 @@ describe('opensearch-issues', () => {
             Issues: [
               {
                 ID: 'vuln-1',
-                ResourceID: deploymentArn,
+                ResourceID: deploymentResourceId,
                 ImageRepository: 'nginx',
                 SeverityV2: { Severity: IssueSeverityEnum.High },
                 Title: 'CVE-1',
@@ -711,8 +719,10 @@ describe('opensearch-issues', () => {
         return Promise.resolve({ Issues: [] });
       });
       const client = { orgOpenSearchQuery: mockQuery } as unknown as ApiClient;
-      const resources: ParsedResource[] = [createResourceWithArn('Deployment', 'app', 'default')];
-      resources[0].arn = deploymentArn;
+      const resources: ParsedResource[] = [
+        createResourceWithResourceId('Deployment', 'app', 'default'),
+      ];
+      resources[0].resourceId = deploymentResourceId;
       resources[0].metadata = { images: ['nginx:1.19'] };
 
       await annotateIssuesFromOpenSearch({
@@ -729,14 +739,13 @@ describe('opensearch-issues', () => {
     });
 
     it('should map issue with missing Severity to severity Unknown', async () => {
-      const deploymentArn =
-        'arn:aws:eks:us-west-2:123456789012:cluster/test-cluster/Deployment/default/app';
+      const deploymentResourceId = 'us-west-2:test-cluster:default:Deployment:app';
       const mockQuery = mock(() =>
         Promise.resolve({
           Issues: [
             {
               ID: 'issue-no-severity',
-              ResourceID: deploymentArn,
+              ResourceID: deploymentResourceId,
               Title: 'Test',
               Summary: 'Summary',
               Type: IssueTypeEnum.Misconfiguration,
@@ -746,8 +755,8 @@ describe('opensearch-issues', () => {
         })
       );
       const client = { orgOpenSearchQuery: mockQuery } as unknown as ApiClient;
-      const resources: ParsedResource[] = [createResourceWithArn('Deployment', 'app')];
-      resources[0].arn = deploymentArn;
+      const resources: ParsedResource[] = [createResourceWithResourceId('Deployment', 'app')];
+      resources[0].resourceId = deploymentResourceId;
 
       await annotateIssuesFromOpenSearch({
         client,
@@ -761,14 +770,13 @@ describe('opensearch-issues', () => {
     });
 
     it('should map issue Severity enum to string (Invalid, Unknown, Low, Medium, High, Critical)', async () => {
-      const deploymentArn =
-        'arn:aws:eks:us-west-2:123456789012:cluster/test-cluster/Deployment/default/app';
+      const deploymentResourceId = 'us-west-2:test-cluster:default:Deployment:app';
       const mockQuery = mock(() =>
         Promise.resolve({
           Issues: [
             {
               ID: 'i1',
-              ResourceID: deploymentArn,
+              ResourceID: deploymentResourceId,
               SeverityV2: { Severity: IssueSeverityEnum.Invalid },
               Title: 'A',
               Type: IssueTypeEnum.Misconfiguration,
@@ -776,7 +784,7 @@ describe('opensearch-issues', () => {
             },
             {
               ID: 'i2',
-              ResourceID: deploymentArn,
+              ResourceID: deploymentResourceId,
               SeverityV2: { Severity: IssueSeverityEnum.Unknown },
               Title: 'B',
               Type: IssueTypeEnum.Misconfiguration,
@@ -784,7 +792,7 @@ describe('opensearch-issues', () => {
             },
             {
               ID: 'i3',
-              ResourceID: deploymentArn,
+              ResourceID: deploymentResourceId,
               SeverityV2: { Severity: IssueSeverityEnum.Low },
               Title: 'C',
               Type: IssueTypeEnum.Misconfiguration,
@@ -792,7 +800,7 @@ describe('opensearch-issues', () => {
             },
             {
               ID: 'i4',
-              ResourceID: deploymentArn,
+              ResourceID: deploymentResourceId,
               SeverityV2: { Severity: IssueSeverityEnum.Medium },
               Title: 'D',
               Type: IssueTypeEnum.Misconfiguration,
@@ -800,7 +808,7 @@ describe('opensearch-issues', () => {
             },
             {
               ID: 'i5',
-              ResourceID: deploymentArn,
+              ResourceID: deploymentResourceId,
               SeverityV2: { Severity: IssueSeverityEnum.High },
               Title: 'E',
               Type: IssueTypeEnum.Misconfiguration,
@@ -808,7 +816,7 @@ describe('opensearch-issues', () => {
             },
             {
               ID: 'i6',
-              ResourceID: deploymentArn,
+              ResourceID: deploymentResourceId,
               SeverityV2: { Severity: IssueSeverityEnum.Critical },
               Title: 'F',
               Type: IssueTypeEnum.Misconfiguration,
@@ -818,8 +826,8 @@ describe('opensearch-issues', () => {
         })
       );
       const client = { orgOpenSearchQuery: mockQuery } as unknown as ApiClient;
-      const resources: ParsedResource[] = [createResourceWithArn('Deployment', 'app')];
-      resources[0].arn = deploymentArn;
+      const resources: ParsedResource[] = [createResourceWithResourceId('Deployment', 'app')];
+      resources[0].resourceId = deploymentResourceId;
 
       await annotateIssuesFromOpenSearch({
         client,
@@ -840,8 +848,7 @@ describe('opensearch-issues', () => {
     it('should respect MAX_ISSUES_PER_RESOURCE limit', async () => {
       const issues: OpenSearchIssue[] = Array.from({ length: 60 }, (_, i) => ({
         ID: `issue-${i}`,
-        ResourceID:
-          'arn:aws:eks:us-west-2:123456789012:cluster/test-cluster/Deployment/default/app',
+        ResourceID: 'us-west-2:test-cluster:default:Deployment:app',
         SeverityV2: { Severity: IssueSeverityEnum.High },
         Title: `Issue ${i}`,
         Summary: `Summary ${i}`,
@@ -856,7 +863,7 @@ describe('opensearch-issues', () => {
 
       process.env['MAX_ISSUES_PER_RESOURCE'] = '50';
 
-      const resources: ParsedResource[] = [createResourceWithArn('Deployment', 'app')];
+      const resources: ParsedResource[] = [createResourceWithResourceId('Deployment', 'app')];
 
       await annotateIssuesFromOpenSearch({
         client,
@@ -874,7 +881,7 @@ describe('opensearch-issues', () => {
         orgOpenSearchQuery: mockQuery,
       } as unknown as ApiClient;
 
-      const resources: ParsedResource[] = [createResourceWithArn('Deployment', 'app')];
+      const resources: ParsedResource[] = [createResourceWithResourceId('Deployment', 'app')];
 
       await annotateIssuesFromOpenSearch({
         client,
@@ -891,12 +898,9 @@ describe('opensearch-issues', () => {
 
     it('should perform complete e2e flow: resource misconfigurations, public images, and image vulnerabilities', async () => {
       // Setup: Create resources with different types and images
-      const deploymentArn =
-        'arn:aws:eks:us-west-2:123456789012:cluster/test-cluster/Deployment/default/web-app';
-      const statefulSetArn =
-        'arn:aws:eks:us-west-2:123456789012:cluster/test-cluster/StatefulSet/default/db';
-      const serviceArn =
-        'arn:aws:eks:us-west-2:123456789012:cluster/test-cluster/Service/default/api';
+      const deploymentResourceId = 'us-west-2:test-cluster:default:Deployment:web-app';
+      const statefulSetResourceId = 'us-west-2:test-cluster:default:StatefulSet:db';
+      const serviceResourceId = 'us-west-2:test-cluster:default:Service:api';
 
       const resources: ParsedResource[] = [
         {
@@ -907,7 +911,7 @@ describe('opensearch-issues', () => {
           labels: {},
           annotations: {},
           rawYaml: 'apiVersion: apps/v1\nkind: Deployment',
-          arn: deploymentArn,
+          resourceId: deploymentResourceId,
           metadata: {
             images: ['nginx:1.19', 'redis:6.2'],
           },
@@ -920,7 +924,7 @@ describe('opensearch-issues', () => {
           labels: {},
           annotations: {},
           rawYaml: 'apiVersion: apps/v1\nkind: StatefulSet',
-          arn: statefulSetArn,
+          resourceId: statefulSetResourceId,
           metadata: {
             images: ['postgres:13'],
           },
@@ -933,7 +937,7 @@ describe('opensearch-issues', () => {
           labels: {},
           annotations: {},
           rawYaml: 'apiVersion: v1\nkind: Service',
-          arn: serviceArn,
+          resourceId: serviceResourceId,
         },
       ];
 
@@ -954,13 +958,13 @@ describe('opensearch-issues', () => {
         if (
           params.QueryID === OpenSearchNamedQueryEnum.Issue &&
           params.FilterQuery.includes('kubernetes:Deployment') &&
-          params.FilterQuery.includes(deploymentArn)
+          params.FilterQuery.includes(deploymentResourceId)
         ) {
           return Promise.resolve({
             Issues: [
               {
                 ID: 'misconfig-deploy-1',
-                ResourceID: deploymentArn,
+                ResourceID: deploymentResourceId,
                 SeverityV2: { Severity: IssueSeverityEnum.High },
                 Title: 'Deployment Security Issue',
                 Summary: 'Missing security context',
@@ -970,7 +974,7 @@ describe('opensearch-issues', () => {
               },
               {
                 ID: 'misconfig-deploy-2',
-                ResourceID: deploymentArn,
+                ResourceID: deploymentResourceId,
                 SeverityV2: { Severity: IssueSeverityEnum.Critical },
                 Title: 'Critical Deployment Issue',
                 Summary: 'Privileged container',
@@ -987,7 +991,7 @@ describe('opensearch-issues', () => {
         if (
           params.QueryID === OpenSearchNamedQueryEnum.Issue &&
           params.FilterQuery.includes('kubernetes:StatefulSet') &&
-          params.FilterQuery.includes(statefulSetArn)
+          params.FilterQuery.includes(statefulSetResourceId)
         ) {
           // Check if severity filter is applied - if so, Medium issues won't be returned
           const filterQuery = JSON.parse(params.FilterQuery);
@@ -1003,7 +1007,7 @@ describe('opensearch-issues', () => {
             Issues: [
               {
                 ID: 'misconfig-stateful-1',
-                ResourceID: statefulSetArn,
+                ResourceID: statefulSetResourceId,
                 SeverityV2: { Severity: IssueSeverityEnum.Medium },
                 Title: 'StatefulSet Issue',
                 Summary: 'Volume mount issue',
@@ -1020,7 +1024,7 @@ describe('opensearch-issues', () => {
         if (
           params.QueryID === OpenSearchNamedQueryEnum.Issue &&
           params.FilterQuery.includes('kubernetes:Service') &&
-          params.FilterQuery.includes(serviceArn)
+          params.FilterQuery.includes(serviceResourceId)
         ) {
           // Check if severity filter is applied - if so, Low issues won't be returned
           const filterQuery = JSON.parse(params.FilterQuery);
@@ -1036,7 +1040,7 @@ describe('opensearch-issues', () => {
             Issues: [
               {
                 ID: 'misconfig-svc-1',
-                ResourceID: serviceArn,
+                ResourceID: serviceResourceId,
                 SeverityV2: { Severity: IssueSeverityEnum.Low },
                 Title: 'Service Issue',
                 Summary: 'Service configuration issue',
@@ -1064,7 +1068,7 @@ describe('opensearch-issues', () => {
           if (imageRepos.includes(CANONICAL.nginx)) {
             issues.push({
               ID: 'vuln-nginx-1',
-              ResourceID: deploymentArn,
+              ResourceID: deploymentResourceId,
               ImageRepository: 'nginx',
               SeverityV2: { Severity: IssueSeverityEnum.Critical },
               Title: 'CVE-2023-1234 in nginx',
@@ -1075,7 +1079,7 @@ describe('opensearch-issues', () => {
             });
             issues.push({
               ID: 'vuln-nginx-2',
-              ResourceID: deploymentArn,
+              ResourceID: deploymentResourceId,
               ImageRepository: 'nginx',
               SeverityV2: { Severity: IssueSeverityEnum.High },
               Title: 'CVE-2023-5678 in nginx',
@@ -1089,7 +1093,7 @@ describe('opensearch-issues', () => {
           if (imageRepos.includes(CANONICAL.redis)) {
             issues.push({
               ID: 'vuln-redis-1',
-              ResourceID: deploymentArn,
+              ResourceID: deploymentResourceId,
               ImageRepository: 'redis',
               SeverityV2: { Severity: IssueSeverityEnum.High },
               Title: 'CVE-2023-9999 in redis',
