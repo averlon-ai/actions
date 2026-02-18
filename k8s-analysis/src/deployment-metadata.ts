@@ -2,371 +2,362 @@ import * as core from '@actions/core';
 import * as yaml from 'js-yaml';
 import { ParsedResource } from './resource-parser';
 
+export type CloudProvider = 'aws' | 'azure';
+
 export interface DeploymentMetadata {
+  provider?: CloudProvider;
   accountId?: string;
+  resourceGroup?: string;
   region?: string;
   cluster?: string;
   environment?: string;
 }
 
-/**
- * Extract deployment metadata from helm USER-SUPPLIED VALUES
- * Generic approach: checks multiple common field name variations
- */
 export function extractDeploymentMetadata(valuesYaml?: string): DeploymentMetadata | null {
-  if (!valuesYaml) {
-    core.debug('No userSuppliedValues provided to extractDeploymentMetadata');
-    return null;
-  }
-
+  if (!valuesYaml) return null;
   try {
     const parsed = yaml.load(valuesYaml);
-    if (!isRecord(parsed)) {
-      core.debug('Parsed userSuppliedValues is not a record');
-      return null;
-    }
+    if (!isRecord(parsed)) return null;
 
-    // Check both top-level and nested sections (app, aws, global, etc.)
-    const appSection = isRecord(parsed.app) ? parsed.app : {};
-    const awsSection = isRecord(parsed.aws) ? parsed.aws : {};
-    const globalSection = isRecord(parsed.global) ? parsed.global : {};
+    const app = isRecord(parsed.app) ? parsed.app : {};
+    const aws = isRecord(parsed.aws) ? parsed.aws : {};
+    const azure = isRecord(parsed.azure) ? parsed.azure : {};
+    const global = isRecord(parsed.global) ? parsed.global : {};
 
-    // Generic account ID extraction (multiple field name variations)
     const accountId =
-      getString(parsed, 'accountId') ??
-      getString(parsed, 'account_id') ??
-      getString(parsed, 'awsAccountId') ??
-      getString(parsed, 'aws_account_id') ??
-      getString(appSection, 'accountId') ??
-      getString(appSection, 'account_id') ??
-      getString(awsSection, 'accountId') ??
-      getString(awsSection, 'account_id') ??
-      getString(globalSection, 'accountId') ??
-      getString(globalSection, 'account_id');
+      getStr(parsed, 'accountId', 'account_id', 'subscriptionId', 'subscription_id') ??
+      getStr(app, 'accountId', 'account_id') ??
+      getStr(aws, 'accountId', 'account_id') ??
+      getStr(azure, 'subscriptionId', 'subscription_id') ??
+      getStr(global, 'accountId', 'account_id');
 
-    // Generic region extraction (multiple field name variations)
     const region =
-      getString(parsed, 'region') ??
-      getString(parsed, 'awsRegion') ??
-      getString(parsed, 'aws_region') ??
-      getString(appSection, 'region') ??
-      getString(appSection, 'aws_region') ??
-      getString(awsSection, 'region') ??
-      getString(globalSection, 'region');
+      getStr(parsed, 'region', 'awsRegion', 'location') ??
+      getStr(app, 'region') ??
+      getStr(aws, 'region') ??
+      getStr(azure, 'location', 'region') ??
+      getStr(global, 'region');
 
-    // Generic cluster extraction (multiple field name variations)
     const cluster =
-      getString(parsed, 'cluster') ??
-      getString(parsed, 'clusterName') ??
-      getString(parsed, 'cluster_name') ??
-      getString(parsed, 'eksCluster') ??
-      getString(parsed, 'eks_cluster') ??
-      getString(appSection, 'cluster') ??
-      getString(appSection, 'cluster_name') ??
-      getString(awsSection, 'cluster') ??
-      getString(globalSection, 'cluster');
+      getStr(parsed, 'cluster', 'clusterName', 'cluster_name') ??
+      getStr(app, 'cluster', 'cluster_name') ??
+      getStr(aws, 'cluster') ??
+      getStr(azure, 'cluster', 'clusterName', 'aksCluster') ??
+      getStr(global, 'cluster');
 
-    core.debug(
-      `Extracted from values: accountId=${accountId}, region=${region}, cluster=${cluster}`
-    );
-
-    // Also extract application-specific metadata (if present)
     const metadata: DeploymentMetadata = {
-      accountId,
-      region,
-      cluster,
-      environment: getString(appSection, 'env') ?? getString(parsed, 'environment'),
+      accountId: accountId ?? undefined,
+      region: region ?? undefined,
+      cluster: cluster ?? undefined,
+      environment: getStr(app, 'env') ?? getStr(parsed, 'environment') ?? undefined,
     };
-
-    const hasMetadata = Boolean(
-      metadata.accountId || metadata.region || metadata.cluster || metadata.environment
-    );
-
-    return hasMetadata ? metadata : null;
-  } catch (error) {
-    core.debug(
-      `Failed to parse USER-SUPPLIED VALUES block for metadata: ${
-        error instanceof Error ? error.message : String(error)
-      }`
-    );
+    const hasAny =
+      metadata.accountId || metadata.region || metadata.cluster || metadata.environment;
+    return hasAny ? metadata : null;
+  } catch {
     return null;
   }
 }
 
-/**
- * Extract region from any AWS ARN
- * Generic: works with IAM, ACM, WAF, ELB, EKS, etc.
- * ARN format: arn:partition:service:region:account-id:resource
- */
-function extractRegionFromArn(arn: string): string | undefined {
-  const parts = arn.split(':');
-  // Region is at index 3, but skip if it's empty (global services like IAM)
-  if (parts.length >= 4 && parts[3] && parts[3].match(/^[a-z]{2}-[a-z]+-\d+$/)) {
-    return parts[3];
+function getStr(record: Record<string, unknown>, ...keys: string[]): string | null {
+  for (const k of keys) {
+    const v = record[k];
+    if (typeof v === 'string' && v.trim()) return v;
   }
+  return null;
+}
+
+const EKS_LABEL_PREFIX = 'eks.amazonaws.com/';
+const AZURE_LABEL_PREFIX = 'kubernetes.azure.com/';
+
+function hasLabelOrAnnotationKey(obj: Record<string, unknown>, prefix: string): boolean {
+  return Object.keys(obj).some(k => k.startsWith(prefix));
+}
+
+export function detectProvider(resources: ParsedResource[]): CloudProvider | undefined {
+  let aws = false;
+  let azure = false;
+  for (const r of resources) {
+    const labels = r.labels || {};
+    const annotations = r.annotations || {};
+    const text = JSON.stringify(labels) + JSON.stringify(annotations);
+    if (
+      hasLabelOrAnnotationKey(labels, EKS_LABEL_PREFIX) ||
+      hasLabelOrAnnotationKey(annotations, EKS_LABEL_PREFIX) ||
+      text.includes('arn:aws:') ||
+      annotations['aws.amazon.com/region']
+    )
+      aws = true;
+    if (
+      hasLabelOrAnnotationKey(labels, AZURE_LABEL_PREFIX) ||
+      hasLabelOrAnnotationKey(annotations, AZURE_LABEL_PREFIX) ||
+      text.includes('/subscriptions/') ||
+      text.includes('Microsoft.ContainerService')
+    )
+      azure = true;
+    if (r.kind === 'ConfigMap' && r.data) {
+      for (const v of Object.values(r.data)) {
+        if (typeof v === 'string') {
+          if (v.includes('/subscriptions/')) azure = true;
+          if (v.includes('arn:aws:')) aws = true;
+        }
+      }
+    }
+  }
+  if (azure && !aws) return 'azure';
+  if (aws) return 'aws';
   return undefined;
 }
 
-/**
- * Extract account ID from any AWS ARN
- * ARN format: arn:partition:service:region:account-id:resource
- */
-function extractAccountFromArn(arn: string): string | undefined {
-  const parts = arn.split(':');
-  // Account ID is at index 4
-  if (parts.length >= 5 && parts[4] && parts[4].match(/^\d{12}$/)) {
-    return parts[4];
-  }
-  return undefined;
+function parseAwsArnString(awsArn: string): { region?: string; accountId?: string } {
+  const parts = awsArn.split(':');
+  const region =
+    parts.length >= 4 && parts[3]?.match(/^[a-z]{2}-[a-z]+-\d+$/) ? parts[3] : undefined;
+  const accountId = parts.length >= 5 && parts[4]?.match(/^\d{12}$/) ? parts[4] : undefined;
+  return { region, accountId };
 }
 
-/**
- * Generic extraction from ConfigMap data
- * Scans all data values for common patterns (YAML, JSON, env vars)
- */
-function extractFromConfigMapData(data: Record<string, string>): {
+const AZURE_AKS_ID =
+  /\/subscriptions\/([a-f0-9-]+)\/resourceGroups\/([^/]+)\/providers\/Microsoft\.ContainerService\/managedClusters\/([a-zA-Z0-9_-]+)/i;
+const AZURE_REGIONS =
+  /\b(eastus|eastus2|westus|westus2|centralus|northeurope|westeurope|uksouth|southeastasia|eastasia|australiaeast|canadacentral|brazilsouth|japaneast|japanwest)\b/i;
+
+const AZURE_RESOURCE_GROUP_PATTERNS = [
+  /(?:resourceGroup|resource_group|resourceGroupName|aks_resource_group)\s*[:=]\s*["']?([a-zA-Z0-9_-]+)["']?/i,
+  /RESOURCE_GROUP\s*=\s*["']?([a-zA-Z0-9_-]+)["']?/i,
+  /(?:azure\.)?resourceGroup\s*:\s*["']?([a-zA-Z0-9_-]+)["']?/i,
+];
+
+const AZURE_SUBSCRIPTION_ID_PATTERNS = [
+  /(?:subscriptionId|subscription_id|azure\.subscriptionId)\s*[:=]\s*["']?([a-f0-9-]{36})["']?/i,
+  /SUBSCRIPTION_ID\s*=\s*["']?([a-f0-9-]{36})["']?/i,
+  /(?:subscriptionId|subscription_id)\s*[:=]\s*["']?([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})["']?/i,
+];
+
+function fromAzureText(text: string): {
   region?: string;
   cluster?: string;
   accountId?: string;
+  resourceGroup?: string;
 } {
-  let region: string | undefined;
-  let cluster: string | undefined;
-  let accountId: string | undefined;
-
-  for (const [key, value] of Object.entries(data)) {
-    if (region && cluster && accountId) {
-      break;
-    }
-
-    if (typeof value !== 'string') {
-      continue;
-    }
-
-    // Extract from ARNs anywhere in the value
-    if (!region || !accountId) {
-      const arnRegex = /arn:aws:[^:]+:[^:]*:[^:]*:[^\s"'\n,}]*/g;
-      let match;
-      while ((match = arnRegex.exec(value)) !== null) {
-        const arn = match[0];
-        if (!region) {
-          const arnRegion = extractRegionFromArn(arn);
-          if (arnRegion) {
-            region = arnRegion;
-            core.debug(`Extracted region '${region}' from ARN in ConfigMap['${key}']`);
-          }
-        }
-        if (!accountId) {
-          const arnAccount = extractAccountFromArn(arn);
-          if (arnAccount) {
-            accountId = arnAccount;
-            core.debug(`Extracted accountId '${accountId}' from ARN in ConfigMap['${key}']`);
-          }
-        }
-      }
-    }
-
-    // Extract region from common YAML/env patterns
-    if (!region) {
-      const regionPatterns = [
-        /(?:aws[_-]?)?region:\s*([a-z]{2}-[a-z]+-\d+)/i,
-        /(?:hub[_-]?)?region[_-]?name?:\s*([a-z]{2}-[a-z]+-\d+)/i,
-        /AWS_REGION[=:]\s*([a-z]{2}-[a-z]+-\d+)/i,
-      ];
-      for (const pattern of regionPatterns) {
-        const match = value.match(pattern);
-        if (match && match[1] && !match[1].startsWith('${')) {
-          region = match[1];
-          core.debug(`Extracted region '${region}' from pattern in ConfigMap['${key}']`);
-          break;
-        }
-      }
-    }
-
-    // Extract cluster from common patterns
-    if (!cluster) {
-      const clusterPatterns = [
-        /^cluster:\s*([a-zA-Z0-9_-]+)/im, // "cluster: name" (most common)
-        /cluster[_-]?name:\s*([a-zA-Z0-9_-]+)/i, // "cluster_name:" or "cluster-name:"
-        /eks[_-]?cluster:\s*([a-zA-Z0-9_-]+)/i, // "eks_cluster:" or "eks-cluster:"
-        /CLUSTER_NAME[=:]\s*([a-zA-Z0-9_-]+)/i, // "CLUSTER_NAME=" or "CLUSTER_NAME:"
-      ];
-      for (const pattern of clusterPatterns) {
-        const match = value.match(pattern);
-        if (match && match[1] && !match[1].startsWith('${')) {
-          cluster = match[1];
-          core.debug(`Extracted cluster '${cluster}' from pattern in ConfigMap['${key}']`);
-          break;
-        }
+  const id = text.match(AZURE_AKS_ID);
+  const region = text.match(AZURE_REGIONS)?.[1]?.toLowerCase();
+  let resourceGroup = id?.[2];
+  if (!resourceGroup) {
+    for (const re of AZURE_RESOURCE_GROUP_PATTERNS) {
+      const m = text.match(re);
+      if (m?.[1]?.trim() && !m[1].startsWith('${')) {
+        resourceGroup = m[1].trim();
+        break;
       }
     }
   }
+  let accountId = id?.[1];
+  if (!accountId) {
+    for (const re of AZURE_SUBSCRIPTION_ID_PATTERNS) {
+      const m = text.match(re);
+      if (m?.[1]?.trim() && !m[1].startsWith('${')) {
+        accountId = m[1].trim();
+        break;
+      }
+    }
+  }
+  return {
+    accountId,
+    resourceGroup,
+    cluster: id?.[3],
+    region: region ?? text.match(/(?:location|region)[=:]\s*([a-z0-9]+)/i)?.[1]?.toLowerCase(),
+  };
+}
 
-  return { region, cluster, accountId };
+function fromConfigMapData(data: Record<string, string>): {
+  region?: string;
+  cluster?: string;
+  accountIdAws?: string;
+  accountIdAzure?: string;
+  resourceGroupAzure?: string;
+} {
+  let region: string | undefined;
+  let cluster: string | undefined;
+  let accountIdAws: string | undefined;
+  let accountIdAzure: string | undefined;
+  let resourceGroupAzure: string | undefined;
+
+  const rgKeys = ['resourceGroup', 'resource_group', 'resourceGroupName', 'aks_resource_group'];
+  const subKeys = ['subscriptionId', 'subscription_id', 'azure_subscription_id'];
+  for (const key of Object.keys(data)) {
+    const k = key.toLowerCase().replace(/[-.]/g, '_');
+    if (rgKeys.some(rg => rg.toLowerCase().replace(/[-.]/g, '_') === k)) {
+      const v = data[key];
+      if (typeof v === 'string' && v.trim() && !v.startsWith('${')) resourceGroupAzure = v.trim();
+    }
+    if (subKeys.some(sk => sk.toLowerCase().replace(/[-.]/g, '_') === k)) {
+      const v = data[key];
+      if (
+        !accountIdAzure &&
+        typeof v === 'string' &&
+        v.trim() &&
+        !v.startsWith('${') &&
+        /^[a-f0-9-]{36}$/i.test(v.trim())
+      )
+        accountIdAzure = v.trim();
+    }
+  }
+
+  for (const value of Object.values(data)) {
+    if (typeof value !== 'string') continue;
+
+    const arnMatches = value.match(/arn:aws:[^:]+:[^:]*:[^:]*:[^\s"'\n,}]*/g);
+    if (arnMatches?.length) {
+      for (const awsArn of arnMatches) {
+        const { region: r, accountId: a } = parseAwsArnString(awsArn);
+        if (r && !region) region = r;
+        if (a && !accountIdAws) accountIdAws = a;
+      }
+    }
+    if (!region) {
+      const m = value.match(/(?:hub_region|region|AWS_REGION)[=:\s]+([a-z]{2}-[a-z]+-\d+)/i);
+      if (m?.[1]) region = m[1];
+    }
+    const az = fromAzureText(value);
+    if (az.region && !region) region = az.region;
+    if (az.cluster && !cluster) cluster = az.cluster;
+    if (az.accountId && !accountIdAzure) accountIdAzure = az.accountId;
+    if (az.resourceGroup && !resourceGroupAzure) resourceGroupAzure = az.resourceGroup;
+    if (!cluster) {
+      const m =
+        value.match(/cluster\s*[:=]\s*([a-zA-Z0-9_-]+)/i) ??
+        value.match(/cluster[_\-]name\s*[:=]\s*([a-zA-Z0-9_-]+)/i) ??
+        value.match(/eks_cluster\s*[:=]\s*([a-zA-Z0-9_-]+)/i) ??
+        value.match(/CLUSTER_NAME\s*[:=]\s*([a-zA-Z0-9_-]+)/);
+      if (m?.[1] && !m[1].startsWith('${')) cluster = m[1];
+    }
+  }
+
+  return { region, cluster, accountIdAws, accountIdAzure, resourceGroupAzure };
 }
 
 export function extractMetadataFromResources(resources: ParsedResource[]): {
   region?: string;
   cluster?: string;
   accountId?: string;
+  provider?: CloudProvider;
+  resourceGroup?: string;
 } {
+  const provider = detectProvider(resources);
   let region: string | undefined;
   let cluster: string | undefined;
-  let accountId: string | undefined;
+  let accountIdAws: string | undefined;
+  let accountIdAzure: string | undefined;
+  let resourceGroup: string | undefined;
 
-  // PRIORITY 1: Check ConfigMaps FIRST (most reliable source - contains helm values)
-  for (const resource of resources) {
-    if (region && cluster && accountId) {
-      break;
-    }
-
-    if (resource.kind === 'ConfigMap' && resource.data) {
-      const configData = extractFromConfigMapData(resource.data);
-      if (!region && configData.region) {
-        region = configData.region;
-        core.info(`✓ Found region in ConfigMap '${resource.name}': ${region}`);
-      }
-      if (!cluster && configData.cluster) {
-        cluster = configData.cluster;
-        core.info(`✓ Found cluster in ConfigMap '${resource.name}': ${cluster}`);
-      }
-      if (!accountId && configData.accountId) {
-        accountId = configData.accountId;
-        core.info(`✓ Found accountId in ConfigMap '${resource.name}': ${accountId}`);
-      }
-    }
+  for (const r of resources) {
+    if (r.kind !== 'ConfigMap' || !r.data) continue;
+    const cm = fromConfigMapData(r.data);
+    if (cm.region && !region) region = cm.region;
+    if (cm.cluster && !cluster) cluster = cm.cluster;
+    if (cm.accountIdAws && !accountIdAws) accountIdAws = cm.accountIdAws;
+    if (cm.accountIdAzure && !accountIdAzure) accountIdAzure = cm.accountIdAzure;
+    if (cm.resourceGroupAzure && !resourceGroup) resourceGroup = cm.resourceGroupAzure;
   }
 
-  // PRIORITY 2: Check other resources only if ConfigMaps didn't have the values
-  for (const resource of resources) {
-    if (region && cluster && accountId) {
-      break;
-    }
+  for (const r of resources) {
+    const labels = r.labels || {};
+    const annotations = r.annotations || {};
+    const meta = r.metadata;
 
-    // Skip ConfigMaps (already processed above)
-    if (resource.kind === 'ConfigMap') {
-      continue;
-    }
-
-    // 2. Extract from resource metadata (if set directly)
-    const resourceMeta = resource.metadata;
-    if (resourceMeta) {
-      if (!region) {
-        region = resourceMeta.region || resourceMeta.awsRegion;
-      }
-      if (!cluster) {
-        cluster = resourceMeta.cluster;
-      }
-      if (!accountId) {
-        accountId = resourceMeta.accountId;
-      }
-    }
-
-    // 3. Extract from Kubernetes topology labels (standard k8s)
-    if (!region && resource.labels) {
+    if (!region) {
       region =
-        resource.labels['topology.kubernetes.io/region'] ||
-        resource.labels['failure-domain.beta.kubernetes.io/region'];
-
-      if (!region) {
-        const zone =
-          resource.labels['topology.kubernetes.io/zone'] ||
-          resource.labels['failure-domain.beta.kubernetes.io/zone'];
-        if (zone) {
-          const match = zone.match(/^(.+)[a-z]$/);
-          if (match) {
-            region = match[1];
-            core.debug(`Extracted region '${region}' from zone '${zone}'`);
-          }
-        }
+        labels['topology.kubernetes.io/region'] ||
+        labels['failure-domain.beta.kubernetes.io/region'] ||
+        meta?.region ||
+        meta?.awsRegion ||
+        annotations['aws.amazon.com/region'];
+      if (!region && labels['topology.kubernetes.io/zone']) {
+        const z = labels['topology.kubernetes.io/zone'];
+        const m = z.match(/^([a-z]{2}-[a-z]+-\d+)[a-z]$/);
+        if (m) region = m[1];
       }
     }
 
-    // 4. Extract from annotations (AWS/EKS specific)
-    if (resource.annotations) {
-      if (!cluster) {
-        cluster =
-          resource.annotations['eks.amazonaws.com/cluster-name'] ||
-          resource.annotations['eks.amazonaws.com/cluster'];
-      }
-      if (!region) {
-        region = resource.annotations['aws.amazon.com/region'];
-      }
-      if (!accountId) {
-        accountId = resource.annotations['aws.amazon.com/account-id'];
-      }
-
-      // Extract from ANY ARN in annotations (generic approach)
-      if (!region || !accountId) {
-        for (const value of Object.values(resource.annotations)) {
-          if (typeof value === 'string' && value.startsWith('arn:aws:')) {
-            if (!region) {
-              const arnRegion = extractRegionFromArn(value);
-              if (arnRegion) {
-                region = arnRegion;
-                core.debug(`Extracted region '${region}' from ARN in annotations`);
-              }
-            }
-            if (!accountId) {
-              const arnAccount = extractAccountFromArn(value);
-              if (arnAccount) {
-                accountId = arnAccount;
-                core.debug(`Extracted accountId '${accountId}' from ARN in annotations`);
-              }
-            }
-          }
-        }
-      }
-    }
-
-    // 5. Extract cluster from common labels (generic approach)
-    if (!cluster && resource.labels) {
+    if (!cluster) {
       cluster =
-        resource.labels['cluster'] ||
-        resource.labels['cluster-name'] ||
-        resource.labels['eks.amazonaws.com/cluster'] ||
-        resource.labels['eks.amazonaws.com/cluster-name'] ||
-        resource.labels['app.kubernetes.io/instance']; // Helm release name
+        labels['cluster'] ||
+        labels['cluster-name'] ||
+        labels['eks.amazonaws.com/cluster'] ||
+        labels['eks.amazonaws.com/cluster-name'] ||
+        labels['kubernetes.azure.com/cluster'] ||
+        labels['app.kubernetes.io/instance'] ||
+        meta?.cluster ||
+        annotations['eks.amazonaws.com/cluster-name'] ||
+        annotations['eks.amazonaws.com/cluster'];
+      if (labels['kubernetes.azure.com/cluster']?.startsWith('/')) {
+        const az = fromAzureText(labels['kubernetes.azure.com/cluster']);
+        if (az.cluster) cluster = az.cluster;
+        if (az.accountId && !accountIdAzure) accountIdAzure = az.accountId;
+        if (az.resourceGroup && !resourceGroup) resourceGroup = az.resourceGroup;
+      }
+      for (const v of Object.values(annotations)) {
+        if (typeof v === 'string' && v.includes('/subscriptions/')) {
+          const az = fromAzureText(v);
+          if (az.cluster && !cluster) cluster = az.cluster;
+          if (az.accountId && !accountIdAzure) accountIdAzure = az.accountId;
+          if (az.resourceGroup && !resourceGroup) resourceGroup = az.resourceGroup;
+        }
+      }
+    }
+
+    if (provider === 'aws') {
+      if (!accountIdAws) {
+        accountIdAws = meta?.accountId ?? annotations['aws.amazon.com/account-id'];
+        if (!accountIdAws) {
+          for (const v of Object.values(annotations)) {
+            if (typeof v === 'string' && v.startsWith('arn:aws:')) {
+              const { accountId: a } = parseAwsArnString(v);
+              if (a) {
+                accountIdAws = a;
+                break;
+              }
+            }
+          }
+        }
+      }
+      if (!region) {
+        for (const v of Object.values(annotations)) {
+          if (typeof v === 'string' && v.startsWith('arn:aws:')) {
+            const { region: r } = parseAwsArnString(v);
+            if (r) {
+              region = r;
+              break;
+            }
+          }
+        }
+      }
     }
   }
 
-  if (region) {
-    core.info(`✓ Detected region from resources: ${region}`);
-  }
-  if (cluster) {
-    core.info(`✓ Detected cluster from resources: ${cluster}`);
-  }
-  if (accountId) {
-    core.info(`✓ Detected account ID from resources: ${accountId}`);
-  }
+  const accountId =
+    provider === 'azure' ? (accountIdAzure ?? accountIdAws) : (accountIdAws ?? accountIdAzure);
 
-  return { region, cluster, accountId };
+  if (region) core.info(`✓ Detected region: ${region}`);
+  if (cluster) core.info(`✓ Detected cluster: ${cluster}`);
+  if (accountId) core.info(`✓ Detected account ID`);
+  if (provider) core.info(`✓ Detected provider: ${provider}`);
+  if (resourceGroup) core.info(`✓ Detected resource group: ${resourceGroup}`);
+
+  return { region, cluster, accountId, provider, resourceGroup };
 }
 
 export function logDeploymentMetadata(metadata: DeploymentMetadata | null): void {
-  if (!metadata) {
-    return;
-  }
-
-  core.info('\nDeployment metadata extracted from values:');
-  if (metadata.accountId) {
-    core.info(`  Account ID: ${metadata.accountId}`);
-  }
-  if (metadata.region) {
-    core.info(`  Region: ${metadata.region}`);
-  }
-  if (metadata.environment) {
-    core.info(`  Environment: ${metadata.environment}`);
-  }
-  if (metadata.cluster) {
-    core.info(`  Cluster: ${metadata.cluster}`);
-  }
+  if (!metadata) return;
+  core.info('\nDeployment metadata:');
+  if (metadata.provider) core.info(`  Provider: ${metadata.provider}`);
+  if (metadata.accountId) core.info(`  Account ID: ${metadata.accountId}`);
+  if (metadata.region) core.info(`  Region: ${metadata.region}`);
+  if (metadata.cluster) core.info(`  Cluster: ${metadata.cluster}`);
+  if (metadata.environment) core.info(`  Environment: ${metadata.environment}`);
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function getString(record: Record<string, unknown>, key: string): string | undefined {
-  const value = record[key];
-  return typeof value === 'string' ? value : undefined;
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
 }

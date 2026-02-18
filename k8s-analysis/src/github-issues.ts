@@ -1,7 +1,12 @@
 import * as core from '@actions/core';
 import * as github from '@actions/github';
 import { CopilotIssueManager, IssueState } from '@averlon/github-copilot-utils';
-import { AVERLON_CREATED_LABEL } from '@averlon/github-actions-utils';
+import {
+  AVERLON_CREATED_LABEL,
+  createOrUpdateIssue,
+  createPRForIssue,
+  closeIssue,
+} from '@averlon/github-actions-utils';
 import {
   getExistingState,
   getNewIssueIds,
@@ -11,6 +16,8 @@ import {
 } from '@averlon/copilot-issue-batching';
 import type { ParsedResource } from './resource-parser';
 import { generateIssueBody, generateIssueTitle } from './issue-template';
+import type { ApiClient } from '@averlon/shared';
+import { SourceControlIssueType } from '@averlon/shared';
 
 // Action-specific constants
 const AVERLON_K8S_ANALYSIS_LABEL = 'averlon-k8s-analysis';
@@ -84,8 +91,16 @@ export function normalizeResourceIdentifier(identifier: string): string {
  * Extends CopilotIssueManager with Helm-specific logic
  */
 export class GithubIssuesService extends CopilotIssueManager {
-  constructor(octokit: ReturnType<typeof github.getOctokit>, owner: string, repo: string) {
+  private apiClient?: ApiClient;
+
+  constructor(
+    octokit: ReturnType<typeof github.getOctokit>,
+    owner: string,
+    repo: string,
+    apiClient?: ApiClient
+  ) {
     super(octokit, owner, repo);
+    this.apiClient = apiClient;
   }
 
   /**
@@ -118,6 +133,21 @@ export class GithubIssuesService extends CopilotIssueManager {
       namespace,
       resource,
     }));
+
+    // Collect issue IDs for dashboard registration (from incoming)
+    const issueIds = new Set<string>();
+    for (const resource of resources) {
+      if (resource.issues && resource.issues.length > 0) {
+        for (const issue of resource.issues) {
+          if (issue.id) issueIds.add(issue.id);
+        }
+      }
+    }
+    const relatedIssueIDs: number[] = [];
+    for (const id of issueIds) {
+      const numId = parseInt(id, 10);
+      if (!isNaN(numId)) relatedIssueIDs.push(numId);
+    }
 
     if (items.length === 0) {
       core.info(`No resources for chart ${chartName}; skipping issue creation`);
@@ -236,8 +266,34 @@ export class GithubIssuesService extends CopilotIssueManager {
       allIssueNumbers.push(...issueNumbers);
     }
 
+    // Register each issue with backend and link PRs (from incoming dashboard changes)
     for (const issueNumber of allIssueNumbers) {
-      await this.assignCopilot(issueNumber, assignCopilot);
+      await createOrUpdateIssue({
+        apiClient: this.apiClient,
+        orgName: this.owner,
+        repo: this.repo,
+        issueNumber,
+        riskSummary: '',
+        type: SourceControlIssueType.Helm,
+        labels: ISSUE_LABELS,
+        issueIDs: relatedIssueIDs,
+      });
+      const linkedPRs = await this.findPRsLinkedToIssue(issueNumber);
+      if (linkedPRs.length > 0) {
+        await createPRForIssue({
+          apiClient: this.apiClient,
+          orgName: this.owner,
+          repo: this.repo,
+          issueNumber,
+          linkedPRs,
+        });
+      }
+      await this.assignCopilot(issueNumber, assignCopilot).catch(err => {
+        const message = err instanceof Error ? err.message : String(err);
+        core.warning(
+          `Copilot assignment failed (non-fatal): ${message} for issue #${issueNumber} and chart ${chartName}`
+        );
+      });
     }
 
     core.info(
@@ -313,19 +369,17 @@ export class GithubIssuesService extends CopilotIssueManager {
   }
 
   private async closeIssue(issueNumber: number, message: string): Promise<void> {
-    await this.octokit.rest.issues.createComment({
+    await closeIssue({
+      octokit: this.octokit,
       owner: this.owner,
       repo: this.repo,
-      issue_number: issueNumber,
-      body: message,
+      issueNumber,
+      message,
+      apiClient: this.apiClient,
+      type: SourceControlIssueType.Helm,
+      findPRsLinkedToIssue: (num: number) => this.findPRsLinkedToIssue(num),
+      logMessage: `Closed Helm recommendation #${issueNumber}`,
     });
-    await this.octokit.rest.issues.update({
-      owner: this.owner,
-      repo: this.repo,
-      issue_number: issueNumber,
-      state: IssueState.CLOSED,
-    });
-    core.info(`Closed Helm recommendation #${issueNumber}`);
   }
 
   private async getAllAverlonIssues(): Promise<

@@ -109,7 +109,7 @@ async function main(): Promise<void> {
     `Found ${dockerfiles.length} Dockerfile${dockerfiles.length !== 1 ? 's' : ''} in the repository`
   );
 
-  const client = createApiClient({
+  const apiClient = createApiClient({
     apiKey: inputs.apiKey,
     apiSecret: inputs.apiSecret,
     baseUrl: inputs.baseUrl,
@@ -125,11 +125,16 @@ async function main(): Promise<void> {
     Filters: filters,
   };
 
-  const response = await client.getGitProjectRecommendations(payload);
+  const response = await apiClient.getGitProjectRecommendations(payload);
   const dockerRecs = response?.DockerfileRecommendations || [];
 
   const octokit = github.getOctokit(inputs.githubToken);
-  const issuesService = new GithubIssuesService(octokit, inputs.githubOwner, inputs.githubRepo);
+  const issuesService = new GithubIssuesService(
+    octokit,
+    inputs.githubOwner,
+    inputs.githubRepo,
+    apiClient
+  );
 
   const recByPath = new Map<string, (typeof dockerRecs)[number]>();
   for (const rec of dockerRecs) recByPath.set(rec.Path, rec);

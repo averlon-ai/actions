@@ -1,4 +1,5 @@
 import * as core from '@actions/core';
+import * as github from '@actions/github';
 import { readFile } from 'node:fs/promises';
 import {
   createApiClient,
@@ -11,6 +12,7 @@ import {
 } from '@averlon/shared';
 import { getInputSafe, parseBoolean } from '@averlon/github-actions-utils';
 import { postOrUpdateComment, type CommentMode } from './pr-comment';
+import { registerPrWithSourceControl } from './github-issue';
 
 /**
  * Maximum backoff multiplier to prevent excessive delays
@@ -554,26 +556,49 @@ async function run(): Promise<void> {
       core.debug('Step 6: Skipping PR comment (disabled or no token)');
     }
 
+    const context = github.context;
+    if (context.payload.pull_request) {
+      try {
+        const pr = context.payload.pull_request;
+        const serverUrl = (process.env['GITHUB_SERVER_URL'] || 'https://github.com').replace(
+          /\/+$/,
+          ''
+        );
+        const prUrl =
+          pr.html_url ||
+          `${serverUrl}/${context.repo.owner}/${context.repo.repo}/pull/${pr.number}`;
+        await registerPrWithSourceControl({
+          apiClient,
+          owner: context.repo.owner,
+          repo: context.repo.repo,
+          prNumber: pr.number,
+          prUrl,
+          scanResult,
+        });
+      } catch (sourceControlError) {
+        const msg =
+          sourceControlError instanceof Error
+            ? sourceControlError.message
+            : String(sourceControlError);
+        core.warning(`Failed to register with source control: ${msg}`);
+      }
+    } else {
+      core.debug('Not in a pull request context; skipping source control registration');
+    }
+
     core.info('✓ Averlon Infrastructure Risk PreCog Agent completed successfully!');
     core.info(`Scan result available in 'scan-result' output`);
   } catch (error) {
-    // === Error Handling ===
-    // All errors bubble up to here and fail the action
     const errorMessage = error instanceof Error ? error.message : String(error);
     core.error(`Action failed: ${errorMessage}`);
     core.setFailed(`Action failed: ${errorMessage}`);
-
-    // Provide stack trace in debug mode for troubleshooting
     if (error instanceof Error && error.stack) {
       core.debug(`Error stack trace: ${error.stack}`);
     }
-
-    // Re-throw to maintain error propagation for tests
     throw error;
   }
 }
 
-// Run the action if this file is executed directly
 if (process.argv[1]?.endsWith('main.ts') || process.argv[1]?.endsWith('main.js')) {
   run();
 }

@@ -1,6 +1,7 @@
 import * as core from '@actions/core';
 import * as github from '@actions/github';
 
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import {
   createApiClient,
@@ -31,6 +32,13 @@ const BACKOFF_FACTOR = 1.5;
  * After attempt 3, switches to exponential backoff with BACKOFF_FACTOR
  */
 const INITIAL_BACKOFF_MULTIPLIERS = [1.05, 1.1, 1.15];
+
+/**
+ * Generates a git-like SHA-1 hash (40 hex chars) from a string input.
+ */
+export function gitLikeHash(input: string): string {
+  return createHash('sha1').update(input, 'utf8').digest('hex');
+}
 
 /**
  * Custom error class for scan status failures (Failed, Cancelled)
@@ -137,7 +145,11 @@ async function _getInputs(): Promise<ActionInputs> {
     : undefined;
 
   const { owner: githubOwner, repo: githubRepo, commit: defaultCommit } = parseGitHubRepository();
-  const commit = getInputSafe('commit', false) || defaultCommit;
+  const commitInput = getInputSafe('commit', false) || defaultCommit;
+  const planPath = getInputSafe('plan-path', true);
+  const commit = gitLikeHash(
+    `commit:${commitInput}githubRepo:${githubRepo}githubOwner:${githubOwner}planPath:${planPath}`
+  );
 
   if (githubToken) {
     core.setSecret(githubToken);
@@ -164,7 +176,7 @@ async function _getInputs(): Promise<ActionInputs> {
     commit,
     scanPollInterval,
     scanTimeout,
-    planPath: getInputSafe('plan-path', true),
+    planPath,
     githubToken,
     githubOwner,
     githubRepo,
@@ -526,7 +538,8 @@ async function run(): Promise<void> {
         const issuesService = new GithubIssuesService(
           octokit,
           inputs.githubOwner,
-          inputs.githubRepo
+          inputs.githubRepo,
+          apiClient
         );
 
         const runId = process.env['GITHUB_RUN_ID'];

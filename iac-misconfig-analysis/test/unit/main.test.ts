@@ -23,7 +23,7 @@ mock.module('@actions/core', () => ({
 }));
 
 import * as core from '@actions/core';
-import { run } from '../../src/main';
+import { run, gitLikeHash } from '../../src/main';
 import { GithubIssuesService } from '../../src/github-issues';
 import type { ApiClient, ScanTerraformResult, UploadTerraformFileRequest } from '@averlon/shared';
 
@@ -89,6 +89,33 @@ const mockReadFile = mock(() => Promise.resolve(Buffer.from('test-file-content')
 // Mock the fs/promises module
 const fsModule = await import('node:fs/promises');
 const readFileSpy = spyOn(fsModule, 'readFile').mockImplementation(mockReadFile as any);
+
+describe('gitLikeHash', () => {
+  it('returns a 40-character lowercase hex string', () => {
+    const hash = gitLikeHash('hello');
+    expect(hash).toHaveLength(40);
+    expect(hash).toMatch(/^[a-f0-9]{40}$/);
+  });
+
+  it('is deterministic: same input produces same hash', () => {
+    expect(gitLikeHash('foo')).toBe(gitLikeHash('foo'));
+    expect(gitLikeHash('commit+repo+owner+path')).toBe(gitLikeHash('commit+repo+owner+path'));
+  });
+
+  it('produces different hashes for different inputs', () => {
+    expect(gitLikeHash('a')).not.toBe(gitLikeHash('b'));
+    expect(gitLikeHash('')).not.toBe(gitLikeHash('x'));
+  });
+
+  it('hashes empty string to known SHA-1 value', () => {
+    expect(gitLikeHash('')).toBe('da39a3ee5e6b4b0d3255bfef95601890afd80709');
+  });
+
+  it('hashes "hello world" to known SHA-1 value', () => {
+    expect(gitLikeHash('hello world')).toBe('2aae6c35c94fcfb415dbe95f408b9ce91ee846ed');
+  });
+});
+
 describe('iac-misconfig-analysis main.ts', () => {
   let infoSpy: ReturnType<typeof spyOn>;
   let warningSpy: ReturnType<typeof spyOn>;
@@ -105,8 +132,9 @@ describe('iac-misconfig-analysis main.ts', () => {
     // Store original environment
     originalEnv = { ...process.env };
 
-    // Set required environment variables
+    // Set required environment variables (parseGitHubRepository from github-actions-utils requires these)
     process.env.GITHUB_REPOSITORY = 'test-owner/test-repo';
+    process.env.GITHUB_SHA = 'a851d9d065fcd6c6c866198923b72190d613eaf4';
 
     // Create spies for core functions
     infoSpy = spyOn(core, 'info').mockImplementation(() => {});
@@ -564,7 +592,11 @@ describe('iac-misconfig-analysis main.ts', () => {
         if (callArgs && callArgs[0]) {
           const uploadCall = callArgs[0] as UploadTerraformFileRequest;
           expect(uploadCall.RepoName).toBe('test-owner/test-repo');
-          expect(uploadCall.Commit).toBe('abc123');
+          expect(uploadCall.Commit).toBe(
+            gitLikeHash(
+              'commit:abc123githubRepo:test-repogithubOwner:test-ownerplanPath:./test/plan.json'
+            )
+          );
           expect(uploadCall.FileType).toBe('Plan');
           expect(uploadCall.FileData).toBe(Buffer.from('test-file-content').toString('base64'));
         }
@@ -606,10 +638,12 @@ describe('iac-misconfig-analysis main.ts', () => {
       it('should start scan and return results immediately when status is Succeeded', async () => {
         await run();
 
-        // Check that startScanTerraform was called with correct parameters
+        // Check that startScanTerraform was called with correct parameters (commit is gitLikeHash of inputs)
         expect(mockStartScanTerraform).toHaveBeenCalledWith({
           RepoName: 'test-owner/test-repo',
-          Commit: 'abc123',
+          Commit: gitLikeHash(
+            'commit:abc123githubRepo:test-repogithubOwner:test-ownerplanPath:./test/plan.json'
+          ),
           ResourceTypes: undefined,
           IncludeResourcesWithoutIssues: false,
         });
@@ -936,7 +970,9 @@ describe('iac-misconfig-analysis main.ts', () => {
         // Check that startScanTerraform was called with resource type filter
         expect(mockStartScanTerraform).toHaveBeenCalledWith({
           RepoName: 'test-owner/test-repo',
-          Commit: 'abc123',
+          Commit: gitLikeHash(
+            'commit:abc123githubRepo:test-repogithubOwner:test-ownerplanPath:./test/plan.json'
+          ),
           ResourceTypes: ['aws_s3_bucket', 'aws_ec2_instance'],
           IncludeResourcesWithoutIssues: false,
         });
@@ -950,7 +986,9 @@ describe('iac-misconfig-analysis main.ts', () => {
         // Check that startScanTerraform was called with cleaned resource type filter
         expect(mockStartScanTerraform).toHaveBeenCalledWith({
           RepoName: 'test-owner/test-repo',
-          Commit: 'abc123',
+          Commit: gitLikeHash(
+            'commit:abc123githubRepo:test-repogithubOwner:test-ownerplanPath:./test/plan.json'
+          ),
           ResourceTypes: ['aws_s3_bucket', 'aws_ec2_instance'],
           IncludeResourcesWithoutIssues: false,
         });
@@ -964,7 +1002,9 @@ describe('iac-misconfig-analysis main.ts', () => {
         // Check that startScanTerraform was called with verbose enabled
         expect(mockStartScanTerraform).toHaveBeenCalledWith({
           RepoName: 'test-owner/test-repo',
-          Commit: 'abc123',
+          Commit: gitLikeHash(
+            'commit:abc123githubRepo:test-repogithubOwner:test-ownerplanPath:./test/plan.json'
+          ),
           ResourceTypes: undefined,
           IncludeResourcesWithoutIssues: true,
         });
@@ -978,7 +1018,9 @@ describe('iac-misconfig-analysis main.ts', () => {
         // Check that startScanTerraform was called with verbose disabled (default)
         expect(mockStartScanTerraform).toHaveBeenCalledWith({
           RepoName: 'test-owner/test-repo',
-          Commit: 'abc123',
+          Commit: gitLikeHash(
+            'commit:abc123githubRepo:test-repogithubOwner:test-ownerplanPath:./test/plan.json'
+          ),
           ResourceTypes: undefined,
           IncludeResourcesWithoutIssues: false,
         });
@@ -993,7 +1035,9 @@ describe('iac-misconfig-analysis main.ts', () => {
         // Check that startScanTerraform was called with both parameters
         expect(mockStartScanTerraform).toHaveBeenCalledWith({
           RepoName: 'test-owner/test-repo',
-          Commit: 'abc123',
+          Commit: gitLikeHash(
+            'commit:abc123githubRepo:test-repogithubOwner:test-ownerplanPath:./test/plan.json'
+          ),
           ResourceTypes: ['aws_s3_bucket'],
           IncludeResourcesWithoutIssues: true,
         });

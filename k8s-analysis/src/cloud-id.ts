@@ -54,6 +54,10 @@ function normalizeAccountId(accountId?: string): string | undefined {
   if (!accountId) {
     return undefined;
   }
-  const normalized = accountId.replace(/\D/g, '');
-  return normalized || accountId.trim() || undefined;
+  const trimmed = accountId.trim();
+  if (/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(trimmed)) {
+    return trimmed;
+  }
+  const digitsOnly = trimmed.replace(/\D/g, '');
+  return digitsOnly || trimmed || undefined;
 }

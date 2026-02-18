@@ -37,7 +37,7 @@ spec:
       const resources = parseHelmManifest(yaml);
 
       // Should not extract invalid ARNs
-      expect(resources[0].metadata?.referencedArns).toBeUndefined();
+      expect(resources[0].metadata?.referencedResourceIds).toBeUndefined();
     });
 
     it('should handle zone labels that do not match expected pattern', () => {
@@ -181,7 +181,7 @@ spec:
 
       const resources = parseHelmManifest(yaml);
 
-      expect(resources[0].metadata?.referencedArns).toContain(
+      expect(resources[0].metadata?.referencedResourceIds).toContain(
         'arn:aws:s3:us-east-1:123456789012:bucket/my-bucket/path/to/file.txt'
       );
     });
@@ -302,7 +302,7 @@ spec:
 
       const resources = parseHelmManifest(yaml);
 
-      expect(resources[0].metadata?.referencedArns?.length).toBe(3);
+      expect(resources[0].metadata?.referencedResourceIds?.length).toBe(3);
     });
   });
 
@@ -456,7 +456,7 @@ spec:
 
       const resources = parseHelmManifest(yaml);
 
-      expect(resources[0].metadata?.referencedArns?.length).toBe(1);
+      expect(resources[0].metadata?.referencedResourceIds?.length).toBe(1);
     });
 
     it('should handle conflicting region data gracefully', () => {
@@ -662,7 +662,7 @@ spec:
       expect(metadata?.secretRefs).toContain('db-credentials');
       expect(metadata?.secretRefs).toContain('web-env-secrets');
       expect(metadata?.volumeClaims).toContain('web-cache-pvc');
-      expect(metadata?.referencedArns?.length).toBeGreaterThanOrEqual(2);
+      expect(metadata?.referencedResourceIds?.length).toBeGreaterThanOrEqual(2);
     });
   });
 });

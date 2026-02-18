@@ -32,6 +32,9 @@ export function parseGitHubRepository(): GitHubRepository {
   }
 
   const commit = process.env['GITHUB_SHA'];
+  if (!commit) {
+    throw new Error('GITHUB_SHA environment variable is not set');
+  }
 
   return { owner, repo, commit };
 }

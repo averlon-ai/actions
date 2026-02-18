@@ -1,7 +1,14 @@
 import * as core from '@actions/core';
+import * as github from '@actions/github';
 import { CopilotIssueManager, IssueState } from '@averlon/github-copilot-utils';
-import { AVERLON_CREATED_LABEL } from '@averlon/github-actions-utils';
-import type { GitDockerfileRecommendation } from '@averlon/shared';
+import {
+  AVERLON_CREATED_LABEL,
+  createPRForIssue,
+  createOrUpdateIssue,
+  closeIssue as closeIssue,
+} from '@averlon/github-actions-utils';
+import type { GitDockerfileRecommendation, ApiClient } from '@averlon/shared';
+import { SourceControlIssueType } from '@averlon/shared';
 
 // Action-specific constants
 const AVERLON_CONTAINER_ANALYSIS_LABEL = 'averlon-container-analysis';
@@ -60,6 +67,18 @@ export function normalizePathForComparison(filePath: string): string {
  * Extends CopilotIssueManager with container-analysis-specific logic
  */
 export class GithubIssuesService extends CopilotIssueManager {
+  private apiClient?: ApiClient;
+
+  constructor(
+    octokit: ReturnType<typeof github.getOctokit>,
+    owner: string,
+    repo: string,
+    apiClient?: ApiClient
+  ) {
+    super(octokit, owner, repo);
+    this.apiClient = apiClient;
+  }
+
   async createOrUpdateIssue(
     rec: GitDockerfileRecommendation,
     autoAssignCopilot: boolean = false
@@ -92,6 +111,30 @@ export class GithubIssuesService extends CopilotIssueManager {
       } else {
         await this.handleCopilotAssignmentForUnchangedIssue(existingIssueNumber, autoAssignCopilot);
       }
+
+      // Ensure issue is registered in backend if not already
+      await createOrUpdateIssue({
+        apiClient: this.apiClient,
+        orgName: this.owner,
+        repo: this.repo,
+        issueNumber: existingIssueNumber,
+        riskSummary: '',
+        type: SourceControlIssueType.Container,
+        labels: ISSUE_LABELS,
+        issueIDs: [], // IssueIDs not available in GitDockerfileRecommendation
+      });
+
+      // Find and register PRs for existing issue
+      const linkedPRs = await this.findPRsLinkedToIssue(existingIssueNumber);
+      if (linkedPRs.length > 0) {
+        await createPRForIssue({
+          apiClient: this.apiClient,
+          orgName: this.owner,
+          repo: this.repo,
+          issueNumber: existingIssueNumber,
+          linkedPRs,
+        });
+      }
     } else {
       const { data: issue } = await this.octokit.rest.issues.create({
         owner: this.owner,
@@ -102,6 +145,19 @@ export class GithubIssuesService extends CopilotIssueManager {
       });
       core.info(`[${rec.Path}] Created GitHub issue #${issue.number}`);
       await this.assignCopilot(issue.number, autoAssignCopilot);
+
+      // Register the new issue with backend
+      await createOrUpdateIssue({
+        apiClient: this.apiClient,
+        orgName: this.owner,
+        repo: this.repo,
+        issueNumber: issue.number,
+        issueUrl: issue.html_url,
+        riskSummary: '',
+        type: SourceControlIssueType.Container,
+        labels: ISSUE_LABELS,
+        issueIDs: [], // IssueIDs not available in GitDockerfileRecommendation
+      });
     }
   }
 
@@ -183,17 +239,15 @@ export class GithubIssuesService extends CopilotIssueManager {
   }
 
   private async closeIssue(issueNumber: number, message: string): Promise<void> {
-    await this.octokit.rest.issues.createComment({
+    await closeIssue({
+      octokit: this.octokit,
       owner: this.owner,
       repo: this.repo,
-      issue_number: issueNumber,
-      body: message,
-    });
-    await this.octokit.rest.issues.update({
-      owner: this.owner,
-      repo: this.repo,
-      issue_number: issueNumber,
-      state: IssueState.CLOSED,
+      issueNumber,
+      message,
+      apiClient: this.apiClient,
+      type: SourceControlIssueType.Container,
+      findPRsLinkedToIssue: (num: number) => this.findPRsLinkedToIssue(num),
     });
   }
 

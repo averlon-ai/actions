@@ -8,7 +8,7 @@ import {
   parseHelmManifest,
   getResourceSummary,
   groupResourcesByKind,
-  annotateResourceArns,
+  annotateResourceIds,
 } from './resource-parser';
 import {
   DeploymentMetadata,
@@ -79,7 +79,6 @@ async function getInputs(): Promise<ActionInputs> {
     );
   }
 
-  // Only enable Copilot assignment if user explicitly provided a github-token
   const copilotAssignmentEnabled = Boolean(explicitGithubToken);
 
   const baseUrl = getInputSafe('base-url', false) || 'https://wfe.prod.averlon.io/';
@@ -93,7 +92,6 @@ async function getInputs(): Promise<ActionInputs> {
   const verboseInput = getInputSafe('verbose', false) || 'false';
   const verbose = parseBoolean(verboseInput);
 
-  // Parse resource type and namespace filters
   const resourceTypeFilterRaw = getInputSafe('resource-type-filter', false);
   const namespaceFilterRaw = getInputSafe('namespace-filter', false);
   const resourceTypeFilter = resourceTypeFilterRaw
@@ -109,7 +107,6 @@ async function getInputs(): Promise<ActionInputs> {
         .filter(n => n.length > 0)
     : undefined;
 
-  // Get GitHub repository info
   const repository = process.env['GITHUB_REPOSITORY'];
   if (!repository) {
     throw new Error('GITHUB_REPOSITORY environment variable is not set');
@@ -159,7 +156,6 @@ async function getInputs(): Promise<ActionInputs> {
 async function main(): Promise<void> {
   core.info('Starting Averlon Misconfiguration Remediation Agent for Kubernetes...');
 
-  // Step 1: Collect and validate inputs
   const inputs = await getInputs();
   const apiClient = createApiClient({
     apiKey: inputs.apiKey,
@@ -167,7 +163,6 @@ async function main(): Promise<void> {
     baseUrl: inputs.baseUrl,
   });
 
-  // Read and parse manifest file
   core.info(`Reading manifest file: ${inputs.manifestFilePath}`);
   if (!fs.existsSync(inputs.manifestFilePath)) {
     throw new Error(`Manifest file not found: ${inputs.manifestFilePath}`);
@@ -224,7 +219,6 @@ async function main(): Promise<void> {
   core.info(`Release name: ${releaseName}`);
   core.info(`Namespace: ${namespace}`);
 
-  // Build deployment metadata from inputs (preferred) or from USER-SUPPLIED VALUES if available
   core.info('═══ Extracting Deployment Metadata ═══');
   core.info(`Input cloudId: ${inputs.cloudId || 'not provided'}`);
   core.info(`Input region: ${inputs.region || 'not provided'}`);
@@ -235,29 +229,49 @@ async function main(): Promise<void> {
     core.info(`Extracted from user-supplied values: ${JSON.stringify(extractedMetadata, null, 2)}`);
   }
 
-  // Step 2: Parse manifests to extract resources
   core.info('Parsing Kubernetes manifests...');
   let resources = parseHelmManifest(manifestYaml);
   core.info(`✓ Parsed ${resources.length} Kubernetes resources`);
 
-  // Try to extract metadata from resource labels/annotations if not found yet
-  let resourceMetadata: { region?: string; cluster?: string; accountId?: string } = {};
-  const needsRegion = !inputs.region && !extractedMetadata?.region;
-  const needsCluster = !inputs.cluster && !extractedMetadata?.cluster;
-  const needsAccountId = !inputs.cloudId && !extractedMetadata?.accountId;
+  core.info('Extracting region/cluster/accountId from resources...');
+  const resourceMetadata = extractMetadataFromResources(resources);
 
-  if (needsRegion || needsCluster || needsAccountId) {
-    core.info('Attempting to extract region/cluster/accountId from resource labels/annotations...');
-    resourceMetadata = extractMetadataFromResources(resources);
+  const azureRegionPattern =
+    /^(eastus|eastus2|westus|westus2|centralus|northeurope|westeurope|uksouth|southeastasia|eastasia|australiaeast|canadacentral|brazilsouth|japaneast|japanwest)$/i;
+  const userIntentAzure =
+    inputs.region?.match(azureRegionPattern) || inputs.cluster?.toLowerCase().includes('azure');
+
+  const provider: 'aws' | 'azure' | undefined = userIntentAzure
+    ? 'azure'
+    : resourceMetadata.provider;
+
+  let accountId = extractedMetadata?.accountId ?? resourceMetadata.accountId;
+  if (userIntentAzure && accountId && /^\d{12}$/.test(accountId)) {
+    core.info('Using Azure context; ignoring detected AWS account ID');
+    accountId = undefined;
   }
 
-  const detectedAccountId = extractedMetadata?.accountId || resourceMetadata.accountId;
+  const region = inputs.region ?? extractedMetadata?.region ?? resourceMetadata.region;
+  const cluster = inputs.cluster ?? extractedMetadata?.cluster ?? resourceMetadata.cluster;
+  const resourceGroup = resourceMetadata.resourceGroup;
+  // For Azure, use cleared accountId first; only use extracted/resource if not a 12-digit AWS ID.
+  const rejectAwsId = (id: string | undefined) => (id && !/^\d{12}$/.test(id) ? id : undefined);
+  const accountIdResolved =
+    provider === 'azure'
+      ? (accountId ??
+        rejectAwsId(extractedMetadata?.accountId) ??
+        rejectAwsId(resourceMetadata.accountId))
+      : accountId;
+
   const deploymentMetadata: DeploymentMetadata = {
-    accountId: detectedAccountId,
-    region: inputs.region || extractedMetadata?.region || resourceMetadata.region,
-    cluster: inputs.cluster || extractedMetadata?.cluster || resourceMetadata.cluster,
+    provider,
+    accountId: accountIdResolved ?? undefined,
+    resourceGroup: provider === 'azure' ? resourceGroup : undefined,
+    region,
+    cluster,
     environment: extractedMetadata?.environment,
   };
+  const detectedAccountId = deploymentMetadata.accountId;
 
   logDeploymentMetadata(deploymentMetadata);
 
@@ -272,14 +286,14 @@ async function main(): Promise<void> {
   }
 
   if (!deploymentMetadata.region || !deploymentMetadata.cluster) {
-    core.warning('⚠️  Region or cluster not provided; ARNs will not be generated');
-    core.info('Provide region and cluster inputs to enable ARN generation and issue lookup');
+    core.warning('⚠️  Region or cluster not provided; resource IDs will not be generated');
+    core.info(
+      'Provide region and cluster inputs to enable resource ID generation and issue lookup'
+    );
   }
 
-  // Annotate resources with ARNs
-  annotateResourceArns(resources, deploymentMetadata);
+  annotateResourceIds(resources, deploymentMetadata);
 
-  // Apply namespace filter if specified
   if (inputs.namespaceFilter && inputs.namespaceFilter.length > 0) {
     const beforeCount = resources.length;
     resources = resources.filter(r => inputs.namespaceFilter!.includes(r.namespace));
@@ -287,7 +301,6 @@ async function main(): Promise<void> {
     core.info(`  Included namespaces: ${inputs.namespaceFilter.join(', ')}`);
   }
 
-  // Apply resource type filter if specified
   if (inputs.resourceTypeFilter && inputs.resourceTypeFilter.length > 0) {
     const beforeCount = resources.length;
     resources = resources.filter(r => inputs.resourceTypeFilter!.includes(r.kind));
@@ -313,11 +326,16 @@ async function main(): Promise<void> {
     return;
   }
 
-  // Display resource summary
   const summary = getResourceSummary(resources);
   core.info('Resource summary:');
   for (const [kind, count] of Object.entries(summary)) {
     core.info(`  ${kind}: ${count}`);
+  }
+  const podCount = summary['Pod'] ?? 0;
+  if (podCount === 0) {
+    core.info(
+      'Note: No Pods in manifest. Helm template output typically does not include Pods (they are created at runtime by Deployments/DaemonSets). Issue lookup for Pod resource IDs will only match if Pods are present in the manifest.'
+    );
   }
 
   // Display all resource names
@@ -330,8 +348,8 @@ async function main(): Promise<void> {
       const kindResources = groupedResources.get(kind) || [];
       core.info(`\n${kind} (${kindResources.length}):`);
       for (const resource of kindResources.sort((a, b) => a.name.localeCompare(b.name))) {
-        const arnInfo = resource.arn ? ` | ARN: ${resource.arn}` : '';
-        core.info(`  - ${resource.name} (namespace: ${resource.namespace})${arnInfo}`);
+        const resourceIdInfo = resource.resourceId ? ` | Resource ID: ${resource.resourceId}` : '';
+        core.info(`  - ${resource.name} (namespace: ${resource.namespace})${resourceIdInfo}`);
         if (resource.issues && resource.issues.length > 0) {
           core.info('    Issues:');
           for (const issue of resource.issues) {
@@ -345,12 +363,15 @@ async function main(): Promise<void> {
     core.info('Detailed resource listing skipped (set verbose input to true to display).');
   }
 
-  // Step 3: Create a single issue with all resources
-  // Skip issue creation if SKIP_ISSUE_CREATION is set (for testing)
   if (!process.env['SKIP_ISSUE_CREATION']) {
     core.info('\nCreating GitHub issue with all resources...');
     const octokit = github.getOctokit(inputs.githubToken);
-    const issuesService = new GithubIssuesService(octokit, inputs.githubOwner, inputs.githubRepo);
+    const issuesService = new GithubIssuesService(
+      octokit,
+      inputs.githubOwner,
+      inputs.githubRepo,
+      apiClient
+    );
 
     const runId = process.env['GITHUB_RUN_ID'];
     const serverUrl = (process.env['GITHUB_SERVER_URL'] || 'https://github.com').replace(
@@ -374,7 +395,6 @@ async function main(): Promise<void> {
     });
   } else {
     core.info('\nSkipping issue creation (SKIP_ISSUE_CREATION is set)');
-    // Preview how the GitHub issue would look
     const issueIds = new Set<string>();
     let resourcesWithIssues = 0;
     for (const resource of resources) {
@@ -416,7 +436,6 @@ async function main(): Promise<void> {
     core.info('\n════════════════════════════════════════════════════════════════');
   }
 
-  // Step 4: Create action summary
   core.summary.addHeading('Averlon Misconfiguration Remediation Agent for Kubernetes');
   core.summary.addRaw(`**Chart:** \`${chartName}\`\n\n`);
   core.summary.addRaw(`**Release Name:** \`${releaseName}\`\n\n`);
@@ -426,24 +445,26 @@ async function main(): Promise<void> {
   if (deploymentMetadata) {
     core.summary.addHeading('Deployment Metadata', 2);
     const metadataLines: string[] = [];
+    if (deploymentMetadata.provider) {
+      metadataLines.push(`- **Provider:** \`${deploymentMetadata.provider}\``);
+    }
     if (deploymentMetadata.accountId) {
       metadataLines.push(`- **Account ID:** \`${deploymentMetadata.accountId}\``);
     }
     if (deploymentMetadata.region) {
       metadataLines.push(`- **Region:** \`${deploymentMetadata.region}\``);
     }
-    if (deploymentMetadata.environment) {
-      metadataLines.push(`- **Environment:** \`${deploymentMetadata.environment}\``);
-    }
     if (deploymentMetadata.cluster) {
       metadataLines.push(`- **Cluster:** \`${deploymentMetadata.cluster}\``);
+    }
+    if (deploymentMetadata.environment) {
+      metadataLines.push(`- **Environment:** \`${deploymentMetadata.environment}\``);
     }
     if (metadataLines.length > 0) {
       core.summary.addRaw(metadataLines.join('\n') + '\n\n');
     }
   }
 
-  // Resource summary table
   core.summary.addHeading('Resources Analyzed', 2);
   const resourceTableRows = [
     [
@@ -484,7 +505,7 @@ async function main(): Promise<void> {
       { data: 'Kind', header: true },
       { data: 'Namespace', header: true },
       { data: 'Name', header: true },
-      { data: 'ARN', header: true },
+      { data: 'Resource ID', header: true },
     ],
   ] as Array<Array<{ data: string; header?: boolean }>>;
   for (const resource of resources) {
@@ -492,7 +513,7 @@ async function main(): Promise<void> {
       { data: resource.kind },
       { data: resource.namespace },
       { data: resource.name },
-      { data: resource.arn ?? '-' },
+      { data: resource.resourceId ?? '-' },
     ]);
   }
   core.summary.addTable(identifierRows);
@@ -502,7 +523,7 @@ async function main(): Promise<void> {
     core.summary.addHeading('High/Critical Issues', 2);
     const issueRows = [
       [
-        { data: 'Resource ARN', header: true },
+        { data: 'Resource ID', header: true },
         { data: 'Issue ID', header: true },
         { data: 'Severity', header: true },
         { data: 'Title', header: true },
@@ -512,7 +533,7 @@ async function main(): Promise<void> {
       for (const issue of resource.issues ?? []) {
         const title = issue.title || issue.summary || 'Untitled';
         issueRows.push([
-          { data: resource.arn ?? `${resource.kind}/${resource.name}` },
+          { data: resource.resourceId ?? `${resource.kind}/${resource.name}` },
           { data: issue.id },
           { data: issue.severity ?? 'Unknown' },
           { data: title },
@@ -540,7 +561,6 @@ async function run(): Promise<void> {
 
 export { run };
 
-// Run the action if this file is executed directly
 if (require.main === module) {
   run();
 }

@@ -441,7 +441,12 @@ describe('GithubIssuesService', () => {
       );
 
       expect(mockCreateIssue).toHaveBeenCalledTimes(1);
-      expect(mockCreateIssue.mock.calls[0][0].body).toContain('resource-1');
+      const body = mockCreateIssue.mock.calls[0][0].body;
+      expect(body).toContain('resource-1');
+      // New issue must contain only the new issue IDs (issue-2, issue-3), not the existing one (issue-1)
+      expect(body).toContain('issue-2');
+      expect(body).toContain('issue-3');
+      expect(body).not.toContain('issue-1');
       expect(mockUpdateIssue).not.toHaveBeenCalled();
     });
 
@@ -475,7 +480,51 @@ describe('GithubIssuesService', () => {
       );
 
       expect(mockCreateIssue).toHaveBeenCalledTimes(1);
-      expect(mockCreateIssue.mock.calls[0][0].body).toContain('resource-1');
+      const body = mockCreateIssue.mock.calls[0][0].body;
+      expect(body).toContain('resource-1');
+      // New issue must contain only the new issue IDs (issue-3, issue-4), not the existing ones (issue-1, issue-2)
+      expect(body).toContain('issue-3');
+      expect(body).toContain('issue-4');
+      expect(body).not.toContain('issue-1');
+      expect(body).not.toContain('issue-2');
+      expect(mockUpdateIssue).not.toHaveBeenCalled();
+    });
+
+    it('should create new issue with only new issue when existing resource in batch 1 gains one new finding', async () => {
+      // Batch 1 already has resource-1 with issue-1. This run finds resource-1 with issue-1 + issue-2.
+      // We must create one new issue containing only issue-2.
+      const resourceWithOneNewIssue = createMockResource(
+        'resource-1',
+        'aws_s3_bucket',
+        'bucket-1',
+        ['issue-1', 'issue-2']
+      );
+
+      const existingStateBody =
+        'Content\n<!-- averlon-batch-state\n{"v":1,"keys":["asset:asset-resource-1"],"fingerprints":{"asset:asset-resource-1":"issue-1"}}\n-->';
+      mockListForRepo.mockResolvedValueOnce({
+        data: [
+          {
+            number: 1,
+            title: 'Averlon Misconfiguration Remediation Agent for IaC: Batch 1',
+            state: 'open',
+            body: existingStateBody,
+          },
+        ],
+      } as any);
+
+      await issuesService.createBatchedIssues(
+        [resourceWithOneNewIssue],
+        'test-repo',
+        'abc123',
+        false
+      );
+
+      expect(mockCreateIssue).toHaveBeenCalledTimes(1);
+      const body = mockCreateIssue.mock.calls[0][0].body;
+      expect(body).toContain('resource-1');
+      expect(body).toContain('issue-2');
+      expect(body).not.toContain('issue-1');
       expect(mockUpdateIssue).not.toHaveBeenCalled();
     });
   });

@@ -23,6 +23,15 @@ import {
   Cloud,
   AssetV2,
   IssueV2,
+  RegisterSourceControlIssueRequest,
+  RegisterSourceControlIssueResponse,
+  GetSourceControlIssueRequest,
+  GetSourceControlIssueResponse,
+  UpdateSourceControlIssueStatusRequest,
+  RegisterSourceControlPullRequestRequest,
+  GetSourceControlPullRequestRequest,
+  GetSourceControlPullRequestResponse,
+  UpdateSourceControlPullRequestStatusRequest,
 } from './types';
 
 /**
@@ -390,6 +399,84 @@ export class ApiClient {
       summary.currentBatchId = cloud.CurrentBatchID;
     }
     return summary;
+  }
+
+  /**
+   * Register a source control issue with SECDI
+   */
+  async registerSourceControlIssue(
+    request: RegisterSourceControlIssueRequest
+  ): Promise<RegisterSourceControlIssueResponse> {
+    return this.makeAuthenticatedRequest<RegisterSourceControlIssueResponse>(
+      '/pb.Reports/RegisterSourceControlIssue',
+      'POST',
+      request
+    );
+  }
+
+  /**
+   * Get or find a source control issue by external identifiers
+   */
+  async getSourceControlIssue(
+    request: GetSourceControlIssueRequest
+  ): Promise<GetSourceControlIssueResponse> {
+    return this.makeAuthenticatedRequest<GetSourceControlIssueResponse>(
+      '/pb.Reports/GetSourceControlIssue',
+      'POST',
+      request
+    );
+  }
+
+  /**
+   * Update the status of a source control issue
+   */
+  async updateSourceControlIssueStatus(
+    request: UpdateSourceControlIssueStatusRequest
+  ): Promise<void> {
+    await this.makeAuthenticatedRequest<void>(
+      '/pb.Reports/UpdateSourceControlIssueStatus',
+      'POST',
+      request
+    );
+  }
+
+  /**
+   * Register a pull request associated with a source control issue
+   */
+  async registerSourceControlPullRequest(
+    request: RegisterSourceControlPullRequestRequest
+  ): Promise<void> {
+    await this.makeAuthenticatedRequest<void>(
+      '/pb.Reports/RegisterSourceControlPullRequest',
+      'POST',
+      request
+    );
+  }
+
+  /**
+   * Get a source control pull request by external identifiers
+   */
+  async getSourceControlPullRequest(
+    request: GetSourceControlPullRequestRequest
+  ): Promise<GetSourceControlPullRequestResponse> {
+    return this.makeAuthenticatedRequest<GetSourceControlPullRequestResponse>(
+      '/pb.Reports/GetSourceControlPullRequest',
+      'POST',
+      request
+    );
+  }
+
+  /**
+   * Update the status of a source control pull request
+   */
+  async updateSourceControlPullRequestStatus(
+    request: UpdateSourceControlPullRequestStatusRequest
+  ): Promise<void> {
+    await this.makeAuthenticatedRequest<void>(
+      '/pb.Reports/UpdateSourceControlPullRequestStatus',
+      'POST',
+      request
+    );
   }
 }
 

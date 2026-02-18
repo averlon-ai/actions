@@ -150,12 +150,12 @@ spec:
 
       const resources = parseHelmManifest(yaml);
 
-      expect(resources[0].metadata?.referencedArns).toBeDefined();
-      expect(resources[0].metadata?.referencedArns?.length).toBe(2);
-      expect(resources[0].metadata?.referencedArns).toContain(
+      expect(resources[0].metadata?.referencedResourceIds).toBeDefined();
+      expect(resources[0].metadata?.referencedResourceIds?.length).toBe(2);
+      expect(resources[0].metadata?.referencedResourceIds).toContain(
         'arn:aws:elasticloadbalancing:us-west-2:123456789012:loadbalancer/app/my-lb/abc123'
       );
-      expect(resources[0].metadata?.referencedArns).toContain(
+      expect(resources[0].metadata?.referencedResourceIds).toContain(
         'arn:aws:iam::123456789012:role/my-role'
       );
     });
@@ -570,7 +570,7 @@ spec:
 
       const resources = parseHelmManifest(yaml);
 
-      expect(resources[0].metadata?.referencedArns).toContain(
+      expect(resources[0].metadata?.referencedResourceIds).toContain(
         'arn:aws:iam::123456789012:role/app-role'
       );
     });
@@ -597,14 +597,14 @@ spec:
 
       const resources = parseHelmManifest(yaml);
 
-      expect(resources[0].metadata?.referencedArns?.length).toBe(3);
-      expect(resources[0].metadata?.referencedArns).toContain(
+      expect(resources[0].metadata?.referencedResourceIds?.length).toBe(3);
+      expect(resources[0].metadata?.referencedResourceIds).toContain(
         'arn:aws:sqs:us-west-2:123456789012:my-queue'
       );
-      expect(resources[0].metadata?.referencedArns).toContain(
+      expect(resources[0].metadata?.referencedResourceIds).toContain(
         'arn:aws:sns:us-west-2:123456789012:my-topic'
       );
-      expect(resources[0].metadata?.referencedArns).toContain(
+      expect(resources[0].metadata?.referencedResourceIds).toContain(
         'arn:aws:lambda:us-west-2:123456789012:function:my-function'
       );
     });
@@ -627,7 +627,7 @@ spec:
 
       const resources = parseHelmManifest(yaml);
 
-      expect(resources[0].metadata?.referencedArns).toContain(
+      expect(resources[0].metadata?.referencedResourceIds).toContain(
         'arn:aws:dynamodb:us-west-2:123456789012:table/my-table'
       );
     });
@@ -672,7 +672,7 @@ spec:
       const resources = parseHelmManifest(yaml);
 
       // S3 ARNs use standard format without account ID (arn:aws:s3:::bucket)
-      expect(resources[0].metadata?.referencedArns).toContain('arn:aws:s3:::my-bucket');
+      expect(resources[0].metadata?.referencedResourceIds).toContain('arn:aws:s3:::my-bucket');
     });
 
     it('should deduplicate ARNs from env vars and annotations', () => {
@@ -695,7 +695,7 @@ spec:
 
       const resources = parseHelmManifest(yaml);
 
-      expect(resources[0].metadata?.referencedArns?.length).toBe(1);
+      expect(resources[0].metadata?.referencedResourceIds?.length).toBe(1);
     });
   });
 
@@ -936,8 +936,10 @@ spec:
       expect(metadata?.volumeClaims).toContain('data-pvc');
 
       // Referenced ARNs
-      expect(metadata?.referencedArns).toContain('arn:aws:iam::123456789012:role/web-role');
-      expect(metadata?.referencedArns).toContain('arn:aws:sqs:us-west-2:123456789012:my-queue');
+      expect(metadata?.referencedResourceIds).toContain('arn:aws:iam::123456789012:role/web-role');
+      expect(metadata?.referencedResourceIds).toContain(
+        'arn:aws:sqs:us-west-2:123456789012:my-queue'
+      );
     });
 
     it('should handle resources with minimal metadata', () => {

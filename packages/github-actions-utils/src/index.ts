@@ -4,3 +4,4 @@
 export * from './input-utils';
 export * from './github-utils';
 export * from './averlon-utils';
+export * from './source-control-utils';

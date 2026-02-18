@@ -1,6 +1,42 @@
 import { describe, expect, test } from 'bun:test';
-import { extractMetadataFromResources } from '../deployment-metadata';
+import { extractDeploymentMetadata, extractMetadataFromResources } from '../deployment-metadata';
 import type { ParsedResource } from '../resource-parser';
+
+describe('extractDeploymentMetadata (values YAML)', () => {
+  test('extracts from aws: section in values', () => {
+    const valuesYaml = `
+aws:
+  accountId: "123456789012"
+  region: us-east-1
+  cluster: my-eks-cluster
+`;
+    const result = extractDeploymentMetadata(valuesYaml);
+    expect(result).not.toBeNull();
+    expect(result?.accountId).toBe('123456789012');
+    expect(result?.region).toBe('us-east-1');
+    expect(result?.cluster).toBe('my-eks-cluster');
+  });
+
+  test('extracts from azure: section in values', () => {
+    const valuesYaml = `
+azure:
+  subscriptionId: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+  location: eastus
+  cluster: my-aks-cluster
+`;
+    const result = extractDeploymentMetadata(valuesYaml);
+    expect(result).not.toBeNull();
+    expect(result?.accountId).toBe('a1b2c3d4-e5f6-7890-abcd-ef1234567890');
+    expect(result?.region).toBe('eastus');
+    expect(result?.cluster).toBe('my-aks-cluster');
+  });
+
+  test('returns null for empty or invalid values', () => {
+    expect(extractDeploymentMetadata(undefined)).toBeNull();
+    expect(extractDeploymentMetadata('')).toBeNull();
+    expect(extractDeploymentMetadata('not: yaml: [')).toBeNull();
+  });
+});
 
 describe('extractMetadataFromResources', () => {
   describe('ConfigMap extraction (highest priority)', () => {
@@ -406,6 +442,343 @@ cluster: mumbai-prod
 
       const result = extractMetadataFromResources(resources);
       expect(result.cluster).toBe('my-cluster');
+    });
+  });
+
+  describe('Azure (AKS) extraction', () => {
+    test('extracts region, cluster, and subscription from Azure AKS resource ID in ConfigMap', () => {
+      const resources: ParsedResource[] = [
+        {
+          kind: 'ConfigMap',
+          name: 'aks-config',
+          namespace: 'default',
+          apiVersion: 'v1',
+          labels: {},
+          annotations: {},
+          rawYaml: '',
+          data: {
+            'config.yaml': `
+# AKS cluster resource ID (Azure)
+cluster_id: /subscriptions/a1b2c3d4-e5f6-7890-abcd-ef1234567890/resourceGroups/rg-prod/providers/Microsoft.ContainerService/managedClusters/my-aks-prod
+location: eastus
+`,
+          },
+        },
+      ];
+
+      const result = extractMetadataFromResources(resources);
+
+      expect(result.provider).toBe('azure');
+      expect(result.region).toBe('eastus');
+      expect(result.cluster).toBe('my-aks-prod');
+      expect(result.accountId).toBe('a1b2c3d4-e5f6-7890-abcd-ef1234567890');
+      expect(result.resourceGroup).toBe('rg-prod');
+    });
+
+    test('extracts location and cluster from Azure-style ConfigMap (no resource ID)', () => {
+      const resources: ParsedResource[] = [
+        {
+          kind: 'ConfigMap',
+          name: 'app-config',
+          namespace: 'default',
+          apiVersion: 'v1',
+          labels: {},
+          annotations: {},
+          rawYaml: '',
+          data: {
+            'config.yaml': `
+location: eastus2
+cluster: secdi-azure-prod
+environment: prod
+`,
+          },
+        },
+      ];
+
+      const result = extractMetadataFromResources(resources);
+
+      expect(result.region).toBe('eastus2');
+      expect(result.cluster).toBe('secdi-azure-prod');
+    });
+
+    test('detects resourceGroup from standalone key in ConfigMap value', () => {
+      const resources: ParsedResource[] = [
+        {
+          kind: 'ConfigMap',
+          name: 'app-config',
+          namespace: 'default',
+          apiVersion: 'v1',
+          labels: { 'kubernetes.azure.com/cluster': 'secdi-azure-prod' },
+          annotations: {},
+          rawYaml: '',
+          data: {
+            'config.yaml': `
+location: eastus
+cluster: secdi-azure-prod
+resourceGroup: mc_rg_secdi_azure_prod_eastus
+`,
+          },
+        },
+      ];
+
+      const result = extractMetadataFromResources(resources);
+
+      expect(result.provider).toBe('azure');
+      expect(result.resourceGroup).toBe('mc_rg_secdi_azure_prod_eastus');
+      expect(result.cluster).toBe('secdi-azure-prod');
+    });
+
+    test('detects resourceGroup from ConfigMap data key', () => {
+      const resources: ParsedResource[] = [
+        {
+          kind: 'ConfigMap',
+          name: 'app-config',
+          namespace: 'default',
+          apiVersion: 'v1',
+          labels: { 'kubernetes.azure.com/cluster': 'my-aks' },
+          annotations: {},
+          rawYaml: '',
+          data: {
+            resource_group: 'my-aks-rg',
+            'config.yaml': 'cluster: my-aks',
+          },
+        },
+      ];
+
+      const result = extractMetadataFromResources(resources);
+
+      expect(result.provider).toBe('azure');
+      expect(result.resourceGroup).toBe('my-aks-rg');
+    });
+
+    test('detects account ID (subscription) from standalone pattern in ConfigMap value', () => {
+      const resources: ParsedResource[] = [
+        {
+          kind: 'ConfigMap',
+          name: 'app-config',
+          namespace: 'default',
+          apiVersion: 'v1',
+          labels: { 'kubernetes.azure.com/cluster': 'secdi-azure-prod' },
+          annotations: {},
+          rawYaml: '',
+          data: {
+            'config.yaml': `
+location: eastus
+cluster: secdi-azure-prod
+subscriptionId: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+resourceGroup: mc_rg_secdi_eastus
+`,
+          },
+        },
+      ];
+
+      const result = extractMetadataFromResources(resources);
+
+      expect(result.provider).toBe('azure');
+      expect(result.accountId).toBe('a1b2c3d4-e5f6-7890-abcd-ef1234567890');
+      expect(result.resourceGroup).toBe('mc_rg_secdi_eastus');
+    });
+
+    test('detects account ID (subscription) from ConfigMap data key', () => {
+      const resources: ParsedResource[] = [
+        {
+          kind: 'ConfigMap',
+          name: 'app-config',
+          namespace: 'default',
+          apiVersion: 'v1',
+          labels: { 'kubernetes.azure.com/cluster': 'my-aks' },
+          annotations: {},
+          rawYaml: '',
+          data: {
+            subscription_id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+            'config.yaml': 'cluster: my-aks',
+          },
+        },
+      ];
+
+      const result = extractMetadataFromResources(resources);
+
+      expect(result.provider).toBe('azure');
+      expect(result.accountId).toBe('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee');
+    });
+
+    test('extracts cluster from kubernetes.azure.com/cluster label (full resource ID)', () => {
+      const resources: ParsedResource[] = [
+        {
+          kind: 'Pod',
+          name: 'my-pod',
+          namespace: 'default',
+          apiVersion: 'v1',
+          labels: {
+            'kubernetes.azure.com/cluster':
+              '/subscriptions/a1b2c3d4-e5f6-7890-abcd-ef1234567890/resourceGroups/rg/providers/Microsoft.ContainerService/managedClusters/aks-cluster-name',
+          },
+          annotations: {},
+          rawYaml: '',
+        },
+      ];
+
+      const result = extractMetadataFromResources(resources);
+
+      expect(result.provider).toBe('azure');
+      expect(result.cluster).toBe('aks-cluster-name');
+      expect(result.accountId).toBe('a1b2c3d4-e5f6-7890-abcd-ef1234567890');
+      expect(result.resourceGroup).toBe('rg');
+    });
+
+    test('extracts cluster from kubernetes.azure.com/cluster label (short name)', () => {
+      const resources: ParsedResource[] = [
+        {
+          kind: 'Deployment',
+          name: 'my-app',
+          namespace: 'default',
+          apiVersion: 'apps/v1',
+          labels: {
+            'kubernetes.azure.com/cluster': 'my-aks-cluster',
+          },
+          annotations: {},
+          rawYaml: '',
+        },
+      ];
+
+      const result = extractMetadataFromResources(resources);
+
+      expect(result.cluster).toBe('my-aks-cluster');
+    });
+
+    test('extracts region from topology label and subscription from annotation (AKS)', () => {
+      const resources: ParsedResource[] = [
+        {
+          kind: 'ServiceAccount',
+          name: 'my-sa',
+          namespace: 'default',
+          apiVersion: 'v1',
+          labels: {
+            'topology.kubernetes.io/region': 'westeurope',
+          },
+          annotations: {
+            'azure.workload.identity/client-id': 'ignored',
+            'custom/aks-resource-id':
+              '/subscriptions/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/resourceGroups/rg/providers/Microsoft.ContainerService/managedClusters/aks-prod',
+          },
+          rawYaml: '',
+        },
+      ];
+
+      const result = extractMetadataFromResources(resources);
+
+      expect(result.region).toBe('westeurope');
+      expect(result.cluster).toBe('aks-prod');
+      expect(result.accountId).toBe('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee');
+    });
+
+    test('Azure ConfigMap takes priority over labels', () => {
+      const resources: ParsedResource[] = [
+        {
+          kind: 'Deployment',
+          name: 'my-app',
+          namespace: 'default',
+          apiVersion: 'apps/v1',
+          labels: {
+            'app.kubernetes.io/instance': 'wrong-aks-cluster',
+          },
+          annotations: {},
+          rawYaml: '',
+        },
+        {
+          kind: 'ConfigMap',
+          name: 'aks-config',
+          namespace: 'default',
+          apiVersion: 'v1',
+          labels: {},
+          annotations: {},
+          rawYaml: '',
+          data: {
+            'config.yaml': 'cluster: correct-aks-cluster\nlocation: northeurope',
+          },
+        },
+      ];
+
+      const result = extractMetadataFromResources(resources);
+
+      expect(result.cluster).toBe('correct-aks-cluster');
+      expect(result.region).toBe('northeurope');
+    });
+
+    test('Azure manifest does not use AWS accountId when only Azure hints present', () => {
+      const resources: ParsedResource[] = [
+        {
+          kind: 'ConfigMap',
+          name: 'config',
+          namespace: 'default',
+          apiVersion: 'v1',
+          labels: {},
+          annotations: {},
+          rawYaml: '',
+          data: {
+            'config.yaml': `
+location: eastus
+cluster: my-aks-only
+aks_resource_id: /subscriptions/ffffffff-ffff-ffff-ffff-ffffffffffff/resourceGroups/rg/providers/Microsoft.ContainerService/managedClusters/my-aks-only
+`,
+          },
+        },
+      ];
+
+      const result = extractMetadataFromResources(resources);
+
+      expect(result.region).toBe('eastus');
+      expect(result.cluster).toBe('my-aks-only');
+      expect(result.accountId).toBe('ffffffff-ffff-ffff-ffff-ffffffffffff');
+    });
+
+    test('matches Azure location pattern in ConfigMap', () => {
+      const resources: ParsedResource[] = [
+        {
+          kind: 'ConfigMap',
+          name: 'config',
+          namespace: 'default',
+          apiVersion: 'v1',
+          labels: {},
+          annotations: {},
+          rawYaml: '',
+          data: {
+            env: 'AZURE_LOCATION=southeastasia\nCLUSTER_NAME=singapore-aks',
+          },
+        },
+      ];
+
+      const result = extractMetadataFromResources(resources);
+
+      expect(result.region).toBe('southeastasia');
+      expect(result.cluster).toBe('singapore-aks');
+    });
+
+    test('when both AWS and Azure hints in manifest, uses AWS for accountId', () => {
+      const resources: ParsedResource[] = [
+        {
+          kind: 'ConfigMap',
+          name: 'mixed',
+          namespace: 'default',
+          apiVersion: 'v1',
+          labels: {},
+          annotations: {},
+          rawYaml: '',
+          data: {
+            config: [
+              'cluster: shared-cluster',
+              'region: us-west-2',
+              'eks_role: arn:aws:iam::111111111111:role/my-role',
+              'aks_id: /subscriptions/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/resourceGroups/rg/providers/Microsoft.ContainerService/managedClusters/aks1',
+            ].join('\n'),
+          },
+        },
+      ];
+
+      const result = extractMetadataFromResources(resources);
+
+      expect(result.region).toBe('us-west-2');
+      expect(result.accountId).toBe('111111111111');
     });
   });
 
