@@ -112,7 +112,95 @@ describe('GithubIssuesService', () => {
     mockAssignCopilot.mockClear();
   });
 
+  /** Resources with at least one issue so that createResourceListIssue proceeds to create/update GI */
+  const testResourcesWithOneIssue: ParsedResource[] = testResources.map((r, i) =>
+    i === 0 ? { ...r, issues: [{ id: 'issue-1', title: 'Test finding' }] } : r
+  );
+
   describe('createResourceListIssue', () => {
+    it('should skip issue creation when no resources', async () => {
+      await issuesService.createResourceListIssue({
+        chartName: 'test-chart',
+        releaseName: 'test-release',
+        namespace: 'default',
+        resources: [],
+        assignCopilot: false,
+      });
+
+      expect(mockListForRepo).not.toHaveBeenCalled();
+      expect(mockCreateIssue).not.toHaveBeenCalled();
+      expect(infoSpy).toHaveBeenCalledWith(
+        'No resources for chart test-chart; skipping issue creation'
+      );
+    });
+
+    it('should skip issue creation when resources exist but none have issues (no misconfig or image)', async () => {
+      await issuesService.createResourceListIssue({
+        chartName: 'test-chart',
+        releaseName: 'test-release',
+        namespace: 'default',
+        resources: testResources,
+        assignCopilot: false,
+      });
+
+      expect(mockListForRepo).not.toHaveBeenCalled();
+      expect(mockCreateIssue).not.toHaveBeenCalled();
+      expect(infoSpy).toHaveBeenCalledWith(
+        'No issues (misconfiguration or image) found for chart test-chart; skipping GitHub issue creation'
+      );
+    });
+
+    it('should create issue when at least one resource has misconfiguration issues', async () => {
+      mockListForRepo.mockResolvedValueOnce({ data: [] } as any);
+
+      const resourcesWithMisconfig: ParsedResource[] = [
+        { ...testResources[0]!, issues: [{ id: 'misconfig-1', title: 'Pod security' }] },
+        testResources[1]!,
+      ];
+
+      await issuesService.createResourceListIssue({
+        chartName: 'test-chart',
+        releaseName: 'test-release',
+        namespace: 'default',
+        resources: resourcesWithMisconfig,
+        assignCopilot: false,
+      });
+
+      expect(mockCreateIssue).toHaveBeenCalledTimes(1);
+      expect(mockCreateIssue.mock.calls[0][0].body).toContain('misconfig-1');
+    });
+
+    it('should create issue when at least one resource has image/vulnerability issues only', async () => {
+      mockListForRepo.mockResolvedValueOnce({ data: [] } as any);
+
+      const resourcesWithImageIssuesOnly: ParsedResource[] = [
+        {
+          ...testResources[0]!,
+          issues: [
+            {
+              id: 'cve-1',
+              title: 'CVE in image',
+              imageRepository: 'nginx',
+              imageId: 'img-123',
+              type: 'Vulnerability',
+            },
+          ],
+        },
+        testResources[1]!,
+      ];
+
+      await issuesService.createResourceListIssue({
+        chartName: 'test-chart',
+        releaseName: 'test-release',
+        namespace: 'default',
+        resources: resourcesWithImageIssuesOnly,
+        assignCopilot: false,
+      });
+
+      expect(mockCreateIssue).toHaveBeenCalledTimes(1);
+      expect(mockCreateIssue.mock.calls[0][0].body).toContain('cve-1');
+    });
+
     // One issue per namespace — no batching by count/size; unlikely to have so many resources in one namespace.
     it('should create one issue per namespace when none exists', async () => {
       mockListForRepo.mockResolvedValueOnce({
@@ -123,7 +211,7 @@ describe('GithubIssuesService', () => {
         chartName: 'test-chart',
         releaseName: 'test-release',
         namespace: 'default',
-        resources: testResources,
+        resources: testResourcesWithOneIssue,
         assignCopilot: false,
       });
 
@@ -220,11 +308,14 @@ describe('GithubIssuesService', () => {
         data: [],
       } as any);
 
+      const resourcesWithIssue = testResources.map((r, i) =>
+        i === 0 ? { ...r, issues: [{ id: 'x', title: 'Finding' }] } : r
+      );
       await issuesService.createResourceListIssue({
         chartName: 'my-chart',
         releaseName: 'my-release',
         namespace: 'my-namespace',
-        resources: testResources,
+        resources: resourcesWithIssue,
         assignCopilot: false,
       });
 
@@ -244,7 +335,7 @@ describe('GithubIssuesService', () => {
         chartName: 'test-chart',
         releaseName: 'test-release',
         namespace: 'default',
-        resources: testResources,
+        resources: testResourcesWithOneIssue,
         assignCopilot: false,
       });
 
@@ -325,7 +416,11 @@ describe('GithubIssuesService', () => {
 
     it('should create three issues when resources span three namespaces', async () => {
       const threeNamespaceResources: ParsedResource[] = [
-        { ...testResources[0]!, namespace: 'default' },
+        {
+          ...testResources[0]!,
+          namespace: 'default',
+          issues: [{ id: 'ns-1', title: 'Finding' }],
+        },
         { ...testResources[1]!, namespace: 'default' },
         { ...testResources[2]!, namespace: 'production' },
         {
@@ -368,7 +463,7 @@ describe('GithubIssuesService', () => {
         chartName: 'test-chart',
         releaseName: 'test-release',
         namespace: 'default',
-        resources: testResources,
+        resources: testResourcesWithOneIssue,
         assignCopilot: false,
       });
 
@@ -403,7 +498,7 @@ describe('GithubIssuesService', () => {
         chartName: 'test-chart',
         releaseName: 'test-release',
         namespace: 'default',
-        resources: testResources,
+        resources: testResourcesWithOneIssue,
         assignCopilot: true,
         workflowRunUrl: 'https://github.com/test-owner/test-repo/actions/runs/1',
         artifactsUrl: 'https://github.com/test-owner/test-repo/actions/runs/1#artifacts',
@@ -459,6 +554,7 @@ describe('GithubIssuesService', () => {
         labels: {},
         annotations: {},
         rawYaml: `apiVersion: apps/v1\nkind: Deployment`,
+        ...(i === 0 && { issues: [{ id: 'batch-issue', title: 'Finding' }] }),
       }));
       mockListForRepo.mockResolvedValueOnce({ data: [] } as any);
 
@@ -489,7 +585,7 @@ describe('GithubIssuesService', () => {
         chartName: 'link-chart',
         releaseName: 'link-release',
         namespace: 'link-namespace',
-        resources: testResources,
+        resources: testResourcesWithOneIssue,
         assignCopilot: false,
         workflowRunUrl,
         artifactsUrl,
