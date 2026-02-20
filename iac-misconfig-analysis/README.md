@@ -64,7 +64,7 @@ jobs:
           terraform show -json tfplan > plan.json
 
       - name: Run Averlon Remediation Agent for IaC Misconfigurations
-        uses: averlon-ai/actions/iac-misconfig-analysis@v1.0.10
+        uses: averlon-ai/actions/iac-misconfig-analysis@v1.0.11
         with:
           averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
           averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -83,7 +83,7 @@ Skip GitHub issue creation if you only need the output:
 ```yaml
 - name: Run Averlon Remediation Agent for IaC Misconfigurations
   id: scan
-  uses: averlon-ai/actions/iac-misconfig-analysis@v1.0.10
+  uses: averlon-ai/actions/iac-misconfig-analysis@v1.0.11
   with:
     averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
     averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -101,7 +101,7 @@ Skip GitHub issue creation if you only need the output:
 
 ```yaml
 - name: Run Averlon Remediation Agent for IaC Misconfigurations
-  uses: averlon-ai/actions/iac-misconfig-analysis@v1.0.10
+  uses: averlon-ai/actions/iac-misconfig-analysis@v1.0.11
   with:
     # Required inputs
     averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
@@ -159,7 +159,7 @@ Skip GitHub issue creation if you only need the output:
 ```yaml
 - name: Run Averlon Remediation Agent for IaC Misconfigurations
   id: scan
-  uses: averlon-ai/actions/iac-misconfig-analysis@v1.0.10
+  uses: averlon-ai/actions/iac-misconfig-analysis@v1.0.11
   # ... inputs
 
 - name: Use output
@@ -297,7 +297,7 @@ Enable debug logging for troubleshooting:
 
 ```yaml
 - name: Run Averlon Remediation Agent for IaC Misconfigurations
-  uses: averlon-ai/actions/iac-misconfig-analysis@v1.0.10
+  uses: averlon-ai/actions/iac-misconfig-analysis@v1.0.11
   env:
     ACTIONS_STEP_DEBUG: true
   with:
