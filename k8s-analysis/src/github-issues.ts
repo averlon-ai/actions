@@ -154,6 +154,15 @@ export class GithubIssuesService extends CopilotIssueManager {
       return;
     }
 
+    // Create GI only when at least one resource has issues.
+    const hasAnyIssues = resources.some(r => r.issues && r.issues.length > 0);
+    if (!hasAnyIssues) {
+      core.info(
+        `No issues (misconfiguration or image) found for chart ${chartName}; skipping GitHub issue creation`
+      );
+      return;
+    }
+
     const accessors = {
       getKey: getResourceItemKey,
       getFingerprint: getResourceItemFingerprint,

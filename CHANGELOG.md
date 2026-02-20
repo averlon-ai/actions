@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.11] - 2026-02-18
+- fix empty github issue creation
+
 ## [1.0.10] - 2026-02-18
 - Update iac and k8s-analysis for better issue management
 - Update iac analysis to handle multiple paths in same repo
