@@ -370,7 +370,8 @@ async function main(): Promise<void> {
       octokit,
       inputs.githubOwner,
       inputs.githubRepo,
-      apiClient
+      apiClient,
+      cloudIdForIssues
     );
 
     const runId = process.env['GITHUB_RUN_ID'];

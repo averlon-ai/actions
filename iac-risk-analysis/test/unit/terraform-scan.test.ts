@@ -3,7 +3,7 @@ import * as core from '@actions/core';
 import { _runTerraformScan } from '../../src/main';
 import type { ApiClient } from '@averlon/shared/api-client';
 
-// Define ActionInputs interface for testing
+// Define ActionInputs interface for testing (must match main.ts ActionInputs for _runTerraformScan)
 interface ActionInputs {
   apiKey: string;
   apiSecret: string;
@@ -17,6 +17,10 @@ interface ActionInputs {
   repoName: string;
   scanPollInterval: number;
   scanTimeout: number;
+  commentOnPr: boolean;
+  githubToken: string;
+  commentMode: 'always' | 'update' | 'on-security-risks';
+  skipWhenNoChanges: boolean;
 }
 
 // Mock the api-client module - create fresh mocks for each test
@@ -82,6 +86,10 @@ describe('_runTerraformScan function', () => {
     repoName: 'test-repo',
     scanPollInterval: 0.2,
     scanTimeout: 1,
+    commentOnPr: false,
+    githubToken: '',
+    commentMode: 'update',
+    skipWhenNoChanges: true,
     ...overrides,
   });
 

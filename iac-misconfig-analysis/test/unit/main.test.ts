@@ -26,6 +26,7 @@ import * as core from '@actions/core';
 import { run, gitLikeHash } from '../../src/main';
 import { GithubIssuesService } from '../../src/github-issues';
 import type { ApiClient, ScanTerraformResult, UploadTerraformFileRequest } from '@averlon/shared';
+import { IssueSeverityEnum } from '@averlon/shared';
 
 // Mock the api-client module
 const mockAuthenticate = mock(() => Promise.resolve());
@@ -236,6 +237,7 @@ describe('iac-misconfig-analysis main.ts', () => {
     // Clean up test-specific environment variables
     delete process.env.INPUT_RESOURCE_TYPE_FILTER;
     delete process.env.INPUT_INCLUDE_RESOURCES_WITHOUT_ISSUES;
+    delete process.env.INPUT_SEVERITIES;
 
     // Restore original environment
     process.env = originalEnv;
@@ -646,6 +648,7 @@ describe('iac-misconfig-analysis main.ts', () => {
           ),
           ResourceTypes: undefined,
           IncludeResourcesWithoutIssues: false,
+          Severities: [IssueSeverityEnum.Critical, IssueSeverityEnum.High],
         });
 
         // Check that getScanTerraformResult was called
@@ -975,6 +978,7 @@ describe('iac-misconfig-analysis main.ts', () => {
           ),
           ResourceTypes: ['aws_s3_bucket', 'aws_ec2_instance'],
           IncludeResourcesWithoutIssues: false,
+          Severities: [IssueSeverityEnum.Critical, IssueSeverityEnum.High],
         });
       });
 
@@ -991,6 +995,7 @@ describe('iac-misconfig-analysis main.ts', () => {
           ),
           ResourceTypes: ['aws_s3_bucket', 'aws_ec2_instance'],
           IncludeResourcesWithoutIssues: false,
+          Severities: [IssueSeverityEnum.Critical, IssueSeverityEnum.High],
         });
       });
 
@@ -1007,6 +1012,7 @@ describe('iac-misconfig-analysis main.ts', () => {
           ),
           ResourceTypes: undefined,
           IncludeResourcesWithoutIssues: true,
+          Severities: [IssueSeverityEnum.Critical, IssueSeverityEnum.High],
         });
       });
 
@@ -1023,6 +1029,7 @@ describe('iac-misconfig-analysis main.ts', () => {
           ),
           ResourceTypes: undefined,
           IncludeResourcesWithoutIssues: false,
+          Severities: [IssueSeverityEnum.Critical, IssueSeverityEnum.High],
         });
       });
 
@@ -1040,6 +1047,73 @@ describe('iac-misconfig-analysis main.ts', () => {
           ),
           ResourceTypes: ['aws_s3_bucket'],
           IncludeResourcesWithoutIssues: true,
+          Severities: [IssueSeverityEnum.Critical, IssueSeverityEnum.High],
+        });
+      });
+
+      it('should pass severities to scan request when provided', async () => {
+        process.env.INPUT_SEVERITIES = 'Critical,High';
+
+        await run();
+
+        expect(mockStartScanTerraform).toHaveBeenCalledWith({
+          RepoName: 'test-owner/test-repo',
+          Commit: gitLikeHash(
+            'commit:abc123githubRepo:test-repogithubOwner:test-ownerplanPath:./test/plan.json'
+          ),
+          ResourceTypes: undefined,
+          IncludeResourcesWithoutIssues: false,
+          Severities: [IssueSeverityEnum.Critical, IssueSeverityEnum.High],
+        });
+      });
+
+      it('should pass single severity to scan request', async () => {
+        process.env.INPUT_FILTERS = 'Medium';
+
+        await run();
+
+        expect(mockStartScanTerraform).toHaveBeenCalledWith({
+          RepoName: 'test-owner/test-repo',
+          Commit: gitLikeHash(
+            'commit:abc123githubRepo:test-repogithubOwner:test-ownerplanPath:./test/plan.json'
+          ),
+          ResourceTypes: undefined,
+          IncludeResourcesWithoutIssues: false,
+          Severities: [IssueSeverityEnum.Medium],
+        });
+      });
+
+      it('should trim and dedupe severities', async () => {
+        process.env.INPUT_FILTERS = ' high , High , Low ';
+
+        await run();
+
+        expect(mockStartScanTerraform).toHaveBeenCalledWith({
+          RepoName: 'test-owner/test-repo',
+          Commit: gitLikeHash(
+            'commit:abc123githubRepo:test-repogithubOwner:test-ownerplanPath:./test/plan.json'
+          ),
+          ResourceTypes: undefined,
+          IncludeResourcesWithoutIssues: false,
+          Severities: [IssueSeverityEnum.High, IssueSeverityEnum.Low],
+        });
+      });
+
+      it('should combine severities with resource-type-filter and include-resources-without-issues', async () => {
+        process.env.INPUT_FILTERS = 'Critical,Low';
+        process.env.INPUT_RESOURCE_TYPE_FILTER = 'aws_s3_bucket';
+        process.env.INPUT_INCLUDE_RESOURCES_WITHOUT_ISSUES = 'true';
+
+        await run();
+
+        expect(mockStartScanTerraform).toHaveBeenCalledWith({
+          RepoName: 'test-owner/test-repo',
+          Commit: gitLikeHash(
+            'commit:abc123githubRepo:test-repogithubOwner:test-ownerplanPath:./test/plan.json'
+          ),
+          ResourceTypes: ['aws_s3_bucket'],
+          IncludeResourcesWithoutIssues: true,
+          Severities: [IssueSeverityEnum.Critical, IssueSeverityEnum.Low],
         });
       });
     });

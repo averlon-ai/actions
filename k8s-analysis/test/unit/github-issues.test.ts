@@ -14,6 +14,7 @@ describe('GithubIssuesService', () => {
   let mockListForRepo: ReturnType<typeof mock>;
   let mockCreateIssue: ReturnType<typeof mock>;
   let mockUpdateIssue: ReturnType<typeof mock>;
+  let mockGetIssue: ReturnType<typeof mock>;
 
   const testResources: ParsedResource[] = [
     {
@@ -86,6 +87,17 @@ describe('GithubIssuesService', () => {
       })
     );
 
+    mockGetIssue = mock((params: { issue_number: number }) =>
+      Promise.resolve({
+        data: {
+          number: params.issue_number,
+          title: `Test Issue #${params.issue_number}`,
+          body: 'Test Body',
+          html_url: `https://github.com/test-owner/test-repo/issues/${params.issue_number}`,
+        },
+      })
+    );
+
     // Create mock Octokit instance
     mockOctokit = {
       rest: {
@@ -93,6 +105,7 @@ describe('GithubIssuesService', () => {
           listForRepo: mockListForRepo as any,
           create: mockCreateIssue as any,
           update: mockUpdateIssue as any,
+          get: mockGetIssue as any,
         },
       },
     } as any;
@@ -109,6 +122,7 @@ describe('GithubIssuesService', () => {
     mockListForRepo.mockClear();
     mockCreateIssue.mockClear();
     mockUpdateIssue.mockClear();
+    mockGetIssue?.mockClear();
     mockAssignCopilot.mockClear();
   });
 
@@ -148,6 +162,21 @@ describe('GithubIssuesService', () => {
       expect(infoSpy).toHaveBeenCalledWith(
         'No issues (misconfiguration or image) found for chart test-chart; skipping GitHub issue creation'
       );
+    });
+
+    it('should not create issue for namespace when only resources there have no issues', async () => {
+      mockListForRepo.mockResolvedValueOnce({ data: [] } as any);
+      // Only first resource (default) has an issue; production has no issues
+      await issuesService.createResourceListIssue({
+        chartName: 'test-chart',
+        releaseName: 'test-release',
+        namespace: 'default',
+        resources: testResourcesWithOneIssue,
+        assignCopilot: false,
+      });
+      // Should create only 1 issue (default), not 2 (no issue for production when its only resource has no issues)
+      expect(mockCreateIssue).toHaveBeenCalledTimes(1);
+      expect(mockCreateIssue.mock.calls[0][0].title).toContain('default');
     });
 
     it('should create issue when at least one resource has misconfiguration issues', async () => {
@@ -201,17 +230,24 @@ describe('GithubIssuesService', () => {
       expect(mockCreateIssue.mock.calls[0][0].body).toContain('cve-1');
     });
 
-    // One issue per namespace — no batching by count/size; unlikely to have so many resources in one namespace.
+    // One issue per namespace that has at least one resource with issues (no issue for namespace with only clean resources).
     it('should create one issue per namespace when none exists', async () => {
       mockListForRepo.mockResolvedValueOnce({
         data: [],
       } as any);
 
+      // Give each namespace at least one resource with an issue so we create one issue per namespace
+      const resourcesBothNamespacesHaveIssues: ParsedResource[] = testResources.map((r, i) =>
+        i <= 1
+          ? { ...r, issues: [{ id: `issue-${i}`, title: 'Finding' }] }
+          : { ...r, issues: [{ id: 'issue-2', title: 'Finding' }] }
+      );
+
       await issuesService.createResourceListIssue({
         chartName: 'test-chart',
         releaseName: 'test-release',
         namespace: 'default',
-        resources: testResourcesWithOneIssue,
+        resources: resourcesBothNamespacesHaveIssues,
         assignCopilot: false,
       });
 
@@ -319,8 +355,9 @@ describe('GithubIssuesService', () => {
         assignCopilot: false,
       });
 
+      // Only one resource has issues (default namespace); we create one issue, not one per namespace when others have no issues
       const bodies = mockCreateIssue.mock.calls.map(c => c[0].body as string);
-      expect(bodies).toHaveLength(2);
+      expect(bodies).toHaveLength(1);
       expect(bodies.every(b => b.includes('**Chart:** `my-chart`'))).toBe(true);
       expect(bodies.every(b => b.includes('**Release Name:** `my-release`'))).toBe(true);
       expect(bodies.every(b => b.includes('**Namespace:**'))).toBe(true);
@@ -331,11 +368,16 @@ describe('GithubIssuesService', () => {
         data: [],
       } as any);
 
+      const resourcesBothNsHaveIssues: ParsedResource[] = testResources.map((r, i) =>
+        i <= 1
+          ? { ...r, issues: [{ id: `n-${i}`, title: 'F' }] }
+          : { ...r, issues: [{ id: 'n-2', title: 'F' }] }
+      );
       await issuesService.createResourceListIssue({
         chartName: 'test-chart',
         releaseName: 'test-release',
         namespace: 'default',
-        resources: testResourcesWithOneIssue,
+        resources: resourcesBothNsHaveIssues,
         assignCopilot: false,
       });
 
@@ -422,7 +464,11 @@ describe('GithubIssuesService', () => {
           issues: [{ id: 'ns-1', title: 'Finding' }],
         },
         { ...testResources[1]!, namespace: 'default' },
-        { ...testResources[2]!, namespace: 'production' },
+        {
+          ...testResources[2]!,
+          namespace: 'production',
+          issues: [{ id: 'ns-2', title: 'Finding' }],
+        },
         {
           kind: 'Secret',
           name: 'my-secret',
@@ -431,6 +477,7 @@ describe('GithubIssuesService', () => {
           labels: {},
           annotations: {},
           rawYaml: 'apiVersion: v1\nkind: Secret',
+          issues: [{ id: 'ns-3', title: 'Finding' }],
         },
       ];
       mockListForRepo.mockResolvedValueOnce({ data: [] } as any);
@@ -459,11 +506,16 @@ describe('GithubIssuesService', () => {
     it('should apply correct labels to created issues', async () => {
       mockListForRepo.mockResolvedValueOnce({ data: [] } as any);
 
+      const resourcesBothNsHaveIssues: ParsedResource[] = testResources.map((r, i) =>
+        i <= 1
+          ? { ...r, issues: [{ id: `l-${i}`, title: 'F' }] }
+          : { ...r, issues: [{ id: 'l-2', title: 'F' }] }
+      );
       await issuesService.createResourceListIssue({
         chartName: 'test-chart',
         releaseName: 'test-release',
         namespace: 'default',
-        resources: testResourcesWithOneIssue,
+        resources: resourcesBothNsHaveIssues,
         assignCopilot: false,
       });
 
@@ -494,11 +546,16 @@ describe('GithubIssuesService', () => {
         data: [],
       } as any);
 
+      const resourcesBothNsHaveIssues: ParsedResource[] = testResources.map((r, i) =>
+        i <= 1
+          ? { ...r, issues: [{ id: `c-${i}`, title: 'F' }] }
+          : { ...r, issues: [{ id: 'c-2', title: 'F' }] }
+      );
       await issuesService.createResourceListIssue({
         chartName: 'test-chart',
         releaseName: 'test-release',
         namespace: 'default',
-        resources: testResourcesWithOneIssue,
+        resources: resourcesBothNsHaveIssues,
         assignCopilot: true,
         workflowRunUrl: 'https://github.com/test-owner/test-repo/actions/runs/1',
         artifactsUrl: 'https://github.com/test-owner/test-repo/actions/runs/1#artifacts',
@@ -570,7 +627,8 @@ describe('GithubIssuesService', () => {
       expect(mockCreateIssue.mock.calls[0][0].title).toBe(
         'Averlon Misconfiguration Remediation Agent for Kubernetes: big-chart - default'
       );
-      expect(mockCreateIssue.mock.calls[0][0].body).toContain('Total resources scanned: 25');
+      // Only resources with issues are included in the batch, so count is 1 not 25
+      expect(mockCreateIssue.mock.calls[0][0].body).toContain('Total resources scanned: 1');
     });
 
     it('should include workflow and artifact links when provided', async () => {

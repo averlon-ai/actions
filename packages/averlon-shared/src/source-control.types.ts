@@ -1,6 +1,14 @@
 // ===== Source Control Types =====
 
 /**
+ * RiskStatus indicates whether risk was detected for a source control issue
+ */
+export enum RiskStatus {
+  None = 0,
+  Detected = 1,
+}
+
+/**
  * SourceControlStatus defines the status of a source control issue or PR
  */
 export enum SourceControlStatus {
@@ -37,6 +45,7 @@ export interface SourceControlIssue {
   IssueURL?: string;
   PullRequestNumber?: number;
   PullRequestURL?: string;
+  RiskStatus?: RiskStatus;
   RiskSummary?: string;
   Status?: SourceControlStatus;
   Type?: SourceControlIssueType;
@@ -56,13 +65,17 @@ export interface RegisterSourceControlIssueRequest {
   RepoURL: string;
   IssueNumber: number;
   IssueURL: string;
+  IssueTitle: string;
   PullRequestNumber?: number;
   PullRequestURL?: string;
+  RiskStatus?: RiskStatus;
   RiskSummary?: string;
   Status?: SourceControlStatus;
   Type: SourceControlIssueType;
   Labels?: string[];
   IssueIDs?: number[];
+  /** CloudID is the Averlon cloud ID (required by backend) */
+  CloudID: string;
 }
 
 /**
@@ -77,6 +90,8 @@ export interface UpdateSourceControlIssueStatusRequest {
   IssueID: string;
   RepoURL: string;
   Status: SourceControlStatus;
+  /** CloudID is the Averlon cloud ID (required by backend) */
+  CloudID: string;
 }
 
 /**
@@ -102,6 +117,8 @@ export interface RegisterSourceControlPullRequestRequest {
   PullRequestURL: string;
   Status: SourceControlStatus;
   Author?: string;
+  /** CloudID is the Averlon cloud ID (required by backend) */
+  CloudID: string;
 }
 
 /**
@@ -137,6 +154,8 @@ export interface UpdateSourceControlPullRequestStatusRequest {
 export interface GetSourceControlIssueRequest {
   RepoURL: string;
   IssueNumber: number;
+  /** CloudID is the Averlon cloud ID (required by backend) */
+  CloudID: string;
 }
 
 /**

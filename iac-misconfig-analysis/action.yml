@@ -49,6 +49,12 @@ inputs:
     description: "If true, will get the resources present in terraform plan file with or without issues. Default is false."
     required: false
     default: "false"
+  filters:
+    description: |
+      Severity filters (comma-separated). Supported values: Critical, High, Medium, Low.
+      Example: "Critical,High"
+    required: false
+    default: "Critical,High"
 runs:
   using: 'node20'
   main: 'dist/main.js'

@@ -92,15 +92,19 @@ export function normalizeResourceIdentifier(identifier: string): string {
  */
 export class GithubIssuesService extends CopilotIssueManager {
   private apiClient?: ApiClient;
+  private cloudId?: string;
 
   constructor(
     octokit: ReturnType<typeof github.getOctokit>,
     owner: string,
     repo: string,
-    apiClient?: ApiClient
+    apiClient?: ApiClient,
+    cloudId?: string
   ) {
-    super(octokit, owner, repo);
+    // Type cast needed: k8s-analysis uses @actions/github ^9, CopilotIssueManager uses ^7
+    super(octokit as never, owner, repo);
     this.apiClient = apiClient;
+    this.cloudId = cloudId;
   }
 
   /**
@@ -154,9 +158,8 @@ export class GithubIssuesService extends CopilotIssueManager {
       return;
     }
 
-    // Create GI only when at least one resource has issues.
-    const hasAnyIssues = resources.some(r => r.issues && r.issues.length > 0);
-    if (!hasAnyIssues) {
+    // Create GI only when at least one resource has issues (derived from issueIds collected above).
+    if (issueIds.size === 0) {
       core.info(
         `No issues (misconfiguration or image) found for chart ${chartName}; skipping GitHub issue creation`
       );
@@ -189,14 +192,18 @@ export class GithubIssuesService extends CopilotIssueManager {
         resource: { ...item.resource, issues: newIssues },
       };
     });
-    const itemsToSync: ChartResourceItem[] = [...newItems, ...filteredChanged];
+    // Only sync items that have at least one issue; avoid creating issues for namespaces
+    // where the only "new" resources have no issues (e.g. new key with empty fingerprint).
+    const itemsToSync: ChartResourceItem[] = [...newItems, ...filteredChanged].filter(
+      item => (item.resource.issues?.length ?? 0) > 0
+    );
 
     if (itemsToSync.length === 0) {
       core.info(`No batches to create or update for chart ${chartName} (already up to date)`);
       return;
     }
 
-    // One issue per namespace — no batching by size; unlikely to have so many resources in one namespace.
+    // One issue per namespace that has at least one resource with issues (no issue if no resources in that namespace have issues).
     const byNamespace = new Map<string, ChartResourceItem[]>();
     for (const item of itemsToSync) {
       const ns = item.resource.namespace ?? item.namespace ?? 'default';
@@ -277,15 +284,23 @@ export class GithubIssuesService extends CopilotIssueManager {
 
     // Register each issue with backend and link PRs (from incoming dashboard changes)
     for (const issueNumber of allIssueNumbers) {
+      const { data: issue } = await this.octokit.rest.issues.get({
+        owner: this.owner,
+        repo: this.repo,
+        issue_number: issueNumber,
+      });
+      const issueTitle = (issue.title?.trim() ?? '') || `Issue #${issueNumber}`;
       await createOrUpdateIssue({
         apiClient: this.apiClient,
         orgName: this.owner,
         repo: this.repo,
         issueNumber,
+        issueTitle,
         riskSummary: '',
         type: SourceControlIssueType.Helm,
         labels: ISSUE_LABELS,
         issueIDs: relatedIssueIDs,
+        cloudId: this.cloudId,
       });
       const linkedPRs = await this.findPRsLinkedToIssue(issueNumber);
       if (linkedPRs.length > 0) {
@@ -295,6 +310,7 @@ export class GithubIssuesService extends CopilotIssueManager {
           repo: this.repo,
           issueNumber,
           linkedPRs,
+          cloudId: this.cloudId,
         });
       }
       await this.assignCopilot(issueNumber, assignCopilot).catch(err => {
@@ -388,6 +404,7 @@ export class GithubIssuesService extends CopilotIssueManager {
       type: SourceControlIssueType.Helm,
       findPRsLinkedToIssue: (num: number) => this.findPRsLinkedToIssue(num),
       logMessage: `Closed Helm recommendation #${issueNumber}`,
+      cloudId: this.cloudId,
     });
   }
 

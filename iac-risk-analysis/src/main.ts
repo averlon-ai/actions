@@ -1,5 +1,6 @@
 import * as core from '@actions/core';
 import * as github from '@actions/github';
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import {
   createApiClient,
@@ -8,6 +9,7 @@ import {
   AnalyzeTerraformRequest,
   JobStatusNotification,
   AnalyzeTerraformResult,
+  TerraformResource,
   getCallerInfo,
 } from '@averlon/shared';
 import { getInputSafe, parseBoolean } from '@averlon/github-actions-utils';
@@ -61,6 +63,43 @@ class ScanTimeoutError extends Error {
   }
 }
 
+/** File extensions treated as Terraform config (case-insensitive). */
+const TERRAFORM_EXTENSIONS = ['.tf', '.tf.json', '.tfvars', '.tfvars.json'];
+
+function _hasTerraformExtension(filePath: string): boolean {
+  const lower = filePath.toLowerCase();
+  return TERRAFORM_EXTENSIONS.some(ext => lower.endsWith(ext));
+}
+
+/**
+ * Get list of file paths changed between base and head refs via GitHub Compare API.
+ * Returns empty array on API error or when no diff (e.g. same commit).
+ */
+async function _getChangedFilesBetweenCommits(
+  owner: string,
+  repo: string,
+  baseRef: string,
+  headRef: string,
+  token: string
+): Promise<string[]> {
+  const octokit = github.getOctokit(token);
+  const basehead = `${baseRef}...${headRef}`;
+  try {
+    const { data } = await octokit.rest.repos.compareCommitsWithBasehead({
+      owner,
+      repo,
+      basehead,
+    });
+    const files = data.files ?? [];
+    return files.map(f => f.filename).filter(Boolean);
+  } catch (err) {
+    core.debug(
+      `GitHub compare API failed (${baseRef}...${headRef}); not skipping based on file changes. Error: ${err instanceof Error ? err.message : String(err)}`
+    );
+    return [];
+  }
+}
+
 interface ActionInputs {
   apiKey: string;
   apiSecret: string;
@@ -77,6 +116,7 @@ interface ActionInputs {
   commentOnPr: boolean;
   githubToken: string;
   commentMode: CommentMode;
+  skipWhenNoChanges: boolean;
 }
 
 /**
@@ -124,6 +164,10 @@ async function _getInputs(): Promise<ActionInputs> {
 
   const commentOnPr = parseBoolean(commentOnPrStr);
   core.debug(`PR commenting ${commentOnPr ? 'enabled' : 'disabled'}`);
+
+  const skipWhenNoChangesStr = getInputSafe('skip-when-no-changes', false) || 'true';
+  const skipWhenNoChanges = parseBoolean(skipWhenNoChangesStr);
+  core.debug(`Skip when no changes: ${skipWhenNoChanges}`);
 
   // Validate comment mode against allowed values
   const validCommentModes: CommentMode[] = ['always', 'update', 'on-security-risks'];
@@ -179,7 +223,65 @@ async function _getInputs(): Promise<ActionInputs> {
     commentOnPr,
     githubToken,
     commentMode,
+    skipWhenNoChanges,
   };
+}
+
+/**
+ * Normalize a value for logical comparison: recursively sort object keys
+ * so that the same logical content produces the same string regardless of
+ * key order or (when stringified) formatting. Arrays keep element order.
+ */
+function _normalizeForComparison(value: unknown): unknown {
+  if (value === null || typeof value !== 'object') {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map(_normalizeForComparison);
+  }
+  const obj = value as Record<string, unknown>;
+  const sorted: Record<string, unknown> = {};
+  for (const key of Object.keys(obj).sort()) {
+    sorted[key] = _normalizeForComparison(obj[key]);
+  }
+  return sorted;
+}
+
+/**
+ * Read plan file, parse as JSON, normalize for logical comparison, return SHA-256 of normalized JSON.
+ * Returns null if file cannot be read or content is not valid JSON (caller should not skip).
+ */
+async function _planLogicalHash(filePath: string): Promise<string | null> {
+  try {
+    const buffer = await readFile(filePath, 'utf-8');
+    const parsed = JSON.parse(buffer) as unknown;
+    const normalized = _normalizeForComparison(parsed);
+    const str = JSON.stringify(normalized);
+    return createHash('sha256').update(str, 'utf-8').digest('hex');
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Check if base and head Terraform plan files are logically identical.
+ * Terraform has no CLI to compare two plan files (only terraform show -json per file),
+ * so we compare normalized JSON: sorted keys and consistent stringify so that key order,
+ * formatting, or trivial serialization differences do not cause a false "different" result.
+ * Used to skip upload and scan when there are no meaningful plan changes.
+ *
+ * @returns true if both files exist, are valid plan JSON, and are logically equal; false otherwise
+ */
+async function _arePlanFilesIdentical(
+  basePlanPath: string,
+  headPlanPath: string
+): Promise<boolean> {
+  const baseHash = await _planLogicalHash(basePlanPath);
+  const headHash = await _planLogicalHash(headPlanPath);
+  if (baseHash == null || headHash == null) {
+    return false;
+  }
+  return baseHash === headHash;
 }
 
 /**
@@ -376,14 +478,29 @@ async function _runTerraformScan(
           `✓ Terraform scan completed successfully after ${elapsedSeconds} seconds and ${attempts} polling attempts`
         );
 
-        // Build the result object with both ReachabilityAnalysis and AccessAnalysis
+        // Build the result object with ReachabilityAnalysis, AccessAnalysis, and optional CrowdstrikePrecogDetections.
+        // Parse CrowdstrikePrecogDetections at the boundary when the API returns a string (possibly double-encoded).
         const hasReachability = !!resultResponse.ReachabilityAnalysis;
         const hasAccess = !!resultResponse.AccessAnalysis;
-
-        if (hasReachability || hasAccess) {
+        let parsedCrowdstrike: unknown = resultResponse.CrowdstrikePrecogDetections;
+        if (typeof resultResponse.CrowdstrikePrecogDetections === 'string') {
+          try {
+            parsedCrowdstrike = JSON.parse(resultResponse.CrowdstrikePrecogDetections);
+            if (typeof parsedCrowdstrike === 'string') {
+              parsedCrowdstrike = JSON.parse(parsedCrowdstrike);
+            }
+          } catch {
+            core.warning(
+              'Failed to parse CrowdstrikePrecogDetections from API, omitting from scan result'
+            );
+            parsedCrowdstrike = undefined;
+          }
+        }
+        if (hasReachability || hasAccess || parsedCrowdstrike != null) {
           const scanResultObj: {
             ReachabilityAnalysis?: typeof resultResponse.ReachabilityAnalysis;
             AccessAnalysis?: typeof resultResponse.AccessAnalysis;
+            CrowdstrikePrecogDetections?: unknown;
           } = {};
 
           if (hasReachability) {
@@ -391,6 +508,9 @@ async function _runTerraformScan(
           }
           if (hasAccess) {
             scanResultObj.AccessAnalysis = resultResponse.AccessAnalysis;
+          }
+          if (parsedCrowdstrike != null) {
+            scanResultObj.CrowdstrikePrecogDetections = parsedCrowdstrike;
           }
 
           core.info('Scan result received and validated');
@@ -484,6 +604,31 @@ async function _runTerraformScan(
   }
 }
 
+function extractCloudIdFromScanResult(scanResult: string): string | undefined {
+  try {
+    const parsed = JSON.parse(scanResult) as {
+      ReachabilityAnalysis?: {
+        AddedResources?: TerraformResource[];
+        RemovedResources?: TerraformResource[];
+        ModifiedResources?: TerraformResource[];
+      };
+      AccessAnalysis?: { Resources?: TerraformResource[] };
+    };
+    const allResources: TerraformResource[] = [
+      ...(parsed.ReachabilityAnalysis?.AddedResources ?? []),
+      ...(parsed.ReachabilityAnalysis?.RemovedResources ?? []),
+      ...(parsed.ReachabilityAnalysis?.ModifiedResources ?? []),
+      ...(parsed.AccessAnalysis?.Resources ?? []),
+    ];
+    for (const resource of allResources) {
+      if (resource.Asset?.CloudID) return resource.Asset.CloudID;
+    }
+  } catch {
+    // Ignore parse errors
+  }
+  return undefined;
+}
+
 /**
  * Main action entry point
  * Orchestrates the complete workflow: input validation, file uploads, scanning, and PR commenting
@@ -497,6 +642,99 @@ async function run(): Promise<void> {
     // === Step 1: Input Collection and Validation ===
     core.debug('Step 1: Collecting and validating inputs');
     const inputs = await _getInputs();
+
+    // === Step 1a: Skip when no Terraform files changed in the PR (base..head) ===
+    if (inputs.skipWhenNoChanges && inputs.githubToken) {
+      let owner: string;
+      let repo: string;
+      try {
+        const ctx = github.context.repo;
+        owner = ctx.owner;
+        repo = ctx.repo;
+      } catch {
+        core.debug(
+          'Could not get repo from context (e.g. GITHUB_REPOSITORY unset); skipping "no Terraform file changes" check.'
+        );
+        owner = '';
+        repo = '';
+      }
+      if (owner && repo) {
+        const changedFiles = await _getChangedFilesBetweenCommits(
+          owner,
+          repo,
+          inputs.baseCommitHash,
+          inputs.headCommitHash,
+          inputs.githubToken
+        );
+        const hasTerraformChanges = changedFiles.some(_hasTerraformExtension);
+        if (changedFiles.length > 0 && !hasTerraformChanges) {
+          core.info(
+            'No Terraform files (*.tf, *.tf.json, *.tfvars, *.tfvars.json) changed in this PR; skipping upload and scan.'
+          );
+          const skipResult = JSON.stringify({
+            skipped: true,
+            reason: 'No Terraform files changed in this PR; nothing to analyze.',
+          });
+          core.setOutput('scan-result', skipResult);
+
+          if (inputs.commentOnPr) {
+            try {
+              await postOrUpdateComment(
+                inputs.githubToken,
+                skipResult,
+                inputs.headCommitHash,
+                inputs.commentMode
+              );
+              core.info('✓ PR comment posted (skipped: no Terraform file changes)');
+            } catch (commentError) {
+              const msg =
+                commentError instanceof Error ? commentError.message : String(commentError);
+              core.warning(`Failed to post PR comment: ${msg}`);
+            }
+          }
+
+          core.info(
+            '✓ Averlon Infrastructure Risk PreCog Agent completed (skipped; no Terraform file changes).'
+          );
+          return;
+        }
+      }
+    }
+
+    // === Step 1b: Skip when base and head plans are identical ===
+    if (inputs.skipWhenNoChanges) {
+      const plansIdentical = await _arePlanFilesIdentical(inputs.basePlanPath, inputs.headPlanPath);
+      if (plansIdentical) {
+        core.info(
+          'Base and head Terraform plan files are logically identical (normalized JSON); skipping upload and scan (no changes to analyze).'
+        );
+        const skipResult = JSON.stringify({
+          skipped: true,
+          reason: 'Base and head Terraform plans are logically identical; no changes to analyze.',
+        });
+        core.setOutput('scan-result', skipResult);
+
+        if (inputs.commentOnPr && inputs.githubToken) {
+          try {
+            await postOrUpdateComment(
+              inputs.githubToken,
+              skipResult,
+              inputs.headCommitHash,
+              inputs.commentMode
+            );
+            core.info('✓ PR comment posted (skipped: no plan changes)');
+          } catch (commentError) {
+            const msg = commentError instanceof Error ? commentError.message : String(commentError);
+            core.warning(`Failed to post PR comment: ${msg}`);
+          }
+        }
+
+        core.info(
+          '✓ Averlon Infrastructure Risk PreCog Agent completed (skipped; no plan changes).'
+        );
+        return;
+      }
+    }
 
     // === Step 2: API Client Initialization ===
     core.debug('Step 2: Initializing API client');
@@ -573,7 +811,9 @@ async function run(): Promise<void> {
           repo: context.repo.repo,
           prNumber: pr.number,
           prUrl,
+          prTitle: pr.title,
           scanResult,
+          cloudId: extractCloudIdFromScanResult(scanResult),
         });
       } catch (sourceControlError) {
         const msg =

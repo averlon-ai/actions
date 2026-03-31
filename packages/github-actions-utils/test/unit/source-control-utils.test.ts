@@ -66,6 +66,7 @@ import type { ApiClient } from '@averlon/shared';
 import {
   SourceControlStatus,
   SourceControlIssueType,
+  RiskStatus,
   type GetSourceControlIssueResponse,
   type SourceControlIssue,
 } from '@averlon/shared';
@@ -148,6 +149,7 @@ describe('source-control-utils', () => {
         orgName: 'test-org',
         repo: 'test-repo',
         issueNumber: 123,
+        cloudId: 'test-cloud-id',
       });
 
       expect(result).not.toBeNull();
@@ -155,6 +157,7 @@ describe('source-control-utils', () => {
       expect(mockGetSourceControlIssue).toHaveBeenCalledWith({
         RepoURL: 'https://github.com/test-org/test-repo',
         IssueNumber: 123,
+        CloudID: 'test-cloud-id',
       });
     });
 
@@ -168,6 +171,7 @@ describe('source-control-utils', () => {
         orgName: 'test-org',
         repo: 'test-repo',
         issueNumber: 999,
+        cloudId: 'test-cloud-id',
       });
 
       expect(result).toEqual({ NotFound: true });
@@ -181,6 +185,7 @@ describe('source-control-utils', () => {
         orgName: 'test-org',
         repo: 'test-repo',
         issueNumber: 123,
+        cloudId: 'test-cloud-id',
       });
 
       expect(result).toBeNull();
@@ -196,6 +201,19 @@ describe('source-control-utils', () => {
 
       expect(result).toBeNull();
     });
+
+    it('should return null when cloudId is not provided', async () => {
+      const result = await findSourceControlIssue({
+        apiClient: mockApiClient,
+        orgName: 'test-org',
+        repo: 'test-repo',
+        issueNumber: 123,
+      });
+
+      expect(result).toBeNull();
+      expect(mockGetSourceControlIssue).not.toHaveBeenCalled();
+      expect(debugSpy).toHaveBeenCalledWith('CloudID required for getSourceControlIssue; skipping');
+    });
   });
 
   describe('createOrUpdateIssue', () => {
@@ -205,10 +223,12 @@ describe('source-control-utils', () => {
         orgName: 'test-org',
         repo: 'test-repo',
         issueNumber: 123,
+        issueTitle: 'Test issue title',
         riskSummary: 'Test risk summary',
         type: SourceControlIssueType.Helm,
         labels: ['label1', 'label2'],
         issueIDs: [1, 2, 3],
+        cloudId: 'test-cloud-id',
       });
 
       expect(result).toBe(true);
@@ -219,13 +239,37 @@ describe('source-control-utils', () => {
         RepoURL: 'https://github.com/test-org/test-repo',
         IssueNumber: 123,
         IssueURL: 'https://github.com/test-org/test-repo/issues/123',
+        IssueTitle: 'Test issue title',
         RiskSummary: 'Test risk summary',
+        RiskStatus: RiskStatus.None,
         Status: SourceControlStatus.Open,
         Type: SourceControlIssueType.Helm,
         Labels: ['label1', 'label2'],
         IssueIDs: [1, 2, 3],
+        CloudID: 'test-cloud-id',
       });
       expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining('Creating/updating issue #123'));
+    });
+
+    it('should pass RiskStatus when provided', async () => {
+      const result = await createOrUpdateIssue({
+        apiClient: mockApiClient,
+        orgName: 'test-org',
+        repo: 'test-repo',
+        issueNumber: 123,
+        issueTitle: 'Risk detected',
+        riskSummary: 'Risk detected',
+        riskStatus: RiskStatus.Detected,
+        type: SourceControlIssueType.Helm,
+        cloudId: 'test-cloud-id',
+      });
+
+      expect(result).toBe(true);
+      expect(mockRegisterSourceControlIssue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          RiskStatus: RiskStatus.Detected,
+        })
+      );
     });
 
     it('should use provided issueUrl when given', async () => {
@@ -234,9 +278,11 @@ describe('source-control-utils', () => {
         orgName: 'test-org',
         repo: 'test-repo',
         issueNumber: 123,
+        issueTitle: 'Test',
         issueUrl: 'https://github.com/test-org/test-repo/issues/123/custom',
         riskSummary: 'Test',
         type: SourceControlIssueType.Helm,
+        cloudId: 'test-cloud-id',
       });
 
       expect(mockRegisterSourceControlIssue).toHaveBeenCalledWith(
@@ -251,12 +297,31 @@ describe('source-control-utils', () => {
         orgName: 'test-org',
         repo: 'test-repo',
         issueNumber: 123,
+        issueTitle: 'Test',
         riskSummary: 'Test',
         type: SourceControlIssueType.Helm,
       });
 
       expect(result).toBe(false);
       expect(mockRegisterSourceControlIssue).not.toHaveBeenCalled();
+    });
+
+    it('should return false when cloudId is not provided', async () => {
+      const result = await createOrUpdateIssue({
+        apiClient: mockApiClient,
+        orgName: 'test-org',
+        repo: 'test-repo',
+        issueNumber: 123,
+        issueTitle: 'Test',
+        riskSummary: 'Test',
+        type: SourceControlIssueType.Helm,
+      });
+
+      expect(result).toBe(false);
+      expect(mockRegisterSourceControlIssue).not.toHaveBeenCalled();
+      expect(debugSpy).toHaveBeenCalledWith(
+        'CloudID required for registerSourceControlIssue; skipping'
+      );
     });
 
     it('should handle API errors gracefully', async () => {
@@ -267,13 +332,35 @@ describe('source-control-utils', () => {
         orgName: 'test-org',
         repo: 'test-repo',
         issueNumber: 123,
+        issueTitle: 'Test',
         riskSummary: 'Test',
         type: SourceControlIssueType.Helm,
+        cloudId: 'test-cloud-id',
       });
 
       expect(result).toBe(false);
       expect(warningSpy).toHaveBeenCalledWith(
         expect.stringContaining('Failed to create/update issue #123')
+      );
+    });
+
+    it('should use fallback "Issue #N" when issueTitle is empty', async () => {
+      const result = await createOrUpdateIssue({
+        apiClient: mockApiClient,
+        orgName: 'test-org',
+        repo: 'test-repo',
+        issueNumber: 123,
+        issueTitle: '',
+        riskSummary: 'Test',
+        type: SourceControlIssueType.Helm,
+        cloudId: 'test-cloud-id',
+      });
+
+      expect(result).toBe(true);
+      expect(mockRegisterSourceControlIssue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          IssueTitle: 'Issue #123',
+        })
       );
     });
   });
@@ -291,6 +378,7 @@ describe('source-control-utils', () => {
         repo: 'test-repo',
         issueNumber: 123,
         linkedPRs: mockLinkedPRs,
+        cloudId: 'test-cloud-id',
       });
 
       expect(result).toBe(true);
@@ -337,6 +425,7 @@ describe('source-control-utils', () => {
         repo: 'test-repo',
         issueNumber: 999,
         linkedPRs: mockLinkedPRs,
+        cloudId: 'test-cloud-id',
       });
 
       expect(result).toBe(false);
@@ -366,6 +455,7 @@ describe('source-control-utils', () => {
         repo: 'test-repo',
         issueNumber: 123,
         linkedPRs: [mockLinkedPRs[0]!],
+        cloudId: 'test-cloud-id',
       });
 
       expect(result).toBe(false);
@@ -381,6 +471,7 @@ describe('source-control-utils', () => {
         repo: 'test-repo',
         issueNumber: 123,
         status: SourceControlStatus.Closed,
+        cloudId: 'test-cloud-id',
       });
 
       expect(result).toBe(true);
@@ -389,6 +480,7 @@ describe('source-control-utils', () => {
         IssueID: 'test-issue-id-123',
         RepoURL: 'https://github.com/test-org/test-repo',
         Status: SourceControlStatus.Closed,
+        CloudID: 'test-cloud-id',
       });
     });
 
@@ -401,6 +493,7 @@ describe('source-control-utils', () => {
         repo: 'test-repo',
         issueNumber: 999,
         status: SourceControlStatus.Closed,
+        cloudId: 'test-cloud-id',
       });
 
       expect(result).toBe(false);
@@ -429,6 +522,7 @@ describe('source-control-utils', () => {
         repo: 'test-repo',
         issueNumber: 123,
         status: SourceControlStatus.Closed,
+        cloudId: 'test-cloud-id',
       });
 
       expect(result).toBe(false);
@@ -447,6 +541,7 @@ describe('source-control-utils', () => {
         issueNumber: 123,
         pullRequestNumber: 456,
         status: SourceControlStatus.Merged,
+        cloudId: 'test-cloud-id',
       });
 
       expect(result).toBe(true);
@@ -469,6 +564,7 @@ describe('source-control-utils', () => {
         issueNumber: 999,
         pullRequestNumber: 456,
         status: SourceControlStatus.Merged,
+        cloudId: 'test-cloud-id',
       });
 
       expect(result).toBe(false);
@@ -499,6 +595,7 @@ describe('source-control-utils', () => {
         issueNumber: 123,
         pullRequestNumber: 456,
         status: SourceControlStatus.Merged,
+        cloudId: 'test-cloud-id',
       });
 
       expect(result).toBe(false);
@@ -522,6 +619,7 @@ describe('source-control-utils', () => {
         Promise.resolve({
           data: {
             number: 123,
+            title: 'Test issue title',
             html_url: 'https://github.com/test-org/test-repo/issues/123',
             body: 'Test issue body',
             labels: [{ name: 'label1' }],
@@ -551,6 +649,7 @@ describe('source-control-utils', () => {
         apiClient: mockApiClient,
         type: SourceControlIssueType.Helm,
         findPRsLinkedToIssue: mockFindPRsLinkedToIssue,
+        cloudId: 'test-cloud-id',
       });
 
       expect(mockCreateComment).toHaveBeenCalledWith({
@@ -570,6 +669,7 @@ describe('source-control-utils', () => {
         IssueID: expect.any(String),
         RepoURL: 'https://github.com/test-org/test-repo',
         Status: SourceControlStatus.Closed,
+        CloudID: 'test-cloud-id',
       });
     });
 
@@ -593,6 +693,7 @@ describe('source-control-utils', () => {
         apiClient: mockApiClient,
         type: SourceControlIssueType.Helm,
         findPRsLinkedToIssue: mockFindPRsLinkedToIssue,
+        cloudId: 'test-cloud-id',
       });
 
       expect(mockFindPRsLinkedToIssue).toHaveBeenCalledWith(123);
@@ -614,6 +715,58 @@ describe('source-control-utils', () => {
       expect(mockUpdateIssue).toHaveBeenCalled();
       // Backend calls should not be made
       expect(mockRegisterSourceControlIssue).not.toHaveBeenCalled();
+    });
+
+    it('should skip backend sync when cloudId is not provided', async () => {
+      await closeIssue({
+        octokit: mockOctokit,
+        owner: 'test-org',
+        repo: 'test-repo',
+        issueNumber: 123,
+        message: 'Closing issue',
+        apiClient: mockApiClient,
+        type: SourceControlIssueType.Helm,
+        findPRsLinkedToIssue: mockFindPRsLinkedToIssue,
+      });
+
+      expect(mockCreateComment).toHaveBeenCalled();
+      expect(mockUpdateIssue).toHaveBeenCalled();
+      // Backend sync requires CloudID; should skip when not provided
+      expect(mockRegisterSourceControlIssue).not.toHaveBeenCalled();
+      expect(mockUpdateSourceControlIssueStatus).not.toHaveBeenCalled();
+      expect(debugSpy).toHaveBeenCalledWith(
+        'CloudID and apiClient required for backend sync; skipping'
+      );
+    });
+
+    it('should use fallback "Issue #N" when issue has no title', async () => {
+      mockGetIssue.mockResolvedValueOnce({
+        data: {
+          number: 123,
+          title: '',
+          html_url: 'https://github.com/test-org/test-repo/issues/123',
+          body: 'Test body',
+          labels: [],
+        },
+      });
+
+      await closeIssue({
+        octokit: mockOctokit,
+        owner: 'test-org',
+        repo: 'test-repo',
+        issueNumber: 123,
+        message: 'Closing',
+        apiClient: mockApiClient,
+        type: SourceControlIssueType.Helm,
+        findPRsLinkedToIssue: mockFindPRsLinkedToIssue,
+        cloudId: 'test-cloud-id',
+      });
+
+      expect(mockRegisterSourceControlIssue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          IssueTitle: 'Issue #123',
+        })
+      );
     });
 
     it('should use custom log message when provided', async () => {
