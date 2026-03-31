@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-03-30
+- Major update to container analysis using composite actions to create PR
+
 ## [1.0.11] - 2026-02-18
 - fix empty github issue creation
 

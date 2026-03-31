@@ -1,338 +1,179 @@
-# Averlon Vulnerability Remediation Agent for Containers Action
+# Averlon Vulnerability Remediation Agent for Containers
 
-Docker and container security analysis with vulnerability detection and remediation
+Docker and container security analysis with vulnerability detection and remediation.
 
 ## 🚀 What It Does
 
-This action scans your repository's Dockerfiles to identify security vulnerabilities and provides actionable recommendations to fix them. It automatically:
-
-- Discovers all Dockerfiles in your repository
-- Maps Dockerfiles to their corresponding container image repositories (Averlon attempts automatic mapping, but explicit mapping via `image-map` is recommended)
-- Analyzes images for security vulnerabilities using Averlon's scanning service
-- Creates or updates GitHub issues with detailed security recommendations
-- Optionally assigns issues to GitHub Copilot for automated fixes
-- Manages issue lifecycle (closes issues when Dockerfiles are removed or vulnerabilities are resolved)
+This action detects and automatically remediates Dockerfile security vulnerabilities using Averlon's intelligence, then opens pull requests with the fixes applied.
 
 ## 📋 Prerequisites
 
 Before using this action, ensure you have:
 
 1. **Averlon Account**: Sign up at [Averlon](https://averlon.io) to get your API credentials
-2. **API Credentials**: Obtain your `api_key` and `api_secret` from the Averlon dashboard (requires Averlon admin access; ask an Averlon org admin to create them if you don't have admin access). Store them as secrets (for example, `AVERLON_API_KEY` and `AVERLON_API_SECRET`) and pass them as `averlon-api-key` / `averlon-api-secret`.
-3. **GitHub Token**: A GitHub token with `contents: read` and `issues: write` permissions
-   - For basic usage: Use `${{ secrets.GITHUB_TOKEN }}` with appropriate GitHub Actions workflow `permissions` declared in your workflow (see [permissions docs](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#permissions))
-   - For Copilot auto-assignment: **Required** - Use a Personal Access Token (PAT) with Copilot access (the default `GITHUB_TOKEN` does not support Copilot assignment)
-4. **Dockerfiles**: At least one Dockerfile in your repository
+2. **Averlon API Credentials** — this action requires **two** key pairs from the Averlon dashboard (requires Averlon admin access; ask an Averlon org admin to create them if you don't have admin access):
+   - **GitActions-scoped** (`averlon-api-key` / `averlon-api-secret`): Used by the action to fetch vulnerability data. Store as `AVERLON_API_KEY` and `AVERLON_API_SECRET`.
+   - **MCPClient-scoped** (`mcp-api-key` / `mcp-api-secret`): Used by the MCP server for real-time vulnerability context. Store as `AVERLON_MCP_API_KEY` and `AVERLON_MCP_API_SECRET`.
+3. **Anthropic API Key**: An API key from [Anthropic](https://console.anthropic.com/). Store it as a secret (e.g., `ANTHROPIC_API_KEY`).
+4. **GitHub Token**: Workflow `GITHUB_TOKEN` with `contents: write` and `pull-requests: write` permissions configured (see [permissions docs](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#permissions))
+5. **Docker**: Docker must be available on the runner (default on `ubuntu-latest`)
 
 ## 🔐 Create Averlon API Keys and MCP Setup
 
 For detailed instructions on creating API keys, please refer to our [API Key Setup Documentation](../docs/actions-api-setup.md).
-
-For setting up the MCP server, please refer to our [MCP Setup Documentation](../docs/mcp-setup.md).
 
 ## 🛠️ Usage
 
 ### Basic Workflow
 
 ```yaml
-name: Averlon Container Security Remediation
+name: Averlon Container Analysis
 on:
   push:
     branches: [main]
-  pull_request:
-    branches: [main]
   workflow_dispatch: {}
   schedule:
-    # Run daily at 2 AM UTC
     - cron: '0 2 * * *'
 
 jobs:
-  container-security-remediation:
+  remediate:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
-      issues: write
+      contents: write
+      pull-requests: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      - name: Run Averlon Remediation Agent for Containers
-        uses: averlon-ai/actions/container-analysis@v1.0.11
+      - name: Run Averlon Container Analysis
+        uses: averlon-ai/actions/container-analysis@v2.0.1
         with:
           averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
           averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
+          mcp-api-key: ${{ secrets.AVERLON_MCP_API_KEY }}
+          mcp-api-secret: ${{ secrets.AVERLON_MCP_API_SECRET }}
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
+          dockerfile: Dockerfile
 ```
 
-### With Explicit Image Mapping (Recommended)
-
-While Averlon automatically attempts to map Dockerfiles to image repositories, **explicitly providing the mapping via `image-map` is recommended** for better accuracy and reliability.
+### Advanced Workflow with Optional Inputs
 
 ```yaml
-name: Averlon Container Security Remediation
+name: Averlon Container Analysis
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
   workflow_dispatch: {}
   schedule:
-    # Run daily at 2 AM UTC
     - cron: '0 2 * * *'
 
 jobs:
-  container-security-remediation:
+  remediate:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
-      issues: write
+      contents: write
+      pull-requests: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      - name: Run Averlon Remediation Agent for Containers
-        uses: averlon-ai/actions/container-analysis@v1.0.11
+      - name: Run Averlon Container Analysis
+        uses: averlon-ai/actions/container-analysis@v2.0.1
         with:
           averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
           averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          image-map: |
-            Dockerfile=docker.io/username/repo-name
-            path/to/Dockerfile=account-id.dkr.ecr.us-west-2.amazonaws.com/repo-name
-            path/to/Dockerfile.prod=ghcr.io/orgname/frontend-app
+          dockerfile: api/Dockerfile
+          image-repository: registry.io/org/api
+          mcp-api-key: ${{ secrets.AVERLON_MCP_API_KEY }}
+          mcp-api-secret: ${{ secrets.AVERLON_MCP_API_SECRET }}
           filters: 'Recommended,Critical,High'
+          model: claude-sonnet-4-6
+          disable-websearch: 'true'
 ```
 
-### With GitHub Copilot Auto-Assignment
-
-To enable automatic assignment of security issues to GitHub Copilot, you **must use a Personal Access Token (PAT)** with Copilot access. The default `GITHUB_TOKEN` does not support Copilot auto-assignment.
-
-**Setting up a PAT for Copilot:**
-
-1. Go to GitHub Settings → Developer settings → Personal access tokens → Fine-grained tokens
-2. Create a token with the following permissions:
-   - Repository access: Select your repositories
-   - Permissions: `Contents` (read), `Issues` (read/write), `Pull requests` (read/write)
-   - **Important**: Your account must have GitHub Copilot access enabled
-3. Add the token as a repository secret (e.g., `COPILOT_PAT`)
+### Matrix Strategy for Multiple Dockerfiles
 
 ```yaml
-name: Averlon Container Security Remediation with Copilot
-on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-  workflow_dispatch: {}
-  schedule:
-    # Run daily at 2 AM UTC
-    - cron: '0 2 * * *'
-
 jobs:
-  container-security-remediation:
+  remediate:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    strategy:
+      matrix:
+        include:
+          - dockerfile: Dockerfile
+            image-repository: registry.io/org/app
+          - dockerfile: api/Dockerfile
+            image-repository: registry.io/org/api
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      - name: Run Averlon Remediation Agent for Containers
-        uses: averlon-ai/actions/container-analysis@v1.0.11
+      - name: Run Averlon Container Analysis
+        uses: averlon-ai/actions/container-analysis@v2.0.1
         with:
           averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
           averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
-          github-token: ${{ secrets.COPILOT_PAT }} # PAT with Copilot access required
-          auto-assign-copilot: 'true'
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          dockerfile: ${{ matrix.dockerfile }}
+          image-repository: ${{ matrix.image-repository }}
 ```
 
 ## 📥 Inputs
 
-| Input                 | Description                                                                                                                                                                                                                                                         | Required | Default                        |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------------------------------ |
-| `averlon-api-key`     | Averlon API key for authentication                                                                                                                                                                                                                                  | ✅       | -                              |
-| `averlon-api-secret`  | Averlon API secret for authentication                                                                                                                                                                                                                               | ✅       | -                              |
-| `github-token`        | GitHub token with `contents: read` and `issues: write` permissions. Use `${{ secrets.GITHUB_TOKEN }}` for basic usage. **For Copilot auto-assignment**: Requires a Personal Access Token (PAT) with Copilot access and additional `pull_requests: write` permission | ✅       | -                              |
-| `base-url`            | Base URL for the Averlon API service                                                                                                                                                                                                                                | ❌       | `https://wfe.prod.averlon.io/` |
-| `image-map`           | Multiline mapping of Dockerfile paths to image repository urls (format: `path=repository-url`). Example: `Dockerfile=docker.io/username/repo-name`. **Recommended**: While Averlon attempts automatic mapping, explicit mapping ensures accuracy                    | ❌       | -                              |
-| `filters`             | Comma-separated vulnerability filters: `Recommended`, `Exploited`, `Critical`, `High`, `HighRCE`, `MediumApplication`                                                                                                                                               | ❌       | `Recommended,Critical,HighRCE` |
-| `auto-assign-copilot` | Auto-assign security issues to GitHub Copilot agent for automated fixes. **Requires a PAT with Copilot access**                                                                                                                                                     | ❌       | `false`                        |
-| `ignore-paths`        | Glob patterns to ignore when searching for Dockerfiles (newline or comma separated). Uses [micromatch](https://github.com/micromatch/micromatch) syntax (via fast-glob). Example: `**/testdata/**,**/vendor/**`                                                     | ❌       | -                              |
-
-## 📤 Outputs
-
-This action provides outputs through GitHub's job summary feature:
-
-- **Summary Table**: Lists all discovered Dockerfiles and their mapped image repositories
-- **Security Issues**: Creates/updates GitHub issues labeled with `averlon-created` and `averlon-container-analysis` containing:
-  - Dockerfile path
-  - Image repository name
-  - Detailed security recommendations
-  - Fix suggestions
-
-## 🔄 How It Works
-
-1. **Discovery**: Scans your repository for Dockerfiles (supports `Dockerfile`, `*.dockerfile`, `Dockerfile.*` patterns)
-2. **Mapping**: Maps discovered Dockerfiles to container image repositories:
-   - Averlon automatically attempts to identify the image repository for each Dockerfile
-   - You can explicitly provide mappings via the `image-map` input (recommended for accuracy)
-   - Labels within Dockerfiles can also aid in mapping
-3. **Scanning**: Sends Dockerfile metadata to Averlon's API for security analysis
-4. **Filtering**: Applies configured filters to focus on critical vulnerabilities
-5. **Issue Management**:
-   - Creates new GitHub issues for security findings
-   - Updates existing issues when recommendations change
-   - Closes issues when Dockerfiles are removed or vulnerabilities are resolved
-6. **Copilot Integration** (optional): Assigns issues to GitHub Copilot for automated fix generation (requires `auto-assign-copilot` enabled)
-7. **Cleanup**: Removes orphaned issues for Dockerfiles that no longer exist
+| Input                | Description                                                                                                                                                                                                        | Required | Default                        |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------- | ------------------------------ |
+| `averlon-api-key`    | API key for Averlon authentication (GitActions-scoped)                                                                                                                                                             | ✅       | -                              |
+| `averlon-api-secret` | API secret for Averlon authentication (GitActions-scoped)                                                                                                                                                          | ✅       | -                              |
+| `anthropic-api-key`  | API key for Anthropic                                                                                                                                                                                              | ✅       | -                              |
+| `mcp-api-key`        | API key for Averlon MCP server (MCPClient-scoped)                                                                                                                                                                  | ✅       | -                              |
+| `mcp-api-secret`     | API secret for Averlon MCP server (MCPClient-scoped)                                                                                                                                                               | ✅       | -                              |
+| `github-token`       | GitHub token with `contents: write` and `pull-requests: write` permissions                                                                                                                                         | ✅       | -                              |
+| `dockerfile`         | Path to the Dockerfile to remediate (e.g. `Dockerfile` or `api/Dockerfile`)                                                                                                                                        | ✅       | -                              |
+| `image-repository`   | Image repository for the Dockerfile (e.g. `registry.io/org/app`)                                                                                                                                                   | ❌       | `''`                           |
+| `base-url`           | Base URL for the Averlon API and MCP server                                                                                                                                                                        | ❌       | `https://wfe.prod.averlon.io/` |
+| `filters`            | Comma-separated recommendation filters. Options: `Recommended`, `Exploited`, `Critical`, `High`, `HighRCE`, `Medium`, `MediumApplication`, `Low`, `LowApplication`                                                 | ❌       | `Recommended,Critical,HighRCE` |
+| `disable-websearch`  | Disable the WebSearch tool                                                                                                                                                                                         | ❌       | `false`                        |
+| `model`              | Claude model for remediation. Supported: `claude-opus-4-6` (recommended), `claude-sonnet-4-6`, `claude-haiku-4-5-20251001`. See [Claude models](https://platform.claude.com/docs/en/about-claude/models/overview). | ❌       | `claude-opus-4-6`              |
 
 ## 🚨 Troubleshooting
 
 ### Common Issues
 
-**Issue: "Unable to map Dockerfile to image repository"**
+**Issue: "No recommendations found"**
 
-While Averlon attempts to automatically map Dockerfiles to image repositories, this may fail if the relationship cannot be determined automatically. **Solution: Provide explicit image mapping** using the `image-map` input.
+Averlon did not find any vulnerabilities matching your filters for the specified Dockerfile/image. This is normal if your image is already up to date.
 
-```yaml
-# Solution: Provide explicit image mapping (recommended)
-- name: Run Averlon Remediation Agent for Containers
-  uses: averlon-ai/actions/container-analysis@v1.0.11
-  with:
-    averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
-    averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
-    github-token: ${{ secrets.GITHUB_TOKEN }}
-    image-map: |
-      Dockerfile=docker.io/username/repo-name
-      services/api/Dockerfile=account-id.dkr.ecr.us-west-2.amazonaws.com/repo-name
-```
+- Verify the `dockerfile` input points to the correct file
+- If using `image-repository`, ensure it matches the image registered in Averlon
+- Try broadening your `filters` (e.g., `Recommended,Critical,High,Medium`)
 
-**Best Practice**: Always provide explicit `image-map` configuration to ensure reliable mapping and avoid potential issues.
+**Issue: AI agent errors or fails to create a PR**
 
-**Issue: "Copilot assignment failed"**
+The agent may fail if the remediation is complex or the repository context is insufficient.
 
-Copilot auto-assignment requires a Personal Access Token (PAT) with Copilot access. The default `GITHUB_TOKEN` does not support assigning issues to the Copilot agent.
+- Check the `prompt` output for what was sent to the agent
+- Ensure the GitHub token has `contents: write` and `pull-requests: write` permissions
+- Try a more capable model (e.g., `claude-opus-4-6`)
+- The step uses `continue-on-error: true`, so the workflow won't fail — check step logs for details
 
-```yaml
-# Solution: Use a PAT with Copilot access
-jobs:
-  container-security-remediation:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
+**Issue: MCP connection issues**
 
-      - name: Run Averlon Remediation Agent for Containers
-        uses: averlon-ai/actions/container-analysis@v1.0.11
-        with:
-          averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
-          averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
-          github-token: ${{ secrets.COPILOT_PAT }} # Must be a PAT, not GITHUB_TOKEN
-          auto-assign-copilot: 'true'
-```
+The MCP server runs as a Docker container. If it fails to connect:
 
-Ensure your PAT has:
-
-- Repository access to your repos
-- `Contents` (read), `Issues` (write), `Pull requests` (read/write) permissions
-- Your GitHub account has Copilot access enabled
-
-**Issue: "Unwanted files detected as Dockerfiles"**
-
-If the action is detecting files that aren't actual Dockerfiles (e.g., test data files or documentation), use the `ignore-paths` input to exclude them. The `ignore-paths` input supports [micromatch](https://github.com/micromatch/micromatch) glob patterns (via fast-glob), including wildcards (`*`, `**`), negation (`!`), and brace expansion.
-
-```yaml
-# Solution: Exclude specific paths from Dockerfile detection
-- name: Run Averlon Remediation Agent for Containers
-  uses: averlon-ai/actions/container-analysis@v1.0.11
-  with:
-    averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
-    averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
-    github-token: ${{ secrets.GITHUB_TOKEN }}
-    ignore-paths: |
-      **/testdata/**
-      **/test-data/**
-      **/vendor/**
-      **/examples/**
-```
-
-You can also ignore a specific file in the root folder:
-
-```yaml
-# Solution: Ignore a specific Dockerfile in the root folder
-- name: Run Averlon Remediation Agent for Containers
-  uses: averlon-ai/actions/container-analysis@v1.0.11
-  with:
-    averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
-    averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
-    github-token: ${{ secrets.GITHUB_TOKEN }}
-    ignore-paths: Dockerfile.debug
-```
-
-**Note**: The action automatically ignores common non-Dockerfile patterns like `*.json`, `*.md`, `*.txt`, `*.yaml`, `*.yml`, and `node_modules/`.
-
-**Issue: "Too many low-priority findings"**
-
-Adjust the filters to focus on critical vulnerabilities.
-
-```yaml
-# Solution: Use stricter filters
-- name: Run Averlon Remediation Agent for Containers
-  uses: averlon-ai/actions/container-analysis@v1.0.11
-  with:
-    averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
-    averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
-    github-token: ${{ secrets.GITHUB_TOKEN }}
-    filters: 'Critical,HighRCE' # Only show critical and high-risk RCE vulnerabilities
-```
-
-**Issue: GitHub API errors (e.g., "Not Found" when listing repository issues)**
-
-If you encounter errors like `Not Found - https://docs.github.com/rest/issues/issues#list-repository-issues` or `Action failed: Not Found`, this typically indicates that the GitHub token (PAT or `GITHUB_TOKEN`) doesn't have the required permissions to access the repository's issues API.
-
-**Solution: Ensure your token has the required permissions**
-
-For `GITHUB_TOKEN` (default token):
-
-```yaml
-# Solution: Declare proper permissions in your workflow
-jobs:
-  container-security-remediation:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read # Required to read repository contents
-      issues: write # Required to read/create/update issues
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-
-      - name: Run Averlon Remediation Agent for Containers
-        uses: averlon-ai/actions/container-analysis@v1.0.11
-        with:
-          averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
-          averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-```
-
-For Personal Access Token (PAT):
-
-1. Go to GitHub Settings → Developer settings → Personal access tokens → Fine-grained tokens
-2. Ensure your token has:
-   - Repository access: Select the repositories you want to scan
-   - Permissions:
-     - `Contents` (read) - Required to read Dockerfiles
-     - `Issues` (write) - Required to create/update issues
-     - `Pull requests` (read/write) - Required if using Copilot auto-assignment
-
-**Additional checks:**
-
-- Verify that Issues are enabled in your repository settings (Settings → General → Features → Issues)
-- Ensure the token has access to the repository (for PATs, check repository access settings)
-- For organization repositories, ensure the token has access to organization resources if required
+- Ensure Docker is available on the runner (`ubuntu-latest` includes Docker by default)
+- If using separate MCP credentials (`mcp-api-key` / `mcp-api-secret`), verify they have MCPClient scope
+- Check that `base-url` is reachable from the runner
 
 ## 💡 Best Practices
 
-1. **Provide Explicit Image Mappings**: Always use `image-map` to explicitly map Dockerfiles to image repositories for reliable scanning
-2. **Declare Proper Permissions**: Always specify `permissions` in your workflow to use `GITHUB_TOKEN` effectively
-3. **Schedule Regular Scans**: Use cron triggers to scan your images regularly, not just on pushes
-4. **Use Strict Filters in Production**: Start with `Critical,HighRCE` filters and expand as needed
-5. **Leverage Copilot**: Enable `auto-assign-copilot` with a PAT to get automated fix suggestions
-6. **Keep Mappings Updated**: Maintain your `image-map` configuration as your infrastructure evolves
+1. **Use Specific Filters**: Start with `Recommended,Critical,HighRCE` (the default) and expand as needed
+2. **Provide Image Repository**: Explicitly set `image-repository` for more accurate vulnerability matching
+3. **Use Matrix Strategy**: For repos with multiple Dockerfiles, use a matrix strategy to remediate each one independently
+4. **Schedule Regular Runs**: Use cron triggers to catch new vulnerabilities as they are disclosed
+5. **Review PRs Carefully**: Always review automated PRs before merging
+6. **Separate MCP Credentials**: Use dedicated MCPClient-scoped credentials for the MCP server when possible

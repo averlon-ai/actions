@@ -1,8 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import fg from 'fast-glob';
 
-import type { GitFileRecommendationRequest, KVPair } from '@averlon/shared';
+import type { GitDockerfileRequest, KVPair } from '@averlon/shared';
+import { FILTER_BITS } from './constants';
 
 /**
  * Converts a path to a relative path.
@@ -110,118 +110,29 @@ function parseDockerLabels(fileContent: string): Record<string, string> {
 }
 
 /**
- * Finds all Dockerfiles in the repository.
- *
- * @param ignorePaths - Optional array of glob patterns to ignore when searching for Dockerfiles.
- * @returns The list of Dockerfiles.
- */
-export async function findDockerfiles(ignorePaths?: string[]): Promise<string[]> {
-  const patterns = [
-    // Standard Dockerfile patterns
-    '**/Dockerfile',
-    '**/dockerfile',
-    '**/Dockerfile.*',
-    '**/dockerfile.*',
-
-    // Hidden Dockerfile patterns
-    '**/.dockerfile',
-    '**/.Dockerfile',
-    '**/.dockerfile.*',
-    '**/.Dockerfile.*',
-
-    // Files with .dockerfile extension
-    '**/*.dockerfile',
-    '**/*.Dockerfile',
-
-    // Common custom naming patterns
-    '**/docker.*.dockerfile',
-    '**/*.docker.*.dockerfile',
-  ];
-  const entries = await fg(patterns, {
-    dot: false,
-    onlyFiles: true,
-    followSymbolicLinks: true,
-    unique: true,
-    ignore: [...(ignorePaths || [])],
-  });
-  return entries.sort();
-}
-
-/**
- * Parses the image map from a multiline string.
- *
- * This function parses a multiline string where each line contains a file path
- * and its corresponding image repository, separated by an equals sign.
- * It's commonly used to map Dockerfile paths to their target image repositories.
- *
- * @param multiline - The multiline string to parse, where each line has format "filepath=repository".
- * @returns A record mapping file paths to their corresponding image repositories.
- *
- * @example
- * ```typescript
- * const input = `Dockerfile=myregistry/myapp:latest
- * cmd/Dockerfile=myregistry/myapp-cmd:v1.0
- * api/Dockerfile=myregistry/myapp-api:dev`;
- * const map = parseImageMap(input);
- * // Returns: {
- * //   "Dockerfile": "myregistry/myapp:latest",
- * //   "cmd/Dockerfile": "myregistry/myapp-cmd:v1.0",
- * //   "api/Dockerfile": "myregistry/myapp-api:dev"
- * // }
- * ```
- */
-export function parseImageMap(multiline: string | undefined): Record<string, string> {
-  const map: Record<string, string> = {};
-  if (!multiline) return map;
-  const lines = multiline
-    .split(/\r?\n/)
-    .map(l => l.trim())
-    .filter(Boolean);
-  for (const line of lines) {
-    const idx = line.indexOf('=');
-    if (idx <= 0) {
-      throw new Error(
-        `Invalid image-map format: "${line}". Expected format: "filepath=image-repository"`
-      );
-    }
-    const filePath = line.slice(0, idx).trim();
-    const repo = line.slice(idx + 1).trim();
-    if (!filePath || !repo) {
-      throw new Error(
-        `Invalid image-map entry: "${line}". Both filepath and repository are required.`
-      );
-    }
-    map[filePath] = repo;
-  }
-  return map;
-}
-
-/**
- * Builds the GitFileRecommendationRequest objects for the Dockerfiles.
+ * Builds the GitDockerfileRequest objects for the Dockerfiles.
  *
  * @param dockerfiles - The list of Dockerfiles.
  * @param imageMap - The image map.
- * @returns The list of GitFileRecommendationRequest objects.
+ * @returns The list of GitDockerfileRequest objects.
  */
 export function buildDockerfileRequests(
   dockerfiles: string[],
   imageMap: Record<string, string>
-): GitFileRecommendationRequest[] {
+): GitDockerfileRequest[] {
   return dockerfiles.map(p => {
     const rel = toRelativePath(p);
     const content = fs.readFileSync(p, 'utf8');
-    const metadata: KVPair[] = [];
-    const labels = parseDockerLabels(content);
-    for (const [k, v] of Object.entries(labels)) {
-      if (k && v) metadata.push({ Key: `label:${k}`, Value: String(v) });
+    const labels: KVPair[] = [];
+    const parsedLabels = parseDockerLabels(content);
+    for (const [k, v] of Object.entries(parsedLabels)) {
+      if (k && v) labels.push({ Key: k, Value: String(v) });
     }
     const imageRepository = imageMap[rel] || '';
-    if (imageMap[rel]) metadata.push({ Key: 'ImageRepository', Value: imageMap[rel] });
     return {
       Path: rel,
-      Type: 1,
-      Content: '',
-      Metadata: metadata,
+      Content: content,
+      Labels: labels,
       ImageRepository: imageRepository,
     };
   });
@@ -257,38 +168,13 @@ export function getGitRepoUrl(): string {
  */
 export function parseFilters(input: string | undefined): number {
   if (!input) return 0;
-  const nameToBit: Record<string, number> = {
-    Critical: 0x2,
-    High: 0x4,
-    HighRCE: 0x8,
-    MediumApplication: 0x10,
-    Recommended: 0x20,
-    Exploited: 0x40,
-  };
   let mask = 0;
   const parts = input
     .split(',')
     .map(p => p.trim())
     .filter(Boolean);
   for (const part of parts) {
-    if (nameToBit[part] != null) mask |= nameToBit[part];
+    if (FILTER_BITS[part] != null) mask |= FILTER_BITS[part];
   }
   return mask;
-}
-
-/**
- * Parses ignore paths from a string input.
- *
- * This function converts a string of ignore patterns (separated by newlines or commas)
- * into an array of trimmed, non-empty path patterns.
- *
- * @param input - String containing ignore patterns separated by newlines or commas.
- * @returns An array of trimmed, non-empty path patterns.
- */
-export function parseIgnorePaths(input: string | undefined): string[] {
-  if (!input) return [];
-  return input
-    .split(/[\n,]/)
-    .map(p => p.trim())
-    .filter(p => p.length > 0);
 }

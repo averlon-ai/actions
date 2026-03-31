@@ -12,8 +12,14 @@ import {
   ScanTerraformResult,
   TerraformResource,
   getCallerInfo,
+  IssueSeverityEnum,
 } from '@averlon/shared';
-import { getInputSafe, parseBoolean, parseGitHubRepository } from '@averlon/github-actions-utils';
+import {
+  getInputSafe,
+  parseBoolean,
+  parseGitHubRepository,
+  parseIssueSeverityFilters,
+} from '@averlon/github-actions-utils';
 import { GithubIssuesService } from './github-issues';
 
 /**
@@ -84,6 +90,7 @@ export interface ActionInputs {
   autoAssignCopilot: boolean;
   resourceTypeFilter?: string[];
   IncludeResourcesWithoutIssues: boolean;
+  severityFilters?: IssueSeverityEnum[];
 }
 
 /**
@@ -143,6 +150,10 @@ async function _getInputs(): Promise<ActionInputs> {
         .map(t => t.trim())
         .filter(t => t.length > 0)
     : undefined;
+  const severityFiltersRaw = getInputSafe('filters', false) || 'Critical,High';
+  const severityFilters = severityFiltersRaw
+    ? parseIssueSeverityFilters(severityFiltersRaw)
+    : undefined;
 
   const { owner: githubOwner, repo: githubRepo, commit: defaultCommit } = parseGitHubRepository();
   const commitInput = getInputSafe('commit', false) || defaultCommit;
@@ -183,6 +194,7 @@ async function _getInputs(): Promise<ActionInputs> {
     autoAssignCopilot,
     resourceTypeFilter,
     IncludeResourcesWithoutIssues,
+    severityFilters,
   };
 }
 
@@ -330,6 +342,7 @@ async function _runScanTerraformMisconfiguration(
     Commit: inputs.commit,
     ResourceTypes: inputs.resourceTypeFilter,
     IncludeResourcesWithoutIssues: inputs.IncludeResourcesWithoutIssues,
+    Severities: inputs.severityFilters,
   };
 
   core.debug(`Scan request: ${JSON.stringify(scanRequest, null, 2)}`);
@@ -375,7 +388,10 @@ async function _runScanTerraformMisconfiguration(
       const resultResponse: ScanTerraformResult =
         await apiClient.getScanTerraformResult(resultRequest);
 
-      core.debug(`Full scan response: ${JSON.stringify(resultResponse, null, 2)}`);
+      if (inputs.IncludeResourcesWithoutIssues) {
+        core.info(`Full scan response: ${JSON.stringify(resultResponse, null, 2)}`);
+      }
+
       core.info(`Scan status: ${resultResponse.Status}`);
 
       // === Handle Final States ===
@@ -484,6 +500,16 @@ async function _runScanTerraformMisconfiguration(
   }
 }
 
+function extractCloudIdFromResources(resources: TerraformResource[]): string | undefined {
+  for (const resource of resources) {
+    if (resource.Asset?.CloudID) return resource.Asset.CloudID;
+    for (const issue of resource.Issues ?? []) {
+      if (issue.CloudID) return issue.CloudID;
+    }
+  }
+  return undefined;
+}
+
 async function run(): Promise<void> {
   try {
     core.info('Starting Averlon Misconfiguration Remediation Agent for IaC...');
@@ -532,6 +558,7 @@ async function run(): Promise<void> {
       core.debug('Step 6: Creating GitHub issues');
       core.info('Creating GitHub issues for Terraform resources...');
       try {
+        const cloudId = extractCloudIdFromResources(sortedScanResult);
         const octokit = github.getOctokit(inputs.githubToken);
         // Type mismatch due to different @actions/github versions in dependencies
         // The octokit instance is compatible at runtime, but TypeScript sees different type definitions
@@ -539,7 +566,8 @@ async function run(): Promise<void> {
           octokit,
           inputs.githubOwner,
           inputs.githubRepo,
-          apiClient
+          apiClient,
+          cloudId
         );
 
         const runId = process.env['GITHUB_RUN_ID'];

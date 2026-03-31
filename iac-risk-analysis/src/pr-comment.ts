@@ -1,9 +1,33 @@
 import * as core from '@actions/core';
 import * as github from '@actions/github';
-import type { AnalyzeTerraformResult, AccessRiskAssessment, RiskAssessment } from '@averlon/shared';
+import type {
+  AnalyzeTerraformResult,
+  AccessRiskAssessment,
+  RiskAssessment,
+  TerraformResource,
+} from '@averlon/shared';
+
+/** Resource ID and optional asset name for reachability display (from ReachabilityAnalysis resources). */
+interface ResourceDisplayInfo {
+  resourceId?: string;
+  assetName?: string;
+}
 
 /** API may return targetResources (array) or targetResource (string) */
 type AccessRiskItem = AccessRiskAssessment & { targetResources?: string[] };
+
+/** Shape of a single CrowdStrike PreCog detection (from CrowdstrikePrecogDetections JSON). */
+interface CrowdStrikePrecogDetection {
+  SeverityName?: string;
+  Description?: string;
+  FileName?: string;
+  FilePath?: string;
+  Hostname?: string;
+  ResourceID?: string;
+  Technique?: string;
+  RiskScore?: string;
+  Status?: string;
+}
 
 export type CommentMode = 'always' | 'update' | 'on-security-risks';
 
@@ -71,6 +95,43 @@ function formatImpactAssessment(text: string): string {
     .join('\n\n');
 }
 
+/**
+ * Build a map from terraform resource address (ID) to ResourceID and asset Name
+ * using ReachabilityAnalysis Added/Removed/Modified resources.
+ */
+function buildReachabilityResourceDisplayMap(
+  resources: TerraformResource[] | undefined
+): Map<string, ResourceDisplayInfo> {
+  const map = new Map<string, ResourceDisplayInfo>();
+  if (!resources) return map;
+  for (const r of resources) {
+    if (r.ID) {
+      map.set(r.ID, {
+        resourceId: r.Asset?.ResourceID,
+        assetName: r.Asset?.Name,
+      });
+    }
+  }
+  return map;
+}
+
+/**
+ * Format the reachability resource display: ResourceID (assetName, terraformResource)
+ * when available, otherwise fall back to assetName (terraformResource) or just terraformResource.
+ */
+function formatReachabilityResourceDisplay(
+  terraformResource: string,
+  info: ResourceDisplayInfo | null | undefined
+): string {
+  const tf = terraformResource || 'Unknown';
+  const resourceId = info?.resourceId;
+  const assetName = info?.assetName;
+  if (resourceId && assetName) return `${resourceId} (${assetName}, ${tf})`;
+  if (resourceId) return `${resourceId} (${tf})`;
+  if (assetName) return `${assetName} (${tf})`;
+  return tf;
+}
+
 function buildCommentShell(
   marker: string,
   title: string,
@@ -113,7 +174,16 @@ export function formatReachabilityComment(scanResult: string, commitSha: string)
 
   try {
     parsedResult = JSON.parse(scanResult);
-    const summaryData = parsedResult.ReachabilityAnalysis?.Summary;
+    const reachability = parsedResult.ReachabilityAnalysis;
+    const summaryData = reachability?.Summary;
+
+    // Build lookup from full scan payload: ID -> { resourceId, assetName } for display
+    const allResources = [
+      ...(reachability?.AddedResources ?? []),
+      ...(reachability?.RemovedResources ?? []),
+      ...(reachability?.ModifiedResources ?? []),
+    ];
+    const resourceDisplayMap = buildReachabilityResourceDisplayMap(allResources);
 
     if (summaryData) {
       if (summaryData.TextSummary) {
@@ -125,57 +195,110 @@ export function formatReachabilityComment(scanResult: string, commitSha: string)
         resultSummary += `### 🌐 New Internet Exposures\n\n`;
         resultSummary += `The following resources will be exposed to the internet:\n\n`;
         summaryData.NewInternetExposures.forEach((resource, index) => {
-          resultSummary += `${index + 1}. \`${resource}\`\n`;
+          const info = resource ? resourceDisplayMap.get(resource) : undefined;
+          const display = formatReachabilityResourceDisplay(resource ?? 'Unknown', info);
+          resultSummary += `${index + 1}. \`${display}\`\n`;
         });
         resultSummary += `\n`;
       }
       if (summaryData.RiskSummary) {
-        try {
-          const riskData: RiskAssessment[] = JSON.parse(summaryData.RiskSummary);
-          if (Array.isArray(riskData) && riskData.length > 0) {
+        const riskSummaryTrimmed = summaryData.RiskSummary.trim();
+        const looksLikeJsonArray = riskSummaryTrimmed.startsWith('[');
+        if (looksLikeJsonArray) {
+          try {
+            const riskData: RiskAssessment[] = JSON.parse(summaryData.RiskSummary);
+            if (Array.isArray(riskData) && riskData.length > 0) {
+              hasRisks = true;
+              core.info(`Found ${riskData.length} risk assessment(s)`);
+              resultSummary += `### ⚠️ Risk Assessment\n\n`;
+              riskData.forEach((risk, index) => {
+                const riskLevel = risk.riskAssessment?.riskLevel || 'Unknown';
+                const riskEmoji = getSeverityEmoji(riskLevel);
+                const tfName = risk.terraformResource || 'Unknown';
+                // Prefer display info from full payload (ReachabilityAnalysis resources), then risk fields
+                const fromMap = tfName ? resourceDisplayMap.get(tfName) : undefined;
+                const info: ResourceDisplayInfo = {
+                  resourceId: fromMap?.resourceId ?? risk.resourceId ?? risk.cloudResource,
+                  assetName: fromMap?.assetName ?? risk.assetName,
+                };
+                const display = formatReachabilityResourceDisplay(tfName, info);
+                resultSummary += `#### ${riskEmoji} Resource ${index + 1}: \`${display}\`\n\n`;
+                resultSummary += `- **Cloud Resource**: \`${risk.cloudResource || 'Unknown'}\`\n`;
+                resultSummary += `- **Risk Level**: **${riskLevel}**\n\n`;
+                if (risk.riskAssessment?.issuesSummary) {
+                  resultSummary += `**Issues summary:**\n\n${risk.riskAssessment.issuesSummary}\n\n`;
+                }
+                if (risk.riskAssessment?.impactAssessment) {
+                  resultSummary += `**Impact:**\n\n${formatImpactAssessment(risk.riskAssessment.impactAssessment)}\n\n`;
+                }
+                if (
+                  risk.riskAssessment?.vulnerabilities &&
+                  risk.riskAssessment.vulnerabilities.length > 0
+                ) {
+                  resultSummary += `\n**Vulnerabilities:**\n`;
+                  risk.riskAssessment.vulnerabilities.forEach(vuln => {
+                    const severityEmoji = getSeverityEmoji(vuln.severity);
+                    resultSummary += `- ${severityEmoji} **${vuln.cve || 'Unknown CVE'}** (${vuln.severity || 'Unknown'})\n`;
+                    if (vuln.riskAnalysis) resultSummary += `  - ${vuln.riskAnalysis}\n`;
+                  });
+                }
+                resultSummary += `\n`;
+              });
+            }
+          } catch {
+            core.warning('Failed to parse RiskSummary as JSON, displaying as text');
             hasRisks = true;
-            core.info(`Found ${riskData.length} risk assessment(s)`);
-            resultSummary += `### ⚠️ Risk Assessment\n\n`;
-            riskData.forEach((risk, index) => {
-              const riskLevel = risk.riskAssessment?.riskLevel || 'Unknown';
-              const riskEmoji = getSeverityEmoji(riskLevel);
-              resultSummary += `#### ${riskEmoji} Resource ${index + 1}: \`${risk.terraformResource || 'Unknown'}\`\n\n`;
-              resultSummary += `- **Cloud Resource**: \`${risk.cloudResource || 'Unknown'}\`\n`;
-              resultSummary += `- **Risk Level**: **${riskLevel}**\n\n`;
-              if (risk.riskAssessment?.issuesSummary) {
-                resultSummary += `**Issues summary:**\n\n${risk.riskAssessment.issuesSummary}\n\n`;
-              }
-              if (risk.riskAssessment?.impactAssessment) {
-                resultSummary += `**Impact:**\n\n${formatImpactAssessment(risk.riskAssessment.impactAssessment)}\n\n`;
-              }
-              if (
-                risk.riskAssessment?.vulnerabilities &&
-                risk.riskAssessment.vulnerabilities.length > 0
-              ) {
-                resultSummary += `\n**Vulnerabilities:**\n`;
-                risk.riskAssessment.vulnerabilities.forEach(vuln => {
-                  const severityEmoji = getSeverityEmoji(vuln.severity);
-                  resultSummary += `- ${severityEmoji} **${vuln.cve || 'Unknown CVE'}** (${vuln.severity || 'Unknown'})\n`;
-                  if (vuln.riskAnalysis) resultSummary += `  - ${vuln.riskAnalysis}\n`;
-                });
-              }
-              resultSummary += `\n`;
-            });
+            resultSummary += `### ⚠️ Risk Assessment\n\n${summaryData.RiskSummary}\n\n`;
           }
-        } catch {
-          core.warning('Failed to parse RiskSummary as JSON, displaying as text');
-          resultSummary += `### ⚠️ Risk Assessment\n\n${summaryData.RiskSummary}\n\n`;
+        } else {
+          // RiskSummary is a preformatted markdown string
+          if (riskSummaryTrimmed.length > 0) {
+            hasRisks = true;
+            core.info('Found risk assessment (markdown summary)');
+            resultSummary += `### ⚠️ Risk Assessment\n\n${summaryData.RiskSummary}\n\n`;
+          }
         }
+      }
+    }
+
+    // CrowdStrike PreCog detections (when present): already-parsed at boundary; render in tabular form
+    const crowdstrikeVal = parsedResult.CrowdstrikePrecogDetections;
+    if (crowdstrikeVal != null) {
+      const detectionsArray = Array.isArray(crowdstrikeVal) ? crowdstrikeVal : null;
+      if (detectionsArray && detectionsArray.length > 0) {
+        hasRisks = true;
+        core.info(`Found ${detectionsArray.length} CrowdStrike PreCog detection(s)`);
+        resultSummary += `### 🔍 CrowdStrike PreCog Detections\n\n`;
+        const detections = detectionsArray as CrowdStrikePrecogDetection[];
+        const cell = (v: string | undefined) =>
+          (v ?? '-').replace(/\|/g, '&#124;').replace(/\n/g, ' ');
+        resultSummary += `| Severity | Description | File | Hostname | Resource ID | Technique | Risk Score | Status |\n`;
+        resultSummary += `| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n`;
+        detections.forEach(d => {
+          const sev = `${getSeverityEmoji(d.SeverityName)} ${d.SeverityName ?? 'Unknown'}`;
+          resultSummary += `| ${cell(sev)} | ${cell(d.Description)} | ${cell(d.FilePath ?? d.FileName)} | ${cell(d.Hostname)} | ${cell(d.ResourceID)} | ${cell(d.Technique)} | ${cell(d.RiskScore)} | ${cell(d.Status)} |\n`;
+        });
+        resultSummary += `\n`;
+      } else if (typeof crowdstrikeVal === 'string' && crowdstrikeVal.trim().length > 0) {
+        // Unparseable non-empty string from older payloads: treat as risk and show message
+        hasRisks = true;
+        resultSummary += `### 🔍 CrowdStrike PreCog Detections\n\n`;
+        resultSummary += `_Unable to parse CrowdStrike PreCog detections (raw data present)._\n\n`;
+        core.warning(
+          'CrowdstrikePrecogDetections present but not a non-empty array; showing parse-failure message'
+        );
       }
     }
 
     const statusEmoji = hasRisks ? '⚠️' : '✅';
     const statusText = hasRisks ? 'Security Issues Detected' : 'No Security Issues Detected';
-    const detailsJson = JSON.stringify(
-      { ReachabilityAnalysis: parsedResult.ReachabilityAnalysis },
-      null,
-      2
-    );
+    const detailsPayload: Record<string, unknown> = {
+      ReachabilityAnalysis: parsedResult.ReachabilityAnalysis,
+    };
+    if (parsedResult.CrowdstrikePrecogDetections) {
+      detailsPayload.CrowdstrikePrecogDetections = parsedResult.CrowdstrikePrecogDetections;
+    }
+    const detailsJson = JSON.stringify(detailsPayload, null, 2);
     return buildCommentShell(
       COMMENT_MARKER_REACHABILITY,
       'Terraform Reachability Analysis',
@@ -361,23 +484,45 @@ function getSeverityEmoji(level?: string): string {
   }
 }
 
+/** Returns whether reachability summary has internet/egress exposure arrays with entries. */
+export function getReachabilityExposureTypes(parsed: AnalyzeTerraformResult): {
+  hasInternetExposures: boolean;
+  hasEgressExposures: boolean;
+} {
+  const summary = parsed.ReachabilityAnalysis?.Summary;
+  return {
+    hasInternetExposures: (summary?.NewInternetExposures?.length ?? 0) > 0,
+    hasEgressExposures: (summary?.NewInternetEgressExposures?.length ?? 0) > 0,
+  };
+}
+
 function hasReachabilityRisksInParsed(parsed: AnalyzeTerraformResult): boolean {
+  const { hasInternetExposures, hasEgressExposures } = getReachabilityExposureTypes(parsed);
+  if (hasInternetExposures || hasEgressExposures) return true;
   const summaryData = parsed.ReachabilityAnalysis?.Summary;
-  if (summaryData?.NewInternetExposures && summaryData.NewInternetExposures.length > 0) {
-    return true;
-  }
   if (summaryData?.RiskSummary) {
-    try {
-      const riskData = JSON.parse(summaryData.RiskSummary);
-      if (Array.isArray(riskData) && riskData.length > 0) return true;
-    } catch {
-      if (summaryData.RiskSummary.trim().length > 0) return true;
+    const trimmed = summaryData.RiskSummary.trim();
+    if (trimmed.length === 0) return false;
+    if (trimmed.startsWith('[')) {
+      try {
+        const riskData = JSON.parse(summaryData.RiskSummary);
+        if (Array.isArray(riskData) && riskData.length > 0) return true;
+        return false; // valid JSON array but empty
+      } catch {
+        return true; // content present but invalid JSON
+      }
     }
+    return true; // non-empty string (markdown) counts as having risks
+  }
+  const cs = parsed.CrowdstrikePrecogDetections;
+  if (cs != null) {
+    if (Array.isArray(cs) && cs.length > 0) return true;
+    if (typeof cs === 'string' && cs.trim().length > 0) return true;
   }
   return false;
 }
 
-function hasAccessRisksInParsed(parsed: AnalyzeTerraformResult): boolean {
+export function hasAccessRisksInParsed(parsed: AnalyzeTerraformResult): boolean {
   const accessPermissions = parsed.AccessAnalysis?.AccessPermissions;
   if (accessPermissions && accessPermissions.length > 0) {
     for (const perm of accessPermissions) {
@@ -492,7 +637,7 @@ export async function postOrUpdateComment(
       return;
     }
 
-    let parsed: AnalyzeTerraformResult;
+    let parsed: AnalyzeTerraformResult & { skipped?: boolean; reason?: string };
     try {
       parsed = JSON.parse(scanResult);
     } catch {
@@ -500,10 +645,35 @@ export async function postOrUpdateComment(
       return;
     }
 
+    if (parsed.skipped === true) {
+      const body = `## Averlon Infrastructure Risk Analysis – Skipped
+
+${parsed.reason ?? 'No Terraform plan changes to analyze.'}
+
+---
+*Analysis skipped for commit: \`${commitSha}\`*
+*Powered by [Averlon Security](https://averlon.io)*`;
+      const octokit = github.getOctokit(token);
+      const prNumber = context.payload.pull_request.number;
+      const repo = context.repo;
+      const skipMarker = '<!-- averlon-terraform-skipped -->';
+      await postOrUpdateSingleComment(
+        octokit,
+        repo,
+        prNumber,
+        skipMarker,
+        skipMarker + '\n\n' + body,
+        mode
+      );
+      return;
+    }
+
     const hasReachability = !!parsed.ReachabilityAnalysis;
     const hasAccess = !!parsed.AccessAnalysis;
+    const hasCrowdstrike = parsed.CrowdstrikePrecogDetections != null;
     const shouldPostReachability =
-      hasReachability && (mode !== 'on-security-risks' || hasReachabilityRisksInParsed(parsed));
+      (hasReachability || hasCrowdstrike) &&
+      (mode !== 'on-security-risks' || hasReachabilityRisksInParsed(parsed));
     const shouldPostAccess =
       hasAccess && (mode !== 'on-security-risks' || hasAccessRisksInParsed(parsed));
 

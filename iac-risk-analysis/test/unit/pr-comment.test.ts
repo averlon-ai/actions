@@ -3,6 +3,7 @@ import * as core from '@actions/core';
 import {
   formatScanResult,
   hasRisksInResult,
+  hasReachabilityRisks,
   enforceCommentBodyLimit,
   GITHUB_COMMENT_BODY_MAX_LENGTH,
 } from '../../src/pr-comment.ts';
@@ -103,7 +104,7 @@ describe('pr-comment.ts', () => {
       const result = formatScanResult(scanResult, commitSha);
 
       expect(result).toContain('### ⚠️ Risk Assessment');
-      expect(result).toContain('Resource 1: `aws_instance.web_server`');
+      expect(result).toContain('Resource 1: `i-1234567890abcdef0 (aws_instance.web_server)`');
       expect(result).toContain('**Cloud Resource**: `i-1234567890abcdef0`');
       expect(result).toContain('**Risk Level**: **HIGH**');
       expect(result).toContain('**Issues summary:**');
@@ -116,6 +117,57 @@ describe('pr-comment.ts', () => {
       expect(result).toContain('**CVE-2024-5678** (HIGH)');
       expect(result).toContain('Privilege escalation possible');
       expect(infoSpy).toHaveBeenCalledWith('Found 1 risk assessment(s)');
+    });
+
+    it('should show ResourceID and asset name first when present in ReachabilityAnalysis resources', () => {
+      const riskSummary = JSON.stringify([
+        {
+          terraformResource: 'module.deploy-goat.module.test.aws_instance.test',
+          cloudResource: 'i-08a47985383682d9d',
+          riskAssessment: { riskLevel: 'CRITICAL' },
+        },
+      ]);
+      const scanResult = JSON.stringify({
+        ReachabilityAnalysis: {
+          ModifiedResources: [
+            {
+              ID: 'module.deploy-goat.module.test.aws_instance.test',
+              Asset: { ResourceID: 'i-08a47985383682d9d', Name: 'cs-nfr-test' },
+            },
+          ],
+          Summary: {
+            RiskSummary: riskSummary,
+          },
+        },
+      });
+
+      const result = formatScanResult(scanResult, commitSha);
+
+      expect(result).toContain(
+        'Resource 1: `i-08a47985383682d9d (cs-nfr-test, module.deploy-goat.module.test.aws_instance.test)`'
+      );
+    });
+
+    it('should format New Internet Exposures with ResourceID and asset name when in ReachabilityAnalysis', () => {
+      const scanResult = JSON.stringify({
+        ReachabilityAnalysis: {
+          ModifiedResources: [
+            {
+              ID: 'module.deploy-goat.module.test.aws_instance.test',
+              Asset: { ResourceID: 'i-08a47985383682d9d', Name: 'cs-nfr-test' },
+            },
+          ],
+          Summary: {
+            NewInternetExposures: ['module.deploy-goat.module.test.aws_instance.test'],
+          },
+        },
+      });
+
+      const result = formatScanResult(scanResult, commitSha);
+
+      expect(result).toContain(
+        '1. `i-08a47985383682d9d (cs-nfr-test, module.deploy-goat.module.test.aws_instance.test)`'
+      );
     });
 
     it('should format impact assessment with bold labels', () => {
@@ -211,9 +263,9 @@ describe('pr-comment.ts', () => {
 
       const result = formatScanResult(scanResult, commitSha);
 
-      expect(result).toContain('Resource 1: `aws_instance.web_server`');
-      expect(result).toContain('Resource 2: `aws_s3_bucket.data`');
-      expect(result).toContain('Resource 3: `aws_security_group.open`');
+      expect(result).toContain('Resource 1: `i-abc123 (aws_instance.web_server)`');
+      expect(result).toContain('Resource 2: `my-bucket (aws_s3_bucket.data)`');
+      expect(result).toContain('Resource 3: `sg-xyz789 (aws_security_group.open)`');
       expect(infoSpy).toHaveBeenCalledWith('Found 3 risk assessment(s)');
     });
 
@@ -351,11 +403,11 @@ describe('pr-comment.ts', () => {
       expect(result).toContain('**Status**: No Security Issues Detected');
     });
 
-    it('should handle invalid RiskSummary JSON gracefully', () => {
+    it('should handle invalid RiskSummary JSON gracefully when it looks like JSON array', () => {
       const scanResult = JSON.stringify({
         ReachabilityAnalysis: {
           Summary: {
-            RiskSummary: 'invalid-json-{[}]',
+            RiskSummary: '[invalid-json-{[}]',
           },
         },
       });
@@ -363,10 +415,30 @@ describe('pr-comment.ts', () => {
       const result = formatScanResult(scanResult, commitSha);
 
       expect(result).toContain('### ⚠️ Risk Assessment');
-      expect(result).toContain('invalid-json-{[}]');
+      expect(result).toContain('[invalid-json-{[}]');
       expect(warningSpy).toHaveBeenCalledWith(
         'Failed to parse RiskSummary as JSON, displaying as text'
       );
+    });
+
+    it('should format RiskSummary when it is a preformatted markdown string', () => {
+      const markdownRiskSummary =
+        '### 1. ac2-appserver-01 (`module.deploy-goat.aws_instance.appserver-01`)\nac2-appserver-01 is changing from non-internet-reachable to both exposed.';
+      const scanResult = JSON.stringify({
+        ReachabilityAnalysis: {
+          Summary: {
+            RiskSummary: markdownRiskSummary,
+          },
+        },
+      });
+
+      const result = formatScanResult(scanResult, commitSha);
+
+      expect(result).toContain('### ⚠️ Risk Assessment');
+      expect(result).toContain('### 1. ac2-appserver-01');
+      expect(result).toContain('ac2-appserver-01 is changing from non-internet-reachable');
+      expect(infoSpy).toHaveBeenCalledWith('Found risk assessment (markdown summary)');
+      expect(warningSpy).not.toHaveBeenCalled();
     });
 
     it('should handle completely invalid JSON input', () => {
@@ -377,6 +449,98 @@ describe('pr-comment.ts', () => {
       expect(result).toContain('## ⚠️ Terraform Reachability Analysis');
       expect(result).toContain('## ⚠️ Terraform Access Risk Analysis');
       expect(result).toContain('**Status**: Security Issues Detected');
+    });
+
+    describe('CrowdStrike PreCog detections', () => {
+      it('should render CrowdStrike detections in a table when present (already-parsed array)', () => {
+        const scanResult = JSON.stringify({
+          ReachabilityAnalysis: { Summary: {} },
+          CrowdstrikePrecogDetections: [
+            {
+              SeverityName: 'High',
+              Description: 'A high level detection was triggered',
+              FilePath: '/usr/bin/bash',
+              Hostname: 'ip-172-31-23-126',
+              ResourceID: 'i-08a47985383682d9d',
+              Technique: 'Malicious Activity',
+              RiskScore: '60',
+              Status: 'new',
+            },
+          ],
+        });
+
+        const result = formatScanResult(scanResult, commitSha);
+
+        expect(result).toContain('### 🔍 CrowdStrike PreCog Detections');
+        expect(result).toContain(
+          '| Severity | Description | File | Hostname | Resource ID | Technique | Risk Score | Status |'
+        );
+        expect(result).toContain('A high level detection was triggered');
+        expect(result).toContain('/usr/bin/bash');
+        expect(result).toContain('ip-172-31-23-126');
+        expect(result).toContain('i-08a47985383682d9d');
+        expect(result).toContain('**Status**: Security Issues Detected');
+        expect(infoSpy).toHaveBeenCalledWith('Found 1 CrowdStrike PreCog detection(s)');
+      });
+
+      it('should escape pipes and newlines in table cells', () => {
+        const scanResult = JSON.stringify({
+          CrowdstrikePrecogDetections: [
+            {
+              SeverityName: 'Medium',
+              Description: 'Pipe | and newline\nin description',
+              FileName: 'file|name.txt',
+            },
+          ],
+        });
+
+        const result = formatScanResult(scanResult, commitSha);
+
+        expect(result).toContain('### 🔍 CrowdStrike PreCog Detections');
+        // Pipes in content should be escaped so the table doesn't break (&#124;)
+        expect(result).toContain('&#124;');
+        // Newline in Description should be replaced with space (so "newline in" appears)
+        expect(result).toContain('newline in description');
+        expect(result).not.toContain('newline\nin description');
+      });
+
+      it('should set hasRisks and Security Issues Detected when detections present', () => {
+        const scanResult = JSON.stringify({
+          CrowdstrikePrecogDetections: [
+            { SeverityName: 'Critical', Description: 'Test detection' },
+          ],
+        });
+
+        const result = formatScanResult(scanResult, commitSha);
+
+        expect(result).toContain('**Status**: Security Issues Detected');
+        expect(result).toContain('### 🔍 CrowdStrike PreCog Detections');
+      });
+
+      it('should show parse-failure message when CrowdstrikePrecogDetections is non-empty string', () => {
+        const scanResult = JSON.stringify({
+          ReachabilityAnalysis: { Summary: {} },
+          CrowdstrikePrecogDetections: 'not-valid-json-array',
+        });
+
+        const result = formatScanResult(scanResult, commitSha);
+
+        expect(result).toContain('### 🔍 CrowdStrike PreCog Detections');
+        expect(result).toContain('Unable to parse CrowdStrike PreCog detections');
+        expect(result).toContain('**Status**: Security Issues Detected');
+      });
+
+      it('should not render CrowdStrike section when array is empty', () => {
+        const scanResult = JSON.stringify({
+          ReachabilityAnalysis: { Summary: { TextSummary: 'Ok' } },
+          CrowdstrikePrecogDetections: [],
+        });
+
+        const result = formatScanResult(scanResult, commitSha);
+
+        expect(result).not.toContain('### 🔍 CrowdStrike PreCog Detections');
+        expect(result).toContain('**Status**: No Security Issues Detected');
+      });
     });
 
     it('should include proper markdown structure', () => {
@@ -419,7 +583,7 @@ describe('pr-comment.ts', () => {
 
       const result = formatScanResult(scanResult, commitSha);
 
-      expect(result).toContain('Resource 1: `aws_instance.web`');
+      expect(result).toContain('Resource 1: `i-123 (aws_instance.web)`');
       expect(result).toContain('**Risk Level**: **LOW**');
       expect(result).not.toContain('**Issues summary:**');
       expect(result).not.toContain('**Impact:**');
@@ -775,7 +939,7 @@ describe('pr-comment.ts', () => {
       expect(hasRisksInResult(scanResult)).toBe(true);
     });
 
-    it('should return false when there are only egress exposures (not displayed)', () => {
+    it('should return true when there are only egress exposures', () => {
       const scanResult = JSON.stringify({
         ReachabilityAnalysis: {
           Summary: {
@@ -784,8 +948,8 @@ describe('pr-comment.ts', () => {
         },
       });
 
-      // Egress exposures are not checked in hasRisksInResult
-      expect(hasRisksInResult(scanResult)).toBe(false);
+      // Egress exposures are reachability risks (internet OR egress)
+      expect(hasRisksInResult(scanResult)).toBe(true);
     });
 
     it('should return true for any of multiple risk types', () => {
@@ -807,6 +971,32 @@ describe('pr-comment.ts', () => {
       });
 
       expect(hasRisksInResult(scanResult)).toBe(true);
+    });
+
+    it('should return true when only CrowdstrikePrecogDetections (non-empty array) is present', () => {
+      const scanResult = JSON.stringify({
+        CrowdstrikePrecogDetections: [{ SeverityName: 'High', Description: 'Detection' }],
+      });
+
+      expect(hasRisksInResult(scanResult)).toBe(true);
+      expect(hasReachabilityRisks(scanResult)).toBe(true);
+    });
+
+    it('should return true when CrowdstrikePrecogDetections is non-empty string (unparseable)', () => {
+      const scanResult = JSON.stringify({
+        CrowdstrikePrecogDetections: 'raw-string-from-api',
+      });
+
+      expect(hasReachabilityRisks(scanResult)).toBe(true);
+    });
+
+    it('should return false when CrowdstrikePrecogDetections is empty array only', () => {
+      const scanResult = JSON.stringify({
+        CrowdstrikePrecogDetections: [],
+      });
+
+      expect(hasReachabilityRisks(scanResult)).toBe(false);
+      expect(hasRisksInResult(scanResult)).toBe(false);
     });
   });
 

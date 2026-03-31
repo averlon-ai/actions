@@ -1,244 +1,174 @@
 import * as core from '@actions/core';
-import * as github from '@actions/github';
+import {
+  createApiClient,
+  GetContainerRecommendationsRequest,
+  GitDockerfile,
+  CodeDefectRef,
+  CodeDefectStatus,
+} from '@averlon/shared';
 import {
   buildDockerfileRequests,
-  findDockerfiles,
   getGitRepoUrl,
   parseFilters,
-  parseIgnorePaths,
-  parseImageMap,
   toRelativePath,
 } from './recommendations';
-import { createApiClient, GetGitProjectRecommendationsRequest } from '@averlon/shared';
-import { getInputSafe, parseBoolean } from '@averlon/github-actions-utils';
-import { GithubIssuesService } from './github-issues';
+import {
+  DEFAULT_BASE_URL,
+  DEFAULT_FILTERS,
+  ALLOWED_BASE_TOOLS,
+  MCP_TOOLS,
+  FEEDBACK_JSON_SCHEMA,
+} from './constants';
 
-interface ActionInputs {
-  apiKey: string;
-  apiSecret: string;
-  baseUrl: string;
-  imageMapInput: string;
-  filtersRaw: string;
-  githubToken: string;
-  autoAssignCopilot: boolean;
-  githubOwner: string;
-  githubRepo: string;
-  ignorePaths: string[];
+/**
+ * Collects all CodeDefectRef entries from every package in the Dockerfile.
+ */
+function collectCodeDefects(dockerfile: GitDockerfile): CodeDefectRef[] {
+  const refs: CodeDefectRef[] = [];
+  for (const layer of dockerfile.Layers ?? []) {
+    for (const pkg of layer.Packages ?? []) {
+      for (const cd of pkg.CodeDefects ?? []) {
+        refs.push(cd);
+      }
+    }
+  }
+  return refs;
 }
 
 /**
- * Collect and validate all action inputs
- *
- * @returns Validated action inputs
- * @throws Error if validation fails
+ * Returns a shallow clone of the dockerfile with CodeDefects stripped to only { ID, PublicID }.
  */
-async function _getInputs(): Promise<ActionInputs> {
-  core.info('Collecting and validating action inputs...');
-
-  // Get required inputs
-  const apiKey = getInputSafe('averlon-api-key', false) || getInputSafe('api-key', false);
-  const apiSecret = getInputSafe('averlon-api-secret', false) || getInputSafe('api-secret', false);
-
-  if (!apiKey) {
-    throw new Error(
-      'Averlon API key required: provide averlon-api-key (preferred) or api-key (deprecated)'
-    );
-  }
-  if (!apiSecret) {
-    throw new Error(
-      'Averlon API secret required: provide averlon-api-secret (preferred) or api-secret (deprecated)'
-    );
-  }
-  const githubToken = getInputSafe('github-token', true);
-
-  // Get optional inputs with defaults
-  const baseUrl = getInputSafe('base-url', false) || 'https://wfe.prod.averlon.io/';
-  const imageMapInput = getInputSafe('image-map', false) || '';
-  const filtersRaw = getInputSafe('filters', false) || 'Recommended,Critical,HighRCE';
-  const autoAssignCopilotStr = getInputSafe('auto-assign-copilot', false) || 'false';
-  const autoAssignCopilot = parseBoolean(autoAssignCopilotStr);
-  const ignorePathsRaw = getInputSafe('ignore-paths', false) || '';
-  const ignorePaths = parseIgnorePaths(ignorePathsRaw);
-
-  // GITHUB_REPOSITORY is a standard environment variable automatically provided by GitHub Actions
-  // It contains the repository name in the format "owner/repo" (e.g., "octocat/Hello-World")
-  // Documentation: https://docs.github.com/en/actions/reference/workflows-and-actions/variables
-  const repository = process.env['GITHUB_REPOSITORY'];
-  if (!repository) {
-    throw new Error('GITHUB_REPOSITORY environment variable is not set');
-  }
-
-  // Parse GitHub owner and repo
-  const [githubOwner, githubRepo] = repository.split('/');
-  if (!githubOwner || !githubRepo || githubOwner.includes('/') || githubRepo.includes('/')) {
-    throw new Error(
-      `Invalid GITHUB_REPOSITORY format: "${githubRepo}". Expected format: "owner/repo"`
-    );
-  }
-
-  core.debug(`Base URL: ${baseUrl}`);
-  core.debug(`Filters: ${filtersRaw}`);
-  core.debug(`Image map provided: ${imageMapInput ? 'yes' : 'no'}`);
-  core.debug(`Ignore paths: ${ignorePaths.length > 0 ? ignorePaths.join(', ') : 'none'}`);
-  core.info(`Auto-assign Copilot ${autoAssignCopilot ? 'enabled' : 'disabled'}`);
-
-  if (githubToken) {
-    core.setSecret(githubToken);
-  }
-
+function stripToCodeDefectRefs(dockerfile: GitDockerfile): GitDockerfile {
   return {
-    apiKey,
-    apiSecret,
-    baseUrl,
-    imageMapInput,
-    filtersRaw,
-    githubToken,
-    autoAssignCopilot,
-    githubOwner,
-    githubRepo,
-    ignorePaths,
+    ...dockerfile,
+    Layers: dockerfile.Layers?.map(layer => ({
+      ...layer,
+      Packages: layer.Packages?.map(pkg => ({
+        ...pkg,
+        CodeDefects: pkg.CodeDefects?.map(cd => ({
+          ID: cd.ID,
+          PublicID: cd.PublicID,
+        })),
+      })),
+    })),
   };
 }
 
+/**
+ * Builds a prompt string for a single Dockerfile to be consumed by the /remediate-container skill.
+ */
+function buildDockerfilePrompt(dockerfile: GitDockerfile): string {
+  const json = JSON.stringify(stripToCodeDefectRefs(dockerfile), null, 2);
+  const codeDefects = collectCodeDefects(dockerfile);
+
+  return `Use /remediate-container skill to resolve issues in ${dockerfile.Path} and create respective PRs.
+
+The package data includes CodeDefects with IDs. Your structured output must include a
+"feedback" array with one entry per CodeDefect ID. For each entry:
+- Status ${CodeDefectStatus.Fixed} = Fixed (CVE was resolved in a PR or by base image rebuild)
+- Status ${CodeDefectStatus.NoFix} = NoFix (could not be fixed)
+- Feedback = empty string for Fixed when a PR changed code; use "Rebuild would fix it" when fixed by base image rebuild with no Dockerfile change; concise reason for NoFix
+
+There are ${codeDefects.length} CodeDefect IDs to report on. Every one MUST appear in the output.
+
+IMPORTANT: The structured JSON output MUST be the very last thing you produce.
+Do NOT output any additional text, summary, or commentary after emitting the structured JSON.
+Once you emit the JSON, stop immediately.
+
+Here is the container recommendations data:
+
+\`\`\`json
+${json}
+\`\`\``;
+}
+
 async function main(): Promise<void> {
-  core.debug('Step 1: Collecting and validating inputs');
-  const inputs = await _getInputs();
+  // Collect inputs from environment
+  const apiKey = process.env['AVERLON_API_KEY'];
+  const apiSecret = process.env['AVERLON_API_SECRET'];
+  const baseUrl = process.env['AVERLON_BASE_URL'] || DEFAULT_BASE_URL;
+  const dockerfilePath = process.env['INPUT_DOCKERFILE'] || '';
+  const imageRepository = process.env['INPUT_IMAGE_REPOSITORY'] || '';
+  const filtersRaw = process.env['INPUT_FILTERS'] || DEFAULT_FILTERS;
 
-  const dockerfiles = await findDockerfiles(inputs.ignorePaths);
-  core.info(
-    `Found ${dockerfiles.length} Dockerfile${dockerfiles.length !== 1 ? 's' : ''} in the repository`
-  );
+  if (!apiKey) {
+    throw new Error('AVERLON_API_KEY environment variable is required');
+  }
+  if (!apiSecret) {
+    throw new Error('AVERLON_API_SECRET environment variable is required');
+  }
+  if (!dockerfilePath) {
+    throw new Error('INPUT_DOCKERFILE environment variable is required');
+  }
 
-  const apiClient = createApiClient({
-    apiKey: inputs.apiKey,
-    apiSecret: inputs.apiSecret,
-    baseUrl: inputs.baseUrl,
-  });
+  // Register secrets to prevent them from appearing in logs
+  core.setSecret(apiKey);
+  core.setSecret(apiSecret);
 
-  const imageMap = parseImageMap(inputs.imageMapInput);
-  const requests = buildDockerfileRequests(dockerfiles, imageMap);
-  const gitRepo = getGitRepoUrl();
-  const filters = parseFilters(inputs.filtersRaw);
-  const payload: GetGitProjectRecommendationsRequest = {
+  core.info(`Processing Dockerfile: ${dockerfilePath}`);
+
+  // Build a single request for the provided Dockerfile
+  const imageMap: Record<string, string> = {};
+  if (imageRepository) {
+    imageMap[toRelativePath(dockerfilePath)] = imageRepository;
+  }
+  const requests = buildDockerfileRequests([dockerfilePath], imageMap);
+
+  // Call Averlon API with getContainerRecommendations
+  const apiClient = createApiClient({ apiKey, apiSecret, baseUrl });
+  const payload: GetContainerRecommendationsRequest = {
     Requests: requests,
-    GitRepo: gitRepo,
-    Filters: filters,
+    GitRepo: getGitRepoUrl(),
+    Filters: parseFilters(filtersRaw),
   };
 
-  const response = await apiClient.getGitProjectRecommendations(payload);
-  const dockerRecs = response?.DockerfileRecommendations || [];
+  core.info('Calling Averlon API for container recommendations...');
+  const response = await apiClient.getContainerRecommendations(payload);
+  const dockerfileRecs = response?.Dockerfiles || [];
+  core.info(`Received ${dockerfileRecs.length} Dockerfile recommendation(s) from Averlon`);
 
-  const octokit = github.getOctokit(inputs.githubToken);
-  const issuesService = new GithubIssuesService(
-    octokit,
-    inputs.githubOwner,
-    inputs.githubRepo,
-    apiClient
+  // Find the Dockerfile with actionable packages
+  const actionable = dockerfileRecs.find(df => {
+    const totalPackages = df.Layers?.reduce((sum, layer) => sum + (layer.Packages?.length || 0), 0);
+    return totalPackages > 0;
+  });
+
+  if (!actionable) {
+    core.info('No actionable container recommendations found.');
+    core.setOutput('has-recommendations', 'false');
+    core.setOutput('prompt', '');
+    core.setOutput('allowed-tools', '');
+    return;
+  }
+
+  // Build the prompt
+  const prompt = buildDockerfilePrompt(actionable);
+
+  // Build allowed tools list
+  const baseTools = [...ALLOWED_BASE_TOOLS];
+  const disableWebSearch = process.env['INPUT_DISABLE_WEBSEARCH']?.toLowerCase() === 'true';
+  if (!disableWebSearch) {
+    baseTools.push('WebSearch');
+  }
+  const allowedTools = [...baseTools, ...MCP_TOOLS].join(',');
+
+  // Collect all code defect IDs so submit-feedback can detect missing ones
+  const codeDefectIds = collectCodeDefects(actionable).map(cd => cd.ID);
+  core.setOutput('code-defect-ids', codeDefectIds.join(','));
+
+  core.setOutput('has-recommendations', 'true');
+  core.setOutput('prompt', prompt);
+  core.setOutput('json-schema', FEEDBACK_JSON_SCHEMA);
+  core.setOutput('allowed-tools', allowedTools);
+
+  core.debug(
+    `Outputs set: has-recommendations=true, prompt length=${prompt.length}, code defect IDs=${codeDefectIds.length}`
   );
-
-  const recByPath = new Map<string, (typeof dockerRecs)[number]>();
-  for (const rec of dockerRecs) recByPath.set(rec.Path, rec);
-
-  core.summary.addHeading('Averlon Recommendations');
-  const tableRows = [
-    [
-      { data: 'Dockerfile', header: true },
-      { data: 'Image Repository', header: true },
-    ],
-  ] as Array<Array<{ data: string; header?: boolean }>>;
-
-  for (const dockerfilePath of dockerfiles) {
-    const rec = recByPath.get(dockerfilePath);
-    const imageRepo = rec?.ImageRepository?.RepositoryName || 'Not Found';
-    tableRows.push([{ data: dockerfilePath }, { data: imageRepo }]);
-
-    try {
-      if (rec) {
-        // Successfully mapped: We got a recommendation from backend, which means we were able to map this Dockerfile to an image repository
-        const mappedImageRepo = rec.ImageRepository?.RepositoryName;
-        core.info(
-          `[${dockerfilePath}] ✓ Successfully mapped to image repository: ${mappedImageRepo || 'Unknown'}`
-        );
-
-        const fixAll = rec.FixAllRecommendation;
-
-        if (fixAll) {
-          // Mapped AND has recommendations
-          core.info(`[${dockerfilePath}] Security recommendations found`);
-          // If there are recommendations, create or update an issue for this Dockerfile (and assign to Copilot if configured).
-          await issuesService.createOrUpdateIssue(rec, inputs.autoAssignCopilot);
-        } else {
-          // Mapped BUT no recommendations
-          core.info(`[${dockerfilePath}] No security recommendations available`);
-          // If there are no recommendations, close any existing issue related to this Dockerfile.
-          await issuesService.closeIssueByPath(
-            dockerfilePath,
-            'This issue has been automatically closed because no security recommendations are available for this Dockerfile in the latest scan.'
-          );
-        }
-      } else {
-        // Failed to map: No recommendation returned from backend, which means we were not able to map this Dockerfile to an image repository
-        const relPath = toRelativePath(dockerfilePath);
-        const mappedImageRepo = imageMap[relPath];
-
-        if (mappedImageRepo) {
-          // Dockerfile is in image-map but Averlon didn't find/scan the image repository
-          core.warning(
-            `[${dockerfilePath}] ✗ Failed to map: Image repository "${mappedImageRepo}" was specified in image-map but not found in Averlon or not scanned yet. Please ensure the image repository in the image-map input is correct and has been scanned by Averlon`
-          );
-          await issuesService.closeIssueByPath(
-            dockerfilePath,
-            'This issue has been automatically closed by Averlon Containers analysis GitHub action.'
-          );
-        } else {
-          // No recommendation returned, which means we were not able to find the mapped image repository for this Dockerfile.
-          // Close any existing issues for this Dockerfile since we can't analyze it without an image repository mapping.
-          core.warning(
-            `[${dockerfilePath}] ✗ Failed to map: Unable to map this Dockerfile to an image repository. Please use image-map input to explicitly map it to an image repository.`
-          );
-          await issuesService.closeIssueByPath(
-            dockerfilePath,
-            'This issue has been automatically closed by Averlon Containers analysis GitHub action.'
-          );
-        }
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      core.error(`Failed to process ${dockerfilePath}: ${message}`);
-      throw error; // Fail the entire action as requested
-    }
-  }
-  core.summary.addTable(tableRows);
-
-  // Clean up issues for Dockerfiles that no longer exist in repo
-  try {
-    await issuesService.cleanupOrphanedIssues(dockerfiles);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    core.error(`Failed to cleanup orphaned github issues: ${message}`);
-    throw error; // Fail the entire action as requested
-  }
-
-  // Fail the action if all Dockerfiles could not be mapped to an image repository
-  if (dockerfiles.length > 0) {
-    const mappedCount = dockerfiles.filter(path => {
-      const rec = recByPath.get(path);
-      return rec?.ImageRepository?.RepositoryName;
-    }).length;
-    if (mappedCount === 0) {
-      throw new Error(
-        `Found ${dockerfiles.length} Dockerfile(s) in the repository but could not map any of them to an image repository. ` +
-          'Please provide an image-map input or ensure your images are scanned by Averlon.'
-      );
-    }
-  }
-
-  await core.summary.write();
 }
 
 async function run(): Promise<void> {
   try {
-    core.info('Starting Averlon Vulnerability Remediation Agent for Containers...');
+    core.info('Starting Averlon Container Analysis action...');
     await main();
     core.info('Action completed successfully');
   } catch (error) {
@@ -250,7 +180,7 @@ async function run(): Promise<void> {
   }
 }
 
-export { run };
+export { run, buildDockerfilePrompt, collectCodeDefects, FEEDBACK_JSON_SCHEMA };
 
 // Run the action if this file is executed directly
 if (require.main === module) {

@@ -753,7 +753,7 @@ describe('_runScanTerraformMisconfiguration function', () => {
 
       const debugCalls = debugSpy.mock.calls.map(call => call[0]);
       expect(debugCalls.some(msg => msg.includes('Scan request:'))).toBe(true);
-      expect(debugCalls.some(msg => msg.includes('Full scan response:'))).toBe(true);
+      expect(debugCalls.some(msg => msg.includes('Full scan response:'))).toBe(false);
     });
   });
 });

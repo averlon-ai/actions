@@ -28,7 +28,14 @@ echo "Building action: $ACTION_NAME"
 # Create dist directory if it doesn't exist
 mkdir -p "$ACTION_NAME/dist"
 
-# Build the action
+# Build the action — main entry point
 bun build "$ACTION_NAME/src/main.ts" --outdir "$ACTION_NAME/dist" --target node --format cjs --minify
+
+# Build additional entry points if they exist
+for extra in "$ACTION_NAME"/src/submit-feedback.ts "$ACTION_NAME"/src/setup-skills.ts "$ACTION_NAME"/src/cleanup-skills.ts; do
+  if [ -f "$extra" ]; then
+    bun build "$extra" --outdir "$ACTION_NAME/dist" --target node --format cjs --minify
+  fi
+done
 
 echo "✓ Built $ACTION_NAME successfully"

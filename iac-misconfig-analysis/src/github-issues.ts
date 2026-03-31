@@ -1,7 +1,11 @@
 import * as core from '@actions/core';
 import * as github from '@actions/github';
 import { CopilotIssueManager } from '@averlon/github-copilot-utils';
-import { AVERLON_CREATED_LABEL, closeIssue } from '@averlon/github-actions-utils';
+import {
+  AVERLON_CREATED_LABEL,
+  closeIssue,
+  createOrUpdateIssue,
+} from '@averlon/github-actions-utils';
 import type { TerraformResource, ApiClient } from '@averlon/shared';
 import { SourceControlIssueType } from '@averlon/shared';
 import {
@@ -80,15 +84,18 @@ function getWeight(resource: TerraformResource): number {
  */
 export class GithubIssuesService extends CopilotIssueManager {
   private apiClient?: ApiClient;
+  private cloudId?: string;
 
   constructor(
     octokit: ReturnType<typeof github.getOctokit>,
     owner: string,
     repo: string,
-    apiClient?: ApiClient
+    apiClient?: ApiClient,
+    cloudId?: string
   ) {
     super(octokit, owner, repo);
     this.apiClient = apiClient;
+    this.cloudId = cloudId;
   }
 
   /**
@@ -172,6 +179,18 @@ export class GithubIssuesService extends CopilotIssueManager {
     core.info(
       `Creating/updating issues only for ${itemsToSync.length} resource(s) that are new or changed`
     );
+
+    // Collect related SecDI issue IDs for backend registration
+    const relatedIssueIDs: number[] = [];
+    for (const resource of itemsToSync) {
+      for (const issue of resource.Issues ?? []) {
+        if (issue.ID) {
+          const numId = parseInt(issue.ID, 10);
+          if (!isNaN(numId)) relatedIssueIDs.push(numId);
+        }
+      }
+    }
+
     const issueNumbers = await syncBatchedIssues({
       octokit: this.octokit as unknown as OctokitLike,
       owner: this.owner,
@@ -211,6 +230,25 @@ export class GithubIssuesService extends CopilotIssueManager {
     });
 
     for (const issueNumber of issueNumbers) {
+      if (this.cloudId && this.apiClient) {
+        const { data: issue } = await this.octokit.rest.issues.get({
+          owner: this.owner,
+          repo: this.repo,
+          issue_number: issueNumber,
+        });
+        await createOrUpdateIssue({
+          apiClient: this.apiClient,
+          orgName: this.owner,
+          repo: this.repo,
+          issueNumber,
+          issueTitle: (issue.title?.trim() ?? '') || `Issue #${issueNumber}`,
+          riskSummary: '',
+          type: SourceControlIssueType.IaC,
+          labels: ISSUE_LABELS,
+          issueIDs: relatedIssueIDs,
+          cloudId: this.cloudId,
+        });
+      }
       await this.assignCopilot(issueNumber, assignCopilot);
     }
 
@@ -231,6 +269,7 @@ export class GithubIssuesService extends CopilotIssueManager {
       type: SourceControlIssueType.IaC,
       findPRsLinkedToIssue: (num: number) => this.findPRsLinkedToIssue(num),
       logMessage: `Closed Terraform scan issue #${issueNumber}`,
+      cloudId: this.cloudId,
     });
   }
 }

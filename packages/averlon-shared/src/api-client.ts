@@ -6,6 +6,8 @@ import {
   CallerInfo,
   GetGitProjectRecommendationsRequest,
   GetGitProjectRecommendationsResponse,
+  GetContainerRecommendationsRequest,
+  GetContainerRecommendationsResponse,
   AnalyzeTerraformResult,
   AnalyzeTerraformRequest,
   ListIssuesRequest,
@@ -32,6 +34,10 @@ import {
   GetSourceControlPullRequestRequest,
   GetSourceControlPullRequestResponse,
   UpdateSourceControlPullRequestStatusRequest,
+  UpdateCodeDefectFeedbackRequest,
+  CodeDefect,
+  GetRemediationAgentSkillsResponse,
+  GetRemediationAgentConfigResponse,
 } from './types';
 
 /**
@@ -352,6 +358,19 @@ export class ApiClient {
   }
 
   /**
+   * Get container recommendations for Dockerfiles (structured layer/package data)
+   */
+  async getContainerRecommendations(
+    request: GetContainerRecommendationsRequest
+  ): Promise<GetContainerRecommendationsResponse> {
+    return this.makeAuthenticatedRequest<GetContainerRecommendationsResponse>(
+      '/pb.Reports/GetContainerRecommendations',
+      'POST',
+      request
+    );
+  }
+
+  /**
    * List issues for a cloud/resource
    */
   async listIssues(request: ListIssuesRequest): Promise<ListIssuesResponse> {
@@ -474,6 +493,39 @@ export class ApiClient {
   ): Promise<void> {
     await this.makeAuthenticatedRequest<void>(
       '/pb.Reports/UpdateSourceControlPullRequestStatus',
+      'POST',
+      request
+    );
+  }
+
+  /**
+   * Get remediation agent skills from the server
+   */
+  async getRemediationAgentSkills(): Promise<GetRemediationAgentSkillsResponse> {
+    return this.makeAuthenticatedRequest<GetRemediationAgentSkillsResponse>(
+      '/pb.Queries/GetRemediationAgentSkills',
+      'POST',
+      {}
+    );
+  }
+
+  /**
+   * Get remediation agent configuration from the server
+   */
+  async getRemediationAgentConfig(): Promise<GetRemediationAgentConfigResponse> {
+    return this.makeAuthenticatedRequest<GetRemediationAgentConfigResponse>(
+      '/pb.Queries/GetRemediationAgentConfig',
+      'POST',
+      {}
+    );
+  }
+
+  /**
+   * Submit feedback for a code defect remediation attempt
+   */
+  async updateCodeDefectFeedback(request: UpdateCodeDefectFeedbackRequest): Promise<CodeDefect> {
+    return this.makeAuthenticatedRequest<CodeDefect>(
+      '/pb.Reports/UpdateCodeDefectFeedback',
       'POST',
       request
     );

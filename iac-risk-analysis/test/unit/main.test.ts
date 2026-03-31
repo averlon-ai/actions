@@ -443,4 +443,37 @@ describe('main.ts', () => {
       );
     });
   });
+
+  describe('skip logic (e2e-style)', () => {
+    it('should skip when no Terraform files changed in PR (GitHub compare returns only non-.tf files)', async () => {
+      process.env.GITHUB_REPOSITORY = 'test-owner/test-repo';
+      const githubModule = await import('@actions/github');
+      const getOctokitSpy = spyOn(githubModule, 'getOctokit').mockReturnValue({
+        rest: {
+          repos: {
+            compareCommitsWithBasehead: () =>
+              Promise.resolve({
+                data: { files: [{ filename: 'README.md' }, { filename: 'docs/setup.md' }] },
+              }),
+          },
+        },
+      } as any);
+
+      await run();
+
+      expect(getOctokitSpy).toHaveBeenCalledWith('test-github-token');
+      expect(setOutputSpy).toHaveBeenCalledWith(
+        'scan-result',
+        expect.stringContaining('"skipped":true')
+      );
+      expect(
+        setOutputSpy.mock.calls.some(
+          c => c[0] === 'scan-result' && c[1].includes('No Terraform files')
+        )
+      ).toBe(true);
+      expect(mockUploadTerraformFile).not.toHaveBeenCalled();
+
+      getOctokitSpy.mockRestore();
+    });
+  });
 });

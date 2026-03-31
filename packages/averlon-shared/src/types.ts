@@ -73,6 +73,13 @@ export interface AnalyzeTerraformResult {
   Status: JobStatus;
   ReachabilityAnalysis?: TerraformReachabilityAnalysis;
   AccessAnalysis?: TerraformAccessAnalysis;
+  /**
+   * Optional CrowdStrike PreCog detections. The API may return this as a JSON string (possibly
+   * double-encoded); at the boundary (e.g. when building the scan result) it should be parsed
+   * so that consumers receive the already-parsed value (array of detections) here.
+   * Included in reachability report when present.
+   */
+  CrowdstrikePrecogDetections?: unknown;
 }
 
 export interface ScanTerraformRequest {
@@ -80,6 +87,7 @@ export interface ScanTerraformRequest {
   Commit: string;
   ResourceTypes?: string[];
   IncludeResourcesWithoutIssues?: boolean;
+  Severities?: IssueSeverityEnum[];
 }
 
 export interface ScanTerraformResult {
@@ -105,6 +113,94 @@ export interface GitFileRecommendationRequest {
 export interface GetGitProjectRecommendationsResponse {
   DockerfileRecommendations: GitDockerfileRecommendation[];
   TerraformRecommendations: GitTerraformRecommendation[];
+}
+
+// --- GetContainerRecommendations types ---
+
+export interface GitDockerfileRequest {
+  Path: string;
+  Content: string;
+  Labels: KVPair[];
+  ImageRepository: string;
+}
+
+export interface GetContainerRecommendationsRequest {
+  Requests: GitDockerfileRequest[];
+  GitRepo: string;
+  Filters: number;
+}
+
+export enum CodeDefectStatus {
+  Unknown = 0,
+  Pending = 1,
+  InProgress = 2,
+  Fixed = 3,
+  NoFix = 4,
+}
+
+export interface CodeDefectRef {
+  ID: string;
+  PublicID: string;
+}
+
+export interface CodeDefect {
+  ID?: string;
+  OrgID?: string;
+  LayerCommand?: string;
+  PackageName?: string;
+  PublicID?: string;
+  ResourceID?: string;
+  Hash?: string;
+  Status?: CodeDefectStatus;
+  Feedback?: string;
+  CreatedAt?: string;
+  UpdatedAt?: string;
+}
+
+export interface UpdateCodeDefectFeedbackRequest {
+  CodeDefectID: string;
+  Status: CodeDefectStatus;
+  Feedback?: string;
+}
+
+export interface GitPackageCVE {
+  CVE: string;
+  FixedVersion: string;
+}
+
+export interface GitLayerPackage {
+  Name: string;
+  CurrentVersion: string;
+  FixedVersion: string;
+  Category: string;
+  Type: string;
+  Deprecated: boolean;
+  Abandoned: boolean;
+  DependencyOf: string[];
+  CVEs: GitPackageCVE[];
+  PackageID: string;
+  Targets?: string[];
+  CodeDefects?: CodeDefectRef[];
+}
+
+export interface GitImageLayer {
+  ID: string;
+  Command: string;
+  IsBaseImage: boolean;
+  Packages: GitLayerPackage[];
+}
+
+export interface GitDockerfile {
+  CloudID?: string;
+  AccountID?: string;
+  ImageID?: string;
+  Path: string;
+  ImageRepository?: ImageRepository;
+  Layers: GitImageLayer[];
+}
+
+export interface GetContainerRecommendationsResponse {
+  Dockerfiles: GitDockerfile[];
 }
 
 export interface GitDockerfileRecommendation {
@@ -297,6 +393,8 @@ export interface AssetV2 {
   OrgID?: string;
   CloudID?: string;
   ResourceID?: string;
+  /** Human-readable asset name (e.g. from Name tag). */
+  Name?: string;
 }
 
 // IssueV2 matches the proto definition
@@ -341,7 +439,7 @@ export interface TerraformReachabilityAnalysisSummary {
   NewInternetExposures?: string[];
   NewInternetEgressExposures?: string[];
   TextSummary?: string;
-  // RiskSummary is a JSON string that unmarshals to RiskAssessment[]
+  // RiskSummary is either a JSON array string (RiskAssessment[]) or a preformatted markdown string
   RiskSummary?: string;
 }
 
@@ -379,6 +477,10 @@ export interface ResultSummary {
 export interface RiskAssessment {
   terraformResource?: string;
   cloudResource?: string;
+  /** Cloud resource ID (e.g. EC2 instance id, ARN). When present, shown first in reachability display. */
+  resourceId?: string;
+  /** Human-readable asset name (e.g. from Name tag). When present, shown with terraform name in parentheses. */
+  assetName?: string;
   riskAssessment?: {
     riskLevel?: string;
     issuesSummary?: string;
@@ -404,6 +506,26 @@ export interface AccessRiskAssessment {
       riskAnalysis?: string;
     }>;
   };
+}
+
+export interface RemediationAgentSkillFile {
+  Path: string;
+  Content: string; // base64-encoded tar archive
+}
+
+export interface RemediationAgentSkill {
+  Name: string;
+  Files: RemediationAgentSkillFile[];
+}
+
+export interface GetRemediationAgentSkillsResponse {
+  Skills: RemediationAgentSkill[];
+}
+
+export interface GetRemediationAgentConfigResponse {
+  ClaudeCodeActionImageRef: string;
+  AverlonMCPImageRef: string;
+  AgentMaxTurns: number;
 }
 
 export * from './source-control.types';

@@ -44,6 +44,10 @@ inputs:
     description: "Comment mode: 'always' (create new comment each time), 'update' (update existing comment), or 'on-security-risks' (only comment if risks found)"
     required: false
     default: 'update'
+  skip-when-no-changes:
+    description: "If true, skip upload and scan when (1) no Terraform files (*.tf, *.tf.json, *.tfvars, *.tfvars.json) changed in the PR (GitHub API; needs github-token), or (2) base and head plan files are logically identical. Saves time when there is nothing to analyze."
+    required: false
+    default: 'true'
   averlon-api-key:
     description: 'API key for authentication'
     required: true

@@ -54,6 +54,7 @@ describe('GithubIssuesService', () => {
   let mockCreateIssue: ReturnType<typeof mock>;
   let mockUpdateIssue: ReturnType<typeof mock>;
   let mockCreateComment: ReturnType<typeof mock>;
+  let mockIssuesGet: ReturnType<typeof mock>;
 
   const createMockResource = (
     id: string,
@@ -109,6 +110,16 @@ describe('GithubIssuesService', () => {
 
     mockCreateComment = mock(() => Promise.resolve({ data: {} }));
 
+    mockIssuesGet = mock((params: { issue_number: number }) =>
+      Promise.resolve({
+        data: {
+          number: params.issue_number,
+          title: `Test Issue #${params.issue_number}`,
+          body: 'Test Body',
+        },
+      })
+    );
+
     // Create mock Octokit instance (no Gist — state in issue body)
     mockOctokit = {
       rest: {
@@ -117,6 +128,7 @@ describe('GithubIssuesService', () => {
           create: mockCreateIssue as any,
           update: mockUpdateIssue as any,
           createComment: mockCreateComment as any,
+          get: mockIssuesGet as any,
         },
       },
     } as any;
@@ -144,6 +156,7 @@ describe('GithubIssuesService', () => {
     mockCreateIssue.mockClear();
     mockUpdateIssue.mockClear();
     mockCreateComment.mockClear();
+    mockIssuesGet?.mockClear();
     mockAssignCopilot.mockClear();
     mockHandleCopilotAssignmentForUpdatedIssue.mockClear();
     mockHandleCopilotAssignmentForUnchangedIssue.mockClear();

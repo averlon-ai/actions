@@ -64,7 +64,7 @@ jobs:
           terraform show -json tfplan > plan.json
 
       - name: Run Averlon Remediation Agent for IaC Misconfigurations
-        uses: averlon-ai/actions/iac-misconfig-analysis@v1.0.11
+        uses: averlon-ai/actions/iac-misconfig-analysis@v2.0.1
         with:
           averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
           averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -83,7 +83,7 @@ Skip GitHub issue creation if you only need the output:
 ```yaml
 - name: Run Averlon Remediation Agent for IaC Misconfigurations
   id: scan
-  uses: averlon-ai/actions/iac-misconfig-analysis@v1.0.11
+  uses: averlon-ai/actions/iac-misconfig-analysis@v2.0.1
   with:
     averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
     averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -101,7 +101,7 @@ Skip GitHub issue creation if you only need the output:
 
 ```yaml
 - name: Run Averlon Remediation Agent for IaC Misconfigurations
-  uses: averlon-ai/actions/iac-misconfig-analysis@v1.0.11
+  uses: averlon-ai/actions/iac-misconfig-analysis@v2.0.1
   with:
     # Required inputs
     averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
@@ -119,6 +119,7 @@ Skip GitHub issue creation if you only need the output:
     auto-assign-copilot: 'true' #auto assign created issue to copilot
     resource-type-filter: 'aws_s3_bucket,aws_lambda_function' # filter the misconfiguration for specific terraform resource types
     include-resources-without-issues: 'true' # If true, will get the resources present in terraform plan file with or without issues. Default is false.
+    filters: 'Critical,High' # Filter by severity levels (comma-separated). Supported: Critical, High, Medium, Low.
 ```
 
 **GitHub Issues:**
@@ -141,12 +142,15 @@ Skip GitHub issue creation if you only need the output:
 
 ### Optional Inputs
 
-| Input                | Description                                                                                                                       | Default                        |
-| -------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
-| `base-url`           | Base URL for Averlon API                                                                                                          | `https://wfe.prod.averlon.io/` |
-| `scan-poll-interval` | Polling interval in seconds for scan result checking                                                                              | `30`                           |
-| `scan-timeout`       | Maximum timeout in seconds to wait for scan completion                                                                            | `1800` (30 minutes)            |
-| `github-token`       | GitHub token for creating issues. Provide a PAT with Copilot access to enable automated assignment; otherwise uses workflow token | `''` (optional)                |
+| Input                              | Description                                                                                                                       | Default                        |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
+| `base-url`                         | Base URL for Averlon API                                                                                                          | `https://wfe.prod.averlon.io/` |
+| `scan-poll-interval`               | Polling interval in seconds for scan result checking                                                                              | `30`                           |
+| `scan-timeout`                     | Maximum timeout in seconds to wait for scan completion                                                                            | `1800` (30 minutes)            |
+| `github-token`                     | GitHub token for creating issues. Provide a PAT with Copilot access to enable automated assignment; otherwise uses workflow token | `''` (optional)                |
+| `resource-type-filter`             | Comma-separated Terraform resource types to include (e.g. `aws_s3_bucket,aws_lambda_function`). Omit to include all types.        | (all types)                    |
+| `include-resources-without-issues` | If `true`, results include resources with or without issues.                                                                      | `false`                        |
+| `filters`                          | Comma-separated severity levels to include. Supported: `Critical`, `High`, `Medium`, `Low`. Example: `Critical,High`.             | `Critical,High`                |
 
 ## 📤 Outputs
 
@@ -159,7 +163,7 @@ Skip GitHub issue creation if you only need the output:
 ```yaml
 - name: Run Averlon Remediation Agent for IaC Misconfigurations
   id: scan
-  uses: averlon-ai/actions/iac-misconfig-analysis@v1.0.11
+  uses: averlon-ai/actions/iac-misconfig-analysis@v2.0.1
   # ... inputs
 
 - name: Use output
@@ -297,7 +301,7 @@ Enable debug logging for troubleshooting:
 
 ```yaml
 - name: Run Averlon Remediation Agent for IaC Misconfigurations
-  uses: averlon-ai/actions/iac-misconfig-analysis@v1.0.11
+  uses: averlon-ai/actions/iac-misconfig-analysis@v2.0.1
   env:
     ACTIONS_STEP_DEBUG: true
   with:

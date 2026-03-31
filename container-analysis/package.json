@@ -1,7 +1,7 @@
 {
   "name": "@averlon/container-analysis-action",
   "version": "1.0.0",
-  "description": "Averlon Vulnerability Remediation Agent for Containers GitHub Action",
+  "description": "Averlon Container Analysis GitHub Action",
   "main": "src/main.ts",
   "scripts": {
     "test": "bun test",
@@ -15,8 +15,7 @@
     "@actions/github": "^7.0.0",
     "fast-glob": "^3.3.2",
     "@averlon/shared": "workspace:*",
-    "@averlon/github-actions-utils": "workspace:*",
-    "@averlon/github-copilot-utils": "workspace:*"
+    "@averlon/github-actions-utils": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "latest"

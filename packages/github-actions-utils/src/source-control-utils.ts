@@ -8,6 +8,7 @@ import type { ApiClient } from '@averlon/shared';
 import {
   SourceControlStatus,
   SourceControlIssueType,
+  RiskStatus,
   type RegisterSourceControlIssueRequest,
   type GetSourceControlIssueResponse,
 } from '@averlon/shared';
@@ -41,6 +42,7 @@ export interface FindSourceControlIssueParams {
   orgName: string;
   repo: string;
   issueNumber: number;
+  cloudId?: string;
 }
 
 /**
@@ -50,13 +52,19 @@ export interface FindSourceControlIssueParams {
 export async function findSourceControlIssue(
   params: FindSourceControlIssueParams
 ): Promise<GetSourceControlIssueResponse | null> {
-  const { apiClient, orgName, repo, issueNumber } = params;
+  const { apiClient, orgName, repo, issueNumber, cloudId } = params;
   const { repoUrl } = getRepoAndOrgUrls(orgName, repo);
+
+  if (!cloudId) {
+    core.debug('CloudID required for getSourceControlIssue; skipping');
+    return null;
+  }
 
   try {
     const request = {
       RepoURL: repoUrl,
       IssueNumber: issueNumber,
+      CloudID: cloudId,
     };
 
     const findResponse = await apiClient.getSourceControlIssue(request);
@@ -87,11 +95,14 @@ export interface CreateOrUpdateIssueParams {
   orgName: string;
   repo: string;
   issueNumber: number;
+  issueTitle: string; // Required - GitHub issue/PR title for backend registration
   issueUrl?: string; // Optional - will be constructed from orgName/repo/issueNumber if not provided
   riskSummary: string;
+  riskStatus?: RiskStatus;
   type: SourceControlIssueType;
   labels?: string[];
   issueIDs?: number[];
+  cloudId?: string;
 }
 
 /**
@@ -100,12 +111,32 @@ export interface CreateOrUpdateIssueParams {
  * Constructs issueUrl from orgName/repo/issueNumber if not provided.
  */
 export async function createOrUpdateIssue(params: CreateOrUpdateIssueParams): Promise<boolean> {
-  const { apiClient, orgName, repo, issueNumber, issueUrl, riskSummary, type, labels, issueIDs } =
-    params;
+  const {
+    apiClient,
+    orgName,
+    repo,
+    issueNumber,
+    issueTitle,
+    issueUrl,
+    riskSummary,
+    riskStatus,
+    type,
+    labels,
+    issueIDs,
+    cloudId,
+  } = params;
 
   if (!apiClient) {
     return false;
   }
+
+  if (!cloudId) {
+    core.debug('CloudID required for registerSourceControlIssue; skipping');
+    return false;
+  }
+
+  // Use fallback when title is missing; backend requires non-empty IssueTitle
+  const trimmedTitle = (issueTitle?.trim() ?? '') || `Issue #${issueNumber}`;
 
   // Construct issueUrl if not provided
   const finalIssueUrl =
@@ -129,9 +160,12 @@ export async function createOrUpdateIssue(params: CreateOrUpdateIssueParams): Pr
       RepoURL: repoUrl,
       IssueNumber: issueNumber,
       IssueURL: finalIssueUrl,
+      IssueTitle: trimmedTitle,
       RiskSummary: riskSummary,
+      RiskStatus: riskStatus ?? RiskStatus.None,
       Status: SourceControlStatus.Open,
       Type: type,
+      CloudID: cloudId,
     };
 
     if (labels && labels.length > 0) {
@@ -164,6 +198,7 @@ export interface CreatePRForIssueParams {
   repo: string;
   issueNumber: number;
   linkedPRs: LinkedPR[];
+  cloudId?: string;
 }
 
 /**
@@ -171,7 +206,7 @@ export interface CreatePRForIssueParams {
  * Returns true if successful, false otherwise. Handles apiClient check internally.
  */
 export async function createPRForIssue(params: CreatePRForIssueParams): Promise<boolean> {
-  const { apiClient, orgName, repo, issueNumber, linkedPRs } = params;
+  const { apiClient, orgName, repo, issueNumber, linkedPRs, cloudId } = params;
 
   if (!apiClient) {
     return false;
@@ -185,12 +220,18 @@ export async function createPRForIssue(params: CreatePRForIssueParams): Promise<
   try {
     const { repoUrl } = getRepoAndOrgUrls(orgName, repo);
 
+    if (!cloudId) {
+      core.debug('CloudID required for PR registration; skipping');
+      return false;
+    }
+
     // Get issue to obtain IssueID
     const findResponse = await findSourceControlIssue({
       apiClient,
       orgName,
       repo,
       issueNumber,
+      cloudId,
     });
 
     // Extract issue ID (handles both response structures)
@@ -228,6 +269,7 @@ export async function createPRForIssue(params: CreatePRForIssueParams): Promise<
           PullRequestURL: prUrl,
           Status: prStatus,
           Author: pr.author,
+          CloudID: cloudId,
         });
         core.info(
           `✓ Registered PR #${pr.number} for issue #${issueNumber} with status ${SourceControlStatus[prStatus]}`
@@ -258,6 +300,7 @@ export interface UpdateIssueStatusParams {
   repo: string;
   issueNumber: number;
   status: SourceControlStatus;
+  cloudId?: string;
 }
 
 /**
@@ -266,9 +309,14 @@ export interface UpdateIssueStatusParams {
  * Returns true if successful, false otherwise. Handles apiClient check internally.
  */
 export async function updateIssueStatus(params: UpdateIssueStatusParams): Promise<boolean> {
-  const { apiClient, orgName, repo, issueNumber, status } = params;
+  const { apiClient, orgName, repo, issueNumber, status, cloudId } = params;
 
   if (!apiClient) {
+    return false;
+  }
+
+  if (!cloudId) {
+    core.debug('CloudID required for updateIssueStatus; skipping');
     return false;
   }
 
@@ -283,6 +331,7 @@ export async function updateIssueStatus(params: UpdateIssueStatusParams): Promis
       orgName,
       repo,
       issueNumber,
+      cloudId,
     });
 
     // Extract issue ID (handles both response structures)
@@ -301,6 +350,7 @@ export async function updateIssueStatus(params: UpdateIssueStatusParams): Promis
       IssueID: issueID,
       RepoURL: repoUrl,
       Status: status,
+      CloudID: cloudId,
     });
 
     core.info(`✓ Updated issue #${issueNumber} status to ${statusName} in backend`);
@@ -322,6 +372,7 @@ export interface UpdatePRStatusParams {
   issueNumber: number;
   pullRequestNumber: number;
   status: SourceControlStatus;
+  cloudId?: string;
 }
 
 /**
@@ -329,7 +380,7 @@ export interface UpdatePRStatusParams {
  * Returns true if successful, false otherwise. Handles apiClient check internally.
  */
 export async function updatePRStatus(params: UpdatePRStatusParams): Promise<boolean> {
-  const { apiClient, orgName, repo, issueNumber, pullRequestNumber, status } = params;
+  const { apiClient, orgName, repo, issueNumber, pullRequestNumber, status, cloudId } = params;
 
   if (!apiClient) {
     return false;
@@ -343,12 +394,18 @@ export async function updatePRStatus(params: UpdatePRStatusParams): Promise<bool
       `Updating PR #${pullRequestNumber} status to ${statusName} in backend (for issue #${issueNumber})...`
     );
 
+    if (!cloudId) {
+      core.debug('CloudID required for updatePRStatus; skipping');
+      return false;
+    }
+
     // Get the issue to get the IssueID
     const findResponse = await findSourceControlIssue({
       apiClient,
       orgName,
       repo,
       issueNumber,
+      cloudId,
     });
 
     // Extract issue ID (handles both response structures)
@@ -388,6 +445,7 @@ export interface CloseIssueParams {
   type: SourceControlIssueType;
   findPRsLinkedToIssue: (issueNumber: number) => Promise<LinkedPR[]>;
   logMessage?: string; // Optional custom log message
+  cloudId?: string;
 }
 
 /**
@@ -405,6 +463,7 @@ export async function closeIssue(params: CloseIssueParams): Promise<void> {
     type,
     findPRsLinkedToIssue,
     logMessage,
+    cloudId,
   } = params;
 
   // Add comment and close issue on GitHub
@@ -427,34 +486,32 @@ export async function closeIssue(params: CloseIssueParams): Promise<void> {
     core.info(`Closed issue #${issueNumber}`);
   }
 
-  // Get issue details and ensure it exists in backend
+  // Backend sync requires CloudID; skip when not provided
+  if (!cloudId || !apiClient) {
+    core.debug('CloudID and apiClient required for backend sync; skipping');
+    return;
+  }
+
   const { data: issue } = await octokit.rest.issues.get({
     owner,
     repo,
     issue_number: issueNumber,
   });
 
-  // Create/update issue in backend if it doesn't exist
-  const createParams: {
-    apiClient?: ApiClient;
-    orgName: string;
-    repo: string;
-    issueNumber: number;
-    issueUrl: string;
-    riskSummary: string;
-    type: SourceControlIssueType;
-    labels?: string[];
-  } = {
+  // Use fallback when title is missing; backend requires non-empty IssueTitle
+  const issueTitle = (issue.title?.trim() ?? '') || `Issue #${issueNumber}`;
+
+  const createParams: CreateOrUpdateIssueParams = {
+    apiClient,
     orgName: owner,
     repo,
     issueNumber,
+    issueTitle,
     issueUrl: issue.html_url,
     riskSummary: issue.body || '',
     type,
+    cloudId,
   };
-  if (apiClient) {
-    createParams.apiClient = apiClient;
-  }
   const labels = issue.labels
     ?.map((l: { name?: string } | string) => (typeof l === 'string' ? l : l.name || ''))
     .filter(Boolean) as string[];
@@ -463,43 +520,26 @@ export async function closeIssue(params: CloseIssueParams): Promise<void> {
   }
   await createOrUpdateIssue(createParams);
 
-  // Update issue status in backend
-  const updateParams: {
-    apiClient?: ApiClient;
-    orgName: string;
-    repo: string;
-    issueNumber: number;
-    status: SourceControlStatus;
-  } = {
+  const updateParams: UpdateIssueStatusParams = {
+    apiClient,
     orgName: owner,
     repo,
     issueNumber,
     status: SourceControlStatus.Closed,
+    cloudId,
   };
-  if (apiClient) {
-    updateParams.apiClient = apiClient;
-  }
   await updateIssueStatus(updateParams);
 
-  // Find and register PRs for this issue
   const linkedPRs = await findPRsLinkedToIssue(issueNumber);
   if (linkedPRs.length > 0) {
-    const prParams: {
-      apiClient?: ApiClient;
-      orgName: string;
-      repo: string;
-      issueNumber: number;
-      linkedPRs: LinkedPR[];
-    } = {
+    await createPRForIssue({
+      apiClient,
       orgName: owner,
       repo,
       issueNumber,
       linkedPRs,
-    };
-    if (apiClient) {
-      prParams.apiClient = apiClient;
-    }
-    await createPRForIssue(prParams);
+      cloudId,
+    });
   }
 }
 
