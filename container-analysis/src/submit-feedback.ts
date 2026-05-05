@@ -1,5 +1,13 @@
 import * as core from '@actions/core';
-import { createApiClient, CodeDefectStatus } from '@averlon/shared';
+import {
+  createApiClient,
+  CodeDefectStatus,
+  RiskStatus,
+  SourceControlIssueType,
+} from '@averlon/shared';
+import { createOrUpdateIssue } from '@averlon/github-actions-utils';
+
+const AVERLON_CONTAINER_LABEL = 'averlon-container-analysis';
 
 interface AgentFeedbackEntry {
   CodeDefectID: string;
@@ -9,24 +17,45 @@ interface AgentFeedbackEntry {
 
 interface StructuredOutput {
   feedback: AgentFeedbackEntry[];
+  pr_number?: number;
+  pr_url?: string;
 }
 
-function parseFeedbackFromOutput(output: string): AgentFeedbackEntry[] {
-  if (!output) return [];
+export interface ParsedStructuredOutput {
+  entries: AgentFeedbackEntry[];
+  pr_number?: number;
+  pr_url?: string;
+}
 
+export function parseStructuredAgentOutput(output: string): ParsedStructuredOutput {
+  if (!output) {
+    return { entries: [] };
+  }
   try {
-    const parsed: StructuredOutput = JSON.parse(output);
+    const parsed = JSON.parse(output) as StructuredOutput;
     if (!parsed.feedback || !Array.isArray(parsed.feedback)) {
       core.warning('Structured output missing "feedback" array');
-      return [];
+      return { entries: [] };
     }
-    return parsed.feedback.filter(e => e.CodeDefectID && typeof e.Status === 'number');
+    const entries = parsed.feedback.filter(e => e.CodeDefectID && typeof e.Status === 'number');
+    const out: ParsedStructuredOutput = { entries };
+    if (typeof parsed.pr_number === 'number') {
+      out.pr_number = parsed.pr_number;
+    }
+    if (typeof parsed.pr_url === 'string') {
+      out.pr_url = parsed.pr_url;
+    }
+    return out;
   } catch (err) {
     core.warning(
       `Failed to parse structured output: ${err instanceof Error ? err.message : String(err)}`
     );
-    return [];
+    return { entries: [] };
   }
+}
+
+function parseFeedbackFromOutput(output: string): AgentFeedbackEntry[] {
+  return parseStructuredAgentOutput(output).entries;
 }
 
 async function main(): Promise<void> {
@@ -50,7 +79,11 @@ async function main(): Promise<void> {
         .filter(Boolean)
     : [];
 
-  const entries = parseFeedbackFromOutput(codingAgentOutput);
+  const {
+    entries,
+    pr_number: prNumber,
+    pr_url: prUrl,
+  } = parseStructuredAgentOutput(codingAgentOutput);
   core.info(`Found ${entries.length} feedback entries from Claude output`);
 
   const apiClient = createApiClient({ apiKey, apiSecret, baseUrl });
@@ -114,6 +147,35 @@ async function main(): Promise<void> {
   }
 
   core.info(`Feedback submission complete: ${succeeded} succeeded, ${failed} failed`);
+
+  const cloudId = process.env['AVERLON_CLOUD_ID'] || '';
+  const githubRepository = process.env['GITHUB_REPOSITORY'] || '';
+  const repoMatch = /^([^/]+)\/([^/]+)$/.exec(githubRepository.trim());
+  const owner = repoMatch?.[1] ?? '';
+  const repo = repoMatch?.[2] ?? '';
+
+  if (cloudId && prNumber && prUrl && owner && repo) {
+    try {
+      const apiClientForSC = createApiClient({ apiKey, apiSecret, baseUrl });
+      await createOrUpdateIssue({
+        apiClient: apiClientForSC,
+        orgName: owner,
+        repo,
+        issueNumber: prNumber,
+        issueTitle: `Container Remediation - PR #${prNumber}`,
+        issueUrl: prUrl,
+        riskStatus: RiskStatus.None,
+        riskSummary: '',
+        type: SourceControlIssueType.Container,
+        labels: [AVERLON_CONTAINER_LABEL],
+        cloudId,
+      });
+      core.info(`Registered PR #${prNumber} with Averlon source control`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      core.warning(`Failed to register PR #${prNumber} with source control: ${msg}`);
+    }
+  }
 }
 
 async function run(): Promise<void> {

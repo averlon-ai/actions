@@ -9,7 +9,6 @@ import {
   AnalyzeTerraformRequest,
   JobStatusNotification,
   AnalyzeTerraformResult,
-  TerraformResource,
   getCallerInfo,
 } from '@averlon/shared';
 import { getInputSafe, parseBoolean } from '@averlon/github-actions-utils';
@@ -414,7 +413,7 @@ async function _uploadTerraformFiles(
 async function _runTerraformScan(
   inputs: ActionInputs,
   apiClient: ReturnType<typeof createApiClient>
-): Promise<string> {
+): Promise<{ result: string; cloudId: string | undefined }> {
   // Start the scan by submitting the comparison job to the API
   core.info('Initiating Terraform scan...');
   const scanRequest: AnalyzeTerraformRequest = {
@@ -516,11 +515,16 @@ async function _runTerraformScan(
           core.info('Scan result received and validated');
           const resultJson = JSON.stringify(scanResultObj);
           core.debug(`Scan result length: ${resultJson.length} chars`);
-          return resultJson;
+          return {
+            result: resultJson,
+            cloudId:
+              resultResponse.ReachabilityAnalysis?.CloudID ??
+              resultResponse.AccessAnalysis?.CloudID,
+          };
         } else {
           // Unusual: scan succeeded but no result data
           core.warning('Scan completed but no result data was returned');
-          return '';
+          return { result: '', cloudId: undefined };
         }
       } else if (resultResponse.Status === 'Failed') {
         // FAILURE: Scan encountered an error and will not retry
@@ -602,31 +606,6 @@ async function _runTerraformScan(
       `Backoff multiplier: ${oldMultiplier.toFixed(2)}x → ${backoffMultiplier.toFixed(2)}x (attempt ${attempts})`
     );
   }
-}
-
-function extractCloudIdFromScanResult(scanResult: string): string | undefined {
-  try {
-    const parsed = JSON.parse(scanResult) as {
-      ReachabilityAnalysis?: {
-        AddedResources?: TerraformResource[];
-        RemovedResources?: TerraformResource[];
-        ModifiedResources?: TerraformResource[];
-      };
-      AccessAnalysis?: { Resources?: TerraformResource[] };
-    };
-    const allResources: TerraformResource[] = [
-      ...(parsed.ReachabilityAnalysis?.AddedResources ?? []),
-      ...(parsed.ReachabilityAnalysis?.RemovedResources ?? []),
-      ...(parsed.ReachabilityAnalysis?.ModifiedResources ?? []),
-      ...(parsed.AccessAnalysis?.Resources ?? []),
-    ];
-    for (const resource of allResources) {
-      if (resource.Asset?.CloudID) return resource.Asset.CloudID;
-    }
-  } catch {
-    // Ignore parse errors
-  }
-  return undefined;
 }
 
 /**
@@ -758,7 +737,7 @@ async function run(): Promise<void> {
 
     // === Step 4: Scan Execution ===
     core.debug('Step 4: Running Terraform scan');
-    const scanResult = await _runTerraformScan(inputs, apiClient);
+    const { result: scanResult, cloudId } = await _runTerraformScan(inputs, apiClient);
 
     // === Step 5: Output Results ===
     core.debug('Step 5: Setting action outputs');
@@ -813,7 +792,7 @@ async function run(): Promise<void> {
           prUrl,
           prTitle: pr.title,
           scanResult,
-          cloudId: extractCloudIdFromScanResult(scanResult),
+          cloudId,
         });
       } catch (sourceControlError) {
         const msg =

@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, spyOn, mock } from 'bun:test';
 
+import {
+  mockCreateOrUpdateIssue,
+  mockCreatePRForIssue,
+} from '@averlon/github-actions-utils/test/github-actions-utils-bun-mock';
+
 // Create mock functions for @actions/core
 const mockInfo = mock(() => {});
 const mockWarning = mock(() => {});
@@ -667,6 +672,114 @@ describe('GithubIssuesService', () => {
 
       // Should not try to close issue #2 since it doesn't match the pattern
       expect(mockCreateComment).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('backend source-control registration via createBatchedIssues', () => {
+    let issuesServiceWithBackend: GithubIssuesService;
+    let mockFindPRsLinkedToIssue: ReturnType<typeof mock>;
+
+    beforeEach(() => {
+      mockCreateOrUpdateIssue.mockClear();
+      mockCreatePRForIssue.mockClear();
+      mockFindPRsLinkedToIssue = mock(() => Promise.resolve([]));
+
+      issuesServiceWithBackend = new GithubIssuesService(
+        mockOctokit as unknown as any,
+        'test-owner',
+        'test-repo',
+        {} as any,
+        'test-cloud-id'
+      );
+      (issuesServiceWithBackend as any).assignCopilot = mock(() => Promise.resolve());
+      (issuesServiceWithBackend as any).findPRsLinkedToIssue = mockFindPRsLinkedToIssue;
+    });
+
+    it('calls createOrUpdateIssue for each GitHub issue created', async () => {
+      const resources = [createMockResource('r1', 'aws_s3_bucket', 'b1', ['iss-1'])];
+      mockListForRepo.mockResolvedValueOnce({ data: [] } as any);
+
+      await issuesServiceWithBackend.createBatchedIssues(resources, 'test-repo', 'abc123', false);
+
+      expect(mockCreateOrUpdateIssue).toHaveBeenCalledTimes(1);
+      expect(mockCreateOrUpdateIssue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          issueNumber: 1,
+          orgName: 'test-owner',
+          repo: 'test-repo',
+          cloudId: 'test-cloud-id',
+        })
+      );
+    });
+
+    it('skips backend registration when apiClient is absent', async () => {
+      const noBackendService = new GithubIssuesService(
+        mockOctokit as unknown as any,
+        'test-owner',
+        'test-repo'
+      );
+      (noBackendService as any).assignCopilot = mock(() => Promise.resolve());
+
+      const resources = [createMockResource('r1', 'aws_s3_bucket', 'b1', ['iss-1'])];
+      mockListForRepo.mockResolvedValueOnce({ data: [] } as any);
+
+      await noBackendService.createBatchedIssues(resources, 'test-repo', 'abc123', false);
+
+      expect(mockCreateOrUpdateIssue).not.toHaveBeenCalled();
+      expect(mockCreatePRForIssue).not.toHaveBeenCalled();
+    });
+
+    it('scenario 1: does not register PR when no PRs are linked at scan time', async () => {
+      mockFindPRsLinkedToIssue.mockResolvedValue([]);
+      const resources = [createMockResource('r1', 'aws_s3_bucket', 'b1', ['iss-1'])];
+      mockListForRepo.mockResolvedValueOnce({ data: [] } as any);
+
+      await issuesServiceWithBackend.createBatchedIssues(resources, 'test-repo', 'abc123', false);
+
+      expect(mockCreateOrUpdateIssue).toHaveBeenCalledTimes(1);
+      expect(mockCreatePRForIssue).not.toHaveBeenCalled();
+    });
+
+    it('scenario 2: registers PR immediately when Copilot PR is already linked', async () => {
+      mockFindPRsLinkedToIssue.mockResolvedValue([
+        { number: 42, author: 'github-copilot[bot]', state: 'OPEN' },
+      ]);
+      const resources = [createMockResource('r1', 'aws_s3_bucket', 'b1', ['iss-1'])];
+      mockListForRepo.mockResolvedValueOnce({ data: [] } as any);
+
+      await issuesServiceWithBackend.createBatchedIssues(resources, 'test-repo', 'abc123', false);
+
+      expect(mockCreateOrUpdateIssue).toHaveBeenCalledTimes(1);
+      expect(mockCreatePRForIssue).toHaveBeenCalledTimes(1);
+      expect(mockCreatePRForIssue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          issueNumber: 1,
+          orgName: 'test-owner',
+          repo: 'test-repo',
+          cloudId: 'test-cloud-id',
+          linkedPRs: [{ number: 42, author: 'github-copilot[bot]', state: 'OPEN' }],
+        })
+      );
+    });
+
+    it('registers backend issue and PR for each batch when multiple batches created', async () => {
+      mockFindPRsLinkedToIssue.mockResolvedValue([
+        { number: 10, author: 'github-copilot[bot]', state: 'OPEN' },
+      ]);
+      const resources: TerraformResource[] = [];
+      for (let i = 1; i <= 25; i++) {
+        resources.push(createMockResource(`r${i}`, 'aws_s3_bucket', `b${i}`, [`iss-${i}`]));
+      }
+      mockListForRepo.mockResolvedValueOnce({ data: [] } as any);
+      mockCreateIssue
+        .mockResolvedValueOnce({ data: { number: 1, title: 'Batch 1', body: '' } } as any)
+        .mockResolvedValueOnce({ data: { number: 2, title: 'Batch 2', body: '' } } as any)
+        .mockResolvedValueOnce({ data: { number: 3, title: 'Batch 3', body: '' } } as any);
+
+      await issuesServiceWithBackend.createBatchedIssues(resources, 'test-repo', 'abc123', false);
+
+      expect(mockCreateOrUpdateIssue).toHaveBeenCalledTimes(3);
+      expect(mockCreatePRForIssue).toHaveBeenCalledTimes(3);
     });
   });
 

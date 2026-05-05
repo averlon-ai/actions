@@ -38,6 +38,8 @@ export const FEEDBACK_JSON_SCHEMA = JSON.stringify({
         required: ['CodeDefectID', 'Status', 'Feedback'],
       },
     },
+    pr_number: { type: 'integer' },
+    pr_url: { type: 'string' },
   },
   required: ['feedback'],
 });

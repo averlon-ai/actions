@@ -432,6 +432,7 @@ export interface TerraformReachabilityAnalysis {
   RemovedResources?: TerraformResource[];
   ModifiedResources?: TerraformResource[];
   Summary?: TerraformReachabilityAnalysisSummary;
+  CloudID?: string;
 }
 
 // TerraformReachabilityAnalysisSummary matches the proto definition
@@ -448,6 +449,7 @@ export interface TerraformAccessAnalysis {
   AccessPermissions?: TerraformAccessPermission[];
   Resources?: TerraformResource[];
   Summary?: TerraformAccessAnalysisSummary;
+  CloudID?: string;
 }
 
 // TerraformAccessPermission represents permission changes
