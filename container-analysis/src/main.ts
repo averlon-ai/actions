@@ -71,6 +71,8 @@ The package data includes CodeDefects with IDs. Your structured output must incl
 
 There are ${codeDefects.length} CodeDefect IDs to report on. Every one MUST appear in the output.
 
+If you created a PR, also include "pr_number" (integer) and "pr_url" (string) in the structured output.
+
 IMPORTANT: The structured JSON output MUST be the very last thing you produce.
 Do NOT output any additional text, summary, or commentary after emitting the structured JSON.
 Once you emit the JSON, stop immediately.
@@ -160,6 +162,7 @@ async function main(): Promise<void> {
   core.setOutput('prompt', prompt);
   core.setOutput('json-schema', FEEDBACK_JSON_SCHEMA);
   core.setOutput('allowed-tools', allowedTools);
+  core.setOutput('cloud-id', actionable.CloudID ?? '');
 
   core.debug(
     `Outputs set: has-recommendations=true, prompt length=${prompt.length}, code defect IDs=${codeDefectIds.length}`

@@ -3,8 +3,8 @@ import * as github from '@actions/github';
 import { CopilotIssueManager } from '@averlon/github-copilot-utils';
 import {
   AVERLON_CREATED_LABEL,
-  closeIssue,
   createOrUpdateIssue,
+  createPRForIssue,
 } from '@averlon/github-actions-utils';
 import type { TerraformResource, ApiClient } from '@averlon/shared';
 import { SourceControlIssueType } from '@averlon/shared';
@@ -248,28 +248,21 @@ export class GithubIssuesService extends CopilotIssueManager {
           issueIDs: relatedIssueIDs,
           cloudId: this.cloudId,
         });
+        const linkedPRs = await this.findPRsLinkedToIssue(issueNumber);
+        if (linkedPRs.length > 0) {
+          await createPRForIssue({
+            apiClient: this.apiClient,
+            orgName: this.owner,
+            repo: this.repo,
+            issueNumber,
+            linkedPRs,
+            cloudId: this.cloudId,
+          });
+        }
       }
       await this.assignCopilot(issueNumber, assignCopilot);
     }
 
     core.info(`✓ GitHub issues created/updated: #${issueNumbers.join(', #')}`);
-  }
-
-  /**
-   * Close an issue with a comment
-   */
-  private async closeIssue(issueNumber: number, options: { message: string }): Promise<void> {
-    await closeIssue({
-      octokit: this.octokit,
-      owner: this.owner,
-      repo: this.repo,
-      issueNumber,
-      message: options.message,
-      apiClient: this.apiClient,
-      type: SourceControlIssueType.IaC,
-      findPRsLinkedToIssue: (num: number) => this.findPRsLinkedToIssue(num),
-      logMessage: `Closed Terraform scan issue #${issueNumber}`,
-      cloudId: this.cloudId,
-    });
   }
 }

@@ -10,7 +10,7 @@
   ],
   "scripts": {
     "prepare": "husky",
-    "test": "bun test",
+    "test": "bash scripts/run-tests.sh",
     "build": "bash scripts/build-all-actions.sh",
     "build:iac-risk-analysis": "bash scripts/build-action.sh iac-risk-analysis",
     "build:container-analysis": "bash scripts/build-action.sh container-analysis",

@@ -169,4 +169,96 @@ describe('registerPrWithSourceControl', () => {
       })
     );
   });
+
+  it('should return false and not call createOrUpdateIssue when scan was skipped', async () => {
+    const scanResult = JSON.stringify({ skipped: true });
+
+    const result = await registerPrWithSourceControl({
+      apiClient: {} as any,
+      owner: 'org',
+      repo: 'repo',
+      prNumber: 1,
+      prUrl: 'https://github.com/org/repo/pull/1',
+      scanResult,
+      cloudId: 'cloud-1',
+    });
+
+    expect(result).toBe(false);
+    expect(createOrUpdateIssueSpy).not.toHaveBeenCalled();
+  });
+
+  it('should use prTitle when provided', async () => {
+    await registerPrWithSourceControl({
+      apiClient: {} as any,
+      owner: 'org',
+      repo: 'repo',
+      prNumber: 5,
+      prUrl: 'https://github.com/org/repo/pull/5',
+      prTitle: 'Fix: reduce egress exposure',
+      cloudId: 'cloud-1',
+    });
+
+    expect(createOrUpdateIssueSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ issueTitle: 'Fix: reduce egress exposure' })
+    );
+  });
+
+  it('should default issueTitle to "Infrastructure Risk Analysis - PR #N" when prTitle absent', async () => {
+    await registerPrWithSourceControl({
+      apiClient: {} as any,
+      owner: 'org',
+      repo: 'repo',
+      prNumber: 7,
+      prUrl: 'https://github.com/org/repo/pull/7',
+      cloudId: 'cloud-1',
+    });
+
+    expect(createOrUpdateIssueSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ issueTitle: 'Infrastructure Risk Analysis - PR #7' })
+    );
+  });
+
+  it('should use riskSummaryOverride when provided, ignoring derived summary', async () => {
+    const scanResult = JSON.stringify({
+      ReachabilityAnalysis: {
+        Summary: { NewInternetExposures: ['r1'], NewInternetEgressExposures: [] },
+      },
+    });
+
+    await registerPrWithSourceControl({
+      apiClient: {} as any,
+      owner: 'org',
+      repo: 'repo',
+      prNumber: 2,
+      prUrl: 'https://github.com/org/repo/pull/2',
+      scanResult,
+      riskSummary: 'Custom summary',
+      cloudId: 'cloud-1',
+    });
+
+    expect(createOrUpdateIssueSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ riskSummary: 'Custom summary' })
+    );
+  });
+
+  it('should register as InfrastructureRisk type with PR URL as issueUrl', async () => {
+    const { SourceControlIssueType } = await import('@averlon/shared');
+
+    await registerPrWithSourceControl({
+      apiClient: {} as any,
+      owner: 'org',
+      repo: 'repo',
+      prNumber: 3,
+      prUrl: 'https://github.com/org/repo/pull/3',
+      cloudId: 'cloud-1',
+    });
+
+    expect(createOrUpdateIssueSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: SourceControlIssueType.InfrastructureRisk,
+        issueUrl: 'https://github.com/org/repo/pull/3',
+        issueNumber: 3,
+      })
+    );
+  });
 });

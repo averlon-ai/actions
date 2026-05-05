@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { parseFeedbackFromOutput } from '../submit-feedback';
+import { parseFeedbackFromOutput, parseStructuredAgentOutput } from '../submit-feedback';
 import {
   mockClaudeOutputValid,
   mockClaudeOutputMidText,
@@ -44,7 +44,7 @@ describe('parseFeedbackFromOutput', () => {
     const result = parseFeedbackFromOutput(mockClaudeOutputMissingFields);
     // Only the first entry has both CodeDefectID and Status
     expect(result).toHaveLength(1);
-    expect(result[0].CodeDefectID).toBe('cd-001');
+    expect(result[0]?.CodeDefectID).toBe('cd-001');
   });
 
   it('returns empty array when feedback key is missing from JSON', () => {
@@ -57,5 +57,41 @@ describe('parseFeedbackFromOutput', () => {
     const output = JSON.stringify({ feedback: 'not-an-array' });
     const result = parseFeedbackFromOutput(output);
     expect(result).toEqual([]);
+  });
+
+  it('parses feedback entries when optional pr fields are present', () => {
+    const output = JSON.stringify({
+      feedback: [{ CodeDefectID: 'cd-001', Status: 3, Feedback: '' }],
+      pr_number: 42,
+      pr_url: 'https://github.com/o/r/pull/42',
+    });
+    expect(parseFeedbackFromOutput(output)).toHaveLength(1);
+  });
+});
+
+describe('parseStructuredAgentOutput', () => {
+  it('returns entries and PR metadata in one parse', () => {
+    const parsed = parseStructuredAgentOutput(
+      JSON.stringify({
+        feedback: [{ CodeDefectID: 'a', Status: 3, Feedback: '' }],
+        pr_number: 12,
+        pr_url: 'https://github.com/o/r/pull/12',
+      })
+    );
+    expect(parsed.entries).toHaveLength(1);
+    expect(parsed.pr_number).toBe(12);
+    expect(parsed.pr_url).toBe('https://github.com/o/r/pull/12');
+  });
+
+  it('ignores pr_number and pr_url when not the expected types', () => {
+    const parsed = parseStructuredAgentOutput(
+      JSON.stringify({
+        feedback: [{ CodeDefectID: 'a', Status: 3, Feedback: '' }],
+        pr_number: '12',
+        pr_url: 123,
+      })
+    );
+    expect(parsed.pr_number).toBeUndefined();
+    expect(parsed.pr_url).toBeUndefined();
   });
 });

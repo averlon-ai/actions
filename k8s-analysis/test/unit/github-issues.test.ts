@@ -1,4 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, spyOn, mock } from 'bun:test';
+
+import {
+  mockCreateOrUpdateIssue,
+  mockCreatePRForIssue,
+} from '@averlon/github-actions-utils/test/github-actions-utils-bun-mock';
+
 import * as core from '@actions/core';
 import * as github from '@actions/github';
 import { GithubIssuesService } from '../../src/github-issues';
@@ -652,6 +658,126 @@ describe('GithubIssuesService', () => {
       const bodies = mockCreateIssue.mock.calls.map(c => c[0].body as string);
       expect(bodies.some(b => b.includes(workflowRunUrl))).toBe(true);
       expect(bodies.some(b => b.includes(artifactsUrl))).toBe(true);
+    });
+  });
+
+  describe('backend source-control registration via createResourceListIssue', () => {
+    let issuesServiceWithBackend: GithubIssuesService;
+    let mockFindPRsLinkedToIssue: ReturnType<typeof mock>;
+
+    const resourceWithIssue: ParsedResource[] = [
+      {
+        kind: 'Deployment',
+        name: 'test-deployment',
+        namespace: 'default',
+        apiVersion: 'apps/v1',
+        labels: {},
+        annotations: {},
+        rawYaml: '',
+        issues: [{ id: 'issue-helm-1', title: 'Test finding' }],
+      },
+    ];
+
+    beforeEach(() => {
+      mockCreateOrUpdateIssue.mockClear();
+      mockCreatePRForIssue.mockClear();
+      mockFindPRsLinkedToIssue = mock(() => Promise.resolve([]));
+
+      issuesServiceWithBackend = new GithubIssuesService(
+        mockOctokit,
+        'test-owner',
+        'test-repo',
+        {} as any,
+        'test-cloud-id'
+      );
+      (issuesServiceWithBackend as any).assignCopilot = mock(() => Promise.resolve());
+      (issuesServiceWithBackend as any).findPRsLinkedToIssue = mockFindPRsLinkedToIssue;
+    });
+
+    it('calls createOrUpdateIssue for each GitHub issue created', async () => {
+      mockListForRepo.mockResolvedValueOnce({ data: [] } as any);
+
+      await issuesServiceWithBackend.createResourceListIssue({
+        chartName: 'test-chart',
+        releaseName: 'test-release',
+        namespace: 'default',
+        resources: resourceWithIssue,
+        assignCopilot: false,
+      });
+
+      expect(mockCreateOrUpdateIssue).toHaveBeenCalledTimes(1);
+      expect(mockCreateOrUpdateIssue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          issueNumber: 1,
+          orgName: 'test-owner',
+          repo: 'test-repo',
+          cloudId: 'test-cloud-id',
+        })
+      );
+    });
+
+    it('calls createOrUpdateIssue with undefined apiClient/cloudId when not configured', async () => {
+      const noBackendService = new GithubIssuesService(mockOctokit, 'test-owner', 'test-repo');
+      (noBackendService as any).assignCopilot = mock(() => Promise.resolve());
+      (noBackendService as any).findPRsLinkedToIssue = mock(() => Promise.resolve([]));
+
+      mockListForRepo.mockResolvedValueOnce({ data: [] } as any);
+
+      await noBackendService.createResourceListIssue({
+        chartName: 'test-chart',
+        releaseName: 'test-release',
+        namespace: 'default',
+        resources: resourceWithIssue,
+        assignCopilot: false,
+      });
+
+      expect(mockCreateOrUpdateIssue).toHaveBeenCalledWith(
+        expect.objectContaining({ apiClient: undefined, cloudId: undefined })
+      );
+      expect(mockCreatePRForIssue).not.toHaveBeenCalled();
+    });
+
+    it('scenario 1: does not register PR when no PRs are linked at scan time', async () => {
+      mockFindPRsLinkedToIssue.mockResolvedValue([]);
+      mockListForRepo.mockResolvedValueOnce({ data: [] } as any);
+
+      await issuesServiceWithBackend.createResourceListIssue({
+        chartName: 'test-chart',
+        releaseName: 'test-release',
+        namespace: 'default',
+        resources: resourceWithIssue,
+        assignCopilot: false,
+      });
+
+      expect(mockCreateOrUpdateIssue).toHaveBeenCalledTimes(1);
+      expect(mockCreatePRForIssue).not.toHaveBeenCalled();
+    });
+
+    it('scenario 2: registers PR immediately when Copilot PR is already linked', async () => {
+      mockFindPRsLinkedToIssue.mockResolvedValue([
+        { number: 42, author: 'github-copilot[bot]', state: 'OPEN' },
+      ]);
+      mockListForRepo.mockResolvedValueOnce({ data: [] } as any);
+
+      await issuesServiceWithBackend.createResourceListIssue({
+        chartName: 'test-chart',
+        releaseName: 'test-release',
+        namespace: 'default',
+        resources: resourceWithIssue,
+        assignCopilot: false,
+      });
+
+      expect(mockCreateOrUpdateIssue).toHaveBeenCalledTimes(1);
+      expect(mockCreatePRForIssue).toHaveBeenCalledTimes(1);
+      expect(mockCreatePRForIssue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          issueNumber: 1,
+          orgName: 'test-owner',
+          repo: 'test-repo',
+          cloudId: 'test-cloud-id',
+          linkedPRs: [{ number: 42, author: 'github-copilot[bot]', state: 'OPEN' }],
+        })
+      );
     });
   });
 });

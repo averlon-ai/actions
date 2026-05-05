@@ -46,7 +46,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Run Averlon Container Analysis
-        uses: averlon-ai/actions/container-analysis@v2.0.1
+        uses: averlon-ai/actions/container-analysis@v2.0.2
         with:
           averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
           averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -77,7 +77,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Run Averlon Container Analysis
-        uses: averlon-ai/actions/container-analysis@v2.0.1
+        uses: averlon-ai/actions/container-analysis@v2.0.2
         with:
           averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
           averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -113,7 +113,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Run Averlon Container Analysis
-        uses: averlon-ai/actions/container-analysis@v2.0.1
+        uses: averlon-ai/actions/container-analysis@v2.0.2
         with:
           averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
           averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
