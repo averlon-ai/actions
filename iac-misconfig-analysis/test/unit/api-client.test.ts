@@ -119,7 +119,7 @@ describe('api-client.ts - Scan Terraform Methods', () => {
 
       expect(result).toEqual(mockJobResponse);
       expect(mockFetch).toHaveBeenCalledWith(
-        'https://test.example.com/pb.Queries/StartScanTerraform',
+        'https://test.example.com/pb.GitActions/StartScanTerraform',
         expect.objectContaining({
           method: 'POST',
           headers: expect.objectContaining({
@@ -177,7 +177,7 @@ describe('api-client.ts - Scan Terraform Methods', () => {
       } as any);
 
       await expect(client.startScanTerraform(scanRequest)).rejects.toThrow(
-        'API request to /pb.Queries/StartScanTerraform failed: API request failed: 400 Bad Request - Invalid request parameters'
+        'API request to /pb.GitActions/StartScanTerraform failed: API request failed: 400 Bad Request - Invalid request parameters'
       );
     });
 
@@ -190,7 +190,7 @@ describe('api-client.ts - Scan Terraform Methods', () => {
       mockFetch.mockRejectedValueOnce(new Error('Network error'));
 
       await expect(client.startScanTerraform(scanRequest)).rejects.toThrow(
-        'API request to /pb.Queries/StartScanTerraform failed: Network error'
+        'API request to /pb.GitActions/StartScanTerraform failed: Network error'
       );
     });
 
@@ -348,7 +348,7 @@ describe('api-client.ts - Scan Terraform Methods', () => {
       expect(result.Status).toBe('Succeeded');
       expect(result.Resources).toEqual(expectedResources);
       expect(mockFetch).toHaveBeenCalledWith(
-        'https://test.example.com/pb.Queries/GetScanTerraformResult',
+        'https://test.example.com/pb.GitActions/GetScanTerraformResult',
         expect.objectContaining({
           method: 'POST',
           headers: expect.objectContaining({
@@ -572,7 +572,7 @@ describe('api-client.ts - Scan Terraform Methods', () => {
       } as any);
 
       await expect(client.getScanTerraformResult(jobRequest)).rejects.toThrow(
-        'API request to /pb.Queries/GetScanTerraformResult failed: API request failed: 404 Not Found - Job not found'
+        'API request to /pb.GitActions/GetScanTerraformResult failed: API request failed: 404 Not Found - Job not found'
       );
     });
 
@@ -586,7 +586,7 @@ describe('api-client.ts - Scan Terraform Methods', () => {
       mockFetch.mockRejectedValueOnce(new Error('Connection timeout'));
 
       await expect(client.getScanTerraformResult(jobRequest)).rejects.toThrow(
-        'API request to /pb.Queries/GetScanTerraformResult failed: Connection timeout'
+        'API request to /pb.GitActions/GetScanTerraformResult failed: Connection timeout'
       );
     });
 

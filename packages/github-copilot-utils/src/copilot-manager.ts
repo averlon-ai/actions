@@ -1,5 +1,5 @@
-import * as core from '@actions/core';
 import * as github from '@actions/github';
+import { logVerbose, logWarn } from '@averlon/shared';
 
 // Constants
 export const COPILOT_SWE_AGENT = 'copilot-swe-agent';
@@ -194,7 +194,7 @@ export class CopilotIssueManager {
     try {
       const copilotBotId = await this.getCopilotBotId();
       if (!copilotBotId) {
-        core.warning(
+        logWarn(
           'Copilot assignment skipped: GitHub token must have access to GitHub Copilot to assign the bot.'
         );
         return;
@@ -202,17 +202,29 @@ export class CopilotIssueManager {
 
       const issueId = await this.getIssueNodeId(issueNumber);
       if (!issueId) {
-        core.warning(`Failed to get issue node ID for issue #${issueNumber}`);
+        logWarn(`Failed to get issue node ID for issue #${issueNumber}`);
         return;
       }
 
       await this.clearAllAssignees(issueId);
       await this.assignIssueToCopilot(issueId, copilotBotId);
-      core.info(`Copilot assigned to issue #${issueNumber}`);
+      logVerbose(`Copilot assigned to issue #${issueNumber}`);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      core.warning(`Copilot assignment failed (non-fatal): ${message}`);
+      logWarn(`Copilot assignment failed (non-fatal): ${message}`);
     }
+  }
+
+  private pullRequestFromTimelineItem(
+    item: TimelineItem
+  ): TimelineItem['subject'] | TimelineItem['source'] | null {
+    if (item.subject?.__typename === 'PullRequest') {
+      return item.subject;
+    }
+    if (item.source?.__typename === 'PullRequest') {
+      return item.source;
+    }
+    return null;
   }
 
   /**
@@ -281,31 +293,37 @@ export class CopilotIssueManager {
 
       const timelineItems = response?.repository?.issue?.timelineItems?.nodes || [];
       const linkedPRs: LinkedPR[] = [];
+      let hiddenPullRequestLinks = 0;
 
       for (const item of timelineItems) {
-        let pr: TimelineItem['subject'] | TimelineItem['source'] | null = null;
-
-        if (
-          (item.subject && item.subject.__typename === 'PullRequest') ||
-          (item.source && item.source.__typename === 'PullRequest')
-        ) {
-          pr =
-            item.subject && item.subject.__typename === 'PullRequest' ? item.subject : item.source;
+        const pr = this.pullRequestFromTimelineItem(item);
+        if (!pr) {
+          continue;
         }
 
-        if (pr && pr.number && pr.state) {
-          linkedPRs.push({
-            number: pr.number,
-            author: pr.author?.login || 'unknown',
-            state: pr.state,
-          });
+        if (!pr.number || !pr.state) {
+          hiddenPullRequestLinks += 1;
+          continue;
         }
+
+        linkedPRs.push({
+          number: pr.number,
+          author: pr.author?.login || 'unknown',
+          state: pr.state,
+        });
       }
 
-      core.info(`Found ${linkedPRs.length} PRs from timeline events`);
+      if (linkedPRs.length === 0 && hiddenPullRequestLinks > 0) {
+        logWarn(
+          `Issue #${issueNumber}: timeline shows ${hiddenPullRequestLinks} linked pull request(s), but PR details are not readable by the GitHub token. Add workflow permission pull-requests: read, or use a PAT with repo scope (not secrets.GITHUB_TOKEN alone).`
+        );
+      } else {
+        logVerbose(`Found ${linkedPRs.length} PRs from timeline events`);
+      }
+
       return linkedPRs;
     } catch (err) {
-      core.warning(
+      logWarn(
         `Timeline query failed for issue #${issueNumber}: ${err instanceof Error ? err.message : String(err)}`
       );
       return [];
@@ -356,26 +374,26 @@ export class CopilotIssueManager {
       const copilotPRs = linkedPRs.filter(pr => pr.author === COPILOT_SWE_AGENT);
 
       if (copilotPRs.length === 0) {
-        core.info(`No existing Copilot PRs found for issue #${issueNumber}`);
+        logVerbose(`No existing Copilot PRs found for issue #${issueNumber}`);
       }
 
       const openPRs = copilotPRs.filter(pr => pr.state === PRState.OPEN);
       const closedPRs = copilotPRs.filter(pr => pr.state === PRState.CLOSED);
 
       if (openPRs.length > 0) {
-        core.info(`Found ${openPRs.length} open Copilot PR(s) for issue #${issueNumber}`);
+        logVerbose(`Found ${openPRs.length} open Copilot PR(s) for issue #${issueNumber}`);
 
         for (const pr of openPRs) {
           await this.closePR(
             pr.number,
             `Closing PR #${pr.number} because the associated recommendation has been updated and Copilot is being reassigned.`
           );
-          core.info(`Closed PR #${pr.number}`);
+          logVerbose(`Closed PR #${pr.number}`);
         }
       }
 
       if (closedPRs.length > 0) {
-        core.info(
+        logVerbose(
           `Found ${closedPRs.length} closed Copilot PR(s) for issue #${issueNumber}: ${closedPRs.map(pr => `#${pr.number}`).join(', ')}`
         );
       }
@@ -383,7 +401,7 @@ export class CopilotIssueManager {
       await this.assignCopilot(issueNumber, autoAssignCopilot);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      core.warning(
+      logWarn(
         `Failed to handle Copilot assignment for updated issue #${issueNumber} (non-fatal): ${message}`
       );
     }
@@ -409,13 +427,13 @@ export class CopilotIssueManager {
       }
 
       if (closedPRs.length > 0) {
-        core.info(
+        logVerbose(
           `Found ${closedPRs.length} closed Copilot PR(s) for issue #${issueNumber}: ${closedPRs.map(pr => `#${pr.number}`).join(', ')}`
         );
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      core.warning(
+      logWarn(
         `Failed to handle Copilot assignment for unchanged issue #${issueNumber} (non-fatal): ${message}`
       );
     }

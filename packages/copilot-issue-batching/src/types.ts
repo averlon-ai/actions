@@ -1,3 +1,10 @@
+export type ListForRepoIssue = {
+  number: number;
+  body: string | null;
+  labels?: Array<{ name?: string | null } | string>;
+  pull_request?: unknown;
+};
+
 /** Minimal Octokit shape needed for listing/creating/updating issues */
 export interface OctokitLike {
   rest: {
@@ -8,7 +15,7 @@ export interface OctokitLike {
         state: string;
         labels?: string;
         per_page: number;
-      }) => Promise<{ data: Array<{ number: number; body: string | null }> }>;
+      }) => Promise<{ data: ListForRepoIssue[] }>;
       create: (opts: {
         owner: string;
         repo: string;

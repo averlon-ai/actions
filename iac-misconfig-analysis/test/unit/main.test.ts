@@ -1,6 +1,5 @@
 import { describe, it, expect, spyOn, beforeEach, afterEach, mock } from 'bun:test';
 
-// Create mock functions for @actions/core
 const mockInfo = mock(() => {});
 const mockWarning = mock(() => {});
 const mockError = mock(() => {});
@@ -9,8 +8,8 @@ const mockGetInput = mock(() => '');
 const mockSetOutput = mock(() => {});
 const mockSetFailed = mock(() => {});
 const mockIsDebug = mock(() => false);
+const mockSetSecret = mock(() => {});
 
-// Mock @actions/core before importing
 mock.module('@actions/core', () => ({
   info: mockInfo,
   warning: mockWarning,
@@ -19,1151 +18,301 @@ mock.module('@actions/core', () => ({
   getInput: mockGetInput,
   setOutput: mockSetOutput,
   setFailed: mockSetFailed,
+  setSecret: mockSetSecret,
   isDebug: mockIsDebug,
 }));
 
 import * as core from '@actions/core';
 import { run, gitLikeHash } from '../../src/main';
+import { parsePulumiStackJson } from '../../src/pulumi';
+import { parseTerraformPlanJson } from '../../src/terraform-local';
 import { GithubIssuesService } from '../../src/github-issues';
-import type { ApiClient, ScanTerraformResult, UploadTerraformFileRequest } from '@averlon/shared';
-import { IssueSeverityEnum } from '@averlon/shared';
+import type { ApiClient } from '@averlon/shared';
 
-// Mock the api-client module
-const mockAuthenticate = mock(() => Promise.resolve());
-const mockGetCallerInfo = mock(() =>
+const mockOrgOpenSearchQuery = mock(() =>
   Promise.resolve({
-    userId: 'test-user-id',
-    organizationId: 'test-org-id',
-    role: 'admin',
+    Issues: [{ ID: 'issue-1', ResourceID: 'arn:aws:s3:::iac-bucket' }],
   })
 );
-const mockUploadTerraformFile = mock(() => Promise.resolve({ success: true }));
-const mockStartScanTerraform = mock(() => Promise.resolve({ JobID: 'test-job-123' }));
-const mockGetScanTerraformResult = mock(() =>
-  Promise.resolve({
-    JobID: 'test-job-123',
-    Status: 'Succeeded',
-    Resources: [
-      {
-        ID: 'test-resource-1',
-        Type: 'test-type',
-        Name: 'test-name',
-        Asset: {
-          ID: 'test-asset-id',
-        },
-        Issues: [
-          {
-            ID: 'issue-1',
-            OrgID: 'test-org-id',
-            CloudID: 'test-cloud-id',
-          },
-          {
-            ID: 'issue-2',
-            OrgID: 'test-org-id',
-            CloudID: 'test-cloud-id',
-          },
-        ],
-      },
-    ],
-  } as ScanTerraformResult)
-);
+const mockGetCallerInfo = mock(() => Promise.resolve({ userId: 'test-user' }));
 
 const mockApiClient = {
-  authenticate: mockAuthenticate,
   getCallerInfo: mockGetCallerInfo,
-  uploadTerraformFile: mockUploadTerraformFile,
-  startScanTerraform: mockStartScanTerraform,
-  getScanTerraformResult: mockGetScanTerraformResult,
+  orgOpenSearchQuery: mockOrgOpenSearchQuery,
 } as unknown as ApiClient;
 
-const mockCreateApiClient = mock(() => mockApiClient);
-
-// Mock the createApiClient function
 const apiClientModule = await import('@averlon/shared');
 let createApiClientSpy = spyOn(apiClientModule, 'createApiClient').mockImplementation(
   () => mockApiClient
 );
 
-// Mock file operations
-const mockReadFile = mock(() => Promise.resolve(Buffer.from('test-file-content')));
-
-// Mock the fs/promises module
 const fsModule = await import('node:fs/promises');
+const mockReadFile = mock(() => Promise.resolve(''));
 const readFileSpy = spyOn(fsModule, 'readFile').mockImplementation(mockReadFile as any);
 
 describe('gitLikeHash', () => {
-  it('returns a 40-character lowercase hex string', () => {
-    const hash = gitLikeHash('hello');
-    expect(hash).toHaveLength(40);
-    expect(hash).toMatch(/^[a-f0-9]{40}$/);
-  });
-
-  it('is deterministic: same input produces same hash', () => {
-    expect(gitLikeHash('foo')).toBe(gitLikeHash('foo'));
-    expect(gitLikeHash('commit+repo+owner+path')).toBe(gitLikeHash('commit+repo+owner+path'));
-  });
-
-  it('produces different hashes for different inputs', () => {
-    expect(gitLikeHash('a')).not.toBe(gitLikeHash('b'));
-    expect(gitLikeHash('')).not.toBe(gitLikeHash('x'));
-  });
-
-  it('hashes empty string to known SHA-1 value', () => {
-    expect(gitLikeHash('')).toBe('da39a3ee5e6b4b0d3255bfef95601890afd80709');
-  });
-
-  it('hashes "hello world" to known SHA-1 value', () => {
+  it('returns deterministic SHA-1 hex', () => {
     expect(gitLikeHash('hello world')).toBe('2aae6c35c94fcfb415dbe95f408b9ce91ee846ed');
   });
 });
 
-describe('iac-misconfig-analysis main.ts', () => {
-  let infoSpy: ReturnType<typeof spyOn>;
-  let warningSpy: ReturnType<typeof spyOn>;
-  let errorSpy: ReturnType<typeof spyOn>;
-  let debugSpy: ReturnType<typeof spyOn>;
-  let getInputSpy: ReturnType<typeof spyOn>;
+describe('local IaC parsers', () => {
+  it('extracts Terraform resources with stable IDs from plan JSON, including no-op', () => {
+    const resources = parseTerraformPlanJson(
+      JSON.stringify({
+        resource_changes: [
+          {
+            address: 'aws_s3_bucket.iac',
+            type: 'aws_s3_bucket',
+            name: 'iac',
+            change: { actions: ['create'], after: { arn: 'arn:aws:s3:::iac-bucket' } },
+          },
+          {
+            address: 'aws_iam_role.same',
+            type: 'aws_iam_role',
+            name: 'same',
+            change: { actions: ['no-op'], after: { arn: 'arn:aws:iam::123:role/same' } },
+          },
+        ],
+      })
+    );
+
+    expect(resources).toEqual([
+      {
+        id: 'aws_s3_bucket.iac',
+        type: 'aws_s3_bucket',
+        name: 'iac',
+        operation: 'create',
+        candidateResourceIds: ['arn:aws:s3:::iac-bucket'],
+      },
+      {
+        id: 'aws_iam_role.same',
+        type: 'aws_iam_role',
+        name: 'same',
+        operation: 'no-op',
+        candidateResourceIds: ['arn:aws:iam::123:role/same'],
+      },
+    ]);
+  });
+
+  it('extracts Pulumi stack resources and skips internal types', () => {
+    const resources = parsePulumiStackJson(
+      JSON.stringify({
+        deployment: {
+          resources: [
+            {
+              urn: 'urn:pulumi:dev::app::pulumi:pulumi:Stack::app-dev',
+              type: 'pulumi:pulumi:Stack',
+            },
+            {
+              urn: 'urn:pulumi:dev::app::aws:s3/bucket:Bucket::iac-bucket',
+              type: 'aws:s3/bucket:Bucket',
+              id: 'iac-bucket',
+              outputs: { arn: 'arn:aws:s3:::iac-bucket' },
+            },
+            {
+              urn: 'urn:pulumi:dev::app::aws:ec2/instance:Instance::old-instance',
+              type: 'aws:ec2/instance:Instance',
+              id: 'i-abc123',
+            },
+          ],
+        },
+      })
+    );
+
+    expect(resources).toHaveLength(2);
+    expect(resources[0]).toMatchObject({
+      type: 'aws:s3/bucket:Bucket',
+      name: 'iac-bucket',
+      operation: 'applied',
+      candidateResourceIds: ['arn:aws:s3:::iac-bucket', 'iac-bucket'],
+    });
+    expect(resources[1]?.candidateResourceIds).toEqual(['i-abc123']);
+  });
+});
+
+describe('iac-misconfig-analysis correlation flow', () => {
   let setOutputSpy: ReturnType<typeof spyOn>;
   let setFailedSpy: ReturnType<typeof spyOn>;
-  let isDebugSpy: ReturnType<typeof spyOn>;
   let createBatchedIssuesSpy: ReturnType<typeof spyOn>;
   let originalEnv: NodeJS.ProcessEnv;
 
   beforeEach(() => {
-    // Store original environment
     originalEnv = { ...process.env };
-
-    // Set required environment variables (parseGitHubRepository from github-actions-utils requires these)
     process.env.GITHUB_REPOSITORY = 'test-owner/test-repo';
-    process.env.GITHUB_SHA = 'a851d9d065fcd6c6c866198923b72190d613eaf4';
+    process.env.GITHUB_SHA = 'abc123';
+    process.env.INPUT_AVERLON_API_KEY = 'test-api-key';
+    process.env.INPUT_AVERLON_API_SECRET = 'test-api-secret';
+    process.env.INPUT_BASE_URL = 'https://test.example.com';
+    process.env.INPUT_PLAN_PATH = './tfplan.json';
+    process.env.INPUT_CLOUD_ID = 'cloud-123';
+    process.env.INPUT_GITHUB_TOKEN = 'test-github-token';
 
-    // Create spies for core functions
-    infoSpy = spyOn(core, 'info').mockImplementation(() => {});
-    warningSpy = spyOn(core, 'warning').mockImplementation(() => {});
-    errorSpy = spyOn(core, 'error').mockImplementation(() => {});
-    debugSpy = spyOn(core, 'debug').mockImplementation(() => {});
-    getInputSpy = spyOn(core, 'getInput').mockImplementation(() => '');
     setOutputSpy = spyOn(core, 'setOutput').mockImplementation(() => {});
     setFailedSpy = spyOn(core, 'setFailed').mockImplementation(() => {});
-    isDebugSpy = spyOn(core, 'isDebug').mockImplementation(() => false);
+    spyOn(core, 'info').mockImplementation(() => {});
+    spyOn(core, 'warning').mockImplementation(() => {});
+    spyOn(core, 'debug').mockImplementation(() => {});
+    spyOn(core, 'error').mockImplementation(() => {});
+    spyOn(core, 'isDebug').mockImplementation(() => false);
+    createBatchedIssuesSpy = spyOn(
+      GithubIssuesService.prototype,
+      'createBatchedIssues'
+    ).mockResolvedValue();
 
-    // Reset all mocks and spies
-    infoSpy.mockClear();
-    warningSpy.mockClear();
-    errorSpy.mockClear();
-    debugSpy.mockClear();
-    getInputSpy.mockClear();
-    setOutputSpy.mockClear();
-    setFailedSpy.mockClear();
-    isDebugSpy.mockClear();
-
-    // Reset API client mocks
-    mockCreateApiClient.mockClear();
-    mockAuthenticate.mockClear();
-    mockGetCallerInfo.mockClear();
-    mockUploadTerraformFile.mockClear();
-    mockStartScanTerraform.mockClear();
-    mockGetScanTerraformResult.mockClear();
-    // Reset mockGetScanTerraformResult to default successful behavior
-    mockGetScanTerraformResult.mockImplementation(() =>
-      Promise.resolve({
-        JobID: 'test-job-123',
-        Status: 'Succeeded',
-        Resources: [
-          {
-            ID: 'test-resource-1',
-            Type: 'test-type',
-            Name: 'test-name',
-            Asset: {
-              ID: 'test-asset-id',
-            },
-            Issues: [
-              {
-                ID: 'issue-1',
-                OrgID: 'test-org-id',
-                CloudID: 'test-cloud-id',
-              },
-              {
-                ID: 'issue-2',
-                OrgID: 'test-org-id',
-                CloudID: 'test-cloud-id',
-              },
-            ],
-          },
-        ],
-      } as ScanTerraformResult)
-    );
-    mockReadFile.mockClear();
-
-    // Reset spy on createApiClient and ensure it returns the correct mock
-    createApiClientSpy.mockClear();
     createApiClientSpy.mockRestore();
     createApiClientSpy = spyOn(apiClientModule, 'createApiClient').mockImplementation(
       () => mockApiClient
     );
     readFileSpy.mockClear();
-    // postOrUpdateCommentSpy removed - GitHub issues are used instead
-
-    // Set up default environment variables for testing
-    process.env.INPUT_AVERLON_API_KEY = 'test-api-key';
-    process.env.INPUT_AVERLON_API_SECRET = 'test-api-secret';
-    process.env.INPUT_BASE_URL = 'https://test.example.com';
-    process.env.INPUT_REPO_NAME = 'test-repo';
-    process.env.INPUT_COMMIT = 'abc123';
-    process.env.INPUT_PLAN_PATH = './test/plan.json';
-    // Keep polling fast in tests to avoid long sleeps/backoff
-    process.env.INPUT_SCAN_POLL_INTERVAL = '1';
-    process.env.INPUT_SCAN_TIMEOUT = '60';
-    process.env.INPUT_GITHUB_TOKEN = 'test-github-token';
-
-    createBatchedIssuesSpy = spyOn(
-      GithubIssuesService.prototype,
-      'createBatchedIssues'
-    ).mockResolvedValue();
+    mockReadFile.mockReset();
+    mockReadFile.mockImplementation(() =>
+      Promise.resolve(
+        JSON.stringify({
+          resource_changes: [
+            {
+              address: 'aws_s3_bucket.iac',
+              type: 'aws_s3_bucket',
+              name: 'iac',
+              change: { actions: ['create'], after: { arn: 'arn:aws:s3:::iac-bucket' } },
+            },
+            {
+              address: 'aws_iam_role.admin',
+              type: 'aws_iam_role',
+              name: 'admin',
+              change: {
+                actions: ['update'],
+                after: { arn: 'arn:aws:iam::123456789012:role/admin-role' },
+              },
+            },
+          ],
+        })
+      )
+    );
+    mockOrgOpenSearchQuery.mockClear();
+    mockOrgOpenSearchQuery.mockImplementation(() =>
+      Promise.resolve({
+        Issues: [{ ID: 'issue-1', ResourceID: 'arn:aws:s3:::iac-bucket' }],
+      })
+    );
   });
 
   afterEach(() => {
-    // Clean up spies after each test
-    infoSpy.mockRestore();
-    warningSpy.mockRestore();
-    errorSpy.mockRestore();
-    debugSpy.mockRestore();
-    getInputSpy.mockRestore();
     setOutputSpy.mockRestore();
     setFailedSpy.mockRestore();
-    isDebugSpy.mockRestore();
     createBatchedIssuesSpy.mockRestore();
-
-    // Clean up test-specific environment variables
-    delete process.env.INPUT_RESOURCE_TYPE_FILTER;
-    delete process.env.INPUT_INCLUDE_RESOURCES_WITHOUT_ISSUES;
-    delete process.env.INPUT_SEVERITIES;
-
-    // Restore original environment
     process.env = originalEnv;
   });
 
-  describe('run function - successful flow', () => {
-    it('should complete the full flow successfully', async () => {
-      await run();
+  it('correlates Terraform resources without backend upload or scan', async () => {
+    await run();
 
-      // Check core API calls
-      expect(mockUploadTerraformFile).toHaveBeenCalled();
-      expect(mockStartScanTerraform).toHaveBeenCalled();
-      expect(mockGetScanTerraformResult).toHaveBeenCalled();
-
-      // Check that scan result is set as output (now JSON string of TerraformResource[])
-      expect(setOutputSpy).toHaveBeenCalledWith(
-        'scan-result',
-        expect.stringContaining('test-resource-1')
-      );
-      const outputCall = setOutputSpy.mock.calls.find(call => call[0] === 'scan-result');
-      expect(outputCall).toBeDefined();
-      const outputValue = JSON.parse(outputCall![1] as string);
-      expect(outputValue).toEqual([
-        {
-          ID: 'test-resource-1',
-          Type: 'test-type',
-          Name: 'test-name',
-          Asset: {
-            ID: 'test-asset-id',
-          },
-          Issues: [
-            {
-              ID: 'issue-1',
-              OrgID: 'test-org-id',
-              CloudID: 'test-cloud-id',
-            },
-            {
-              ID: 'issue-2',
-              OrgID: 'test-org-id',
-              CloudID: 'test-cloud-id',
-            },
-          ],
-        },
-      ]);
-
-      // Check that some info logging happened
-      expect(infoSpy.mock.calls.length).toBeGreaterThanOrEqual(1);
-
-      // Check that API client was created once
-      expect(createApiClientSpy.mock.calls.length).toBe(1);
-
-      // Check that key startup messages are logged
-      const infoCalls = infoSpy.mock.calls.map(call => call[0]);
-      expect(
-        infoCalls.some(msg =>
-          msg.includes('Starting Averlon Misconfiguration Remediation Agent for IaC...')
-        )
-      ).toBe(true);
-    });
-
-    it('should use default baseUrl when not provided', async () => {
-      delete process.env.INPUT_BASE_URL;
-
-      await run();
-
-      // Check that the API client call uses the default baseUrl
-      const calls = createApiClientSpy.mock.calls;
-      expect(calls.length).toBe(1);
-      expect(calls[0][0].baseUrl).toBe('https://wfe.prod.averlon.io/');
-      expect(calls[0][0].apiKey).toBe('test-api-key');
-      expect(calls[0][0].apiSecret).toBe('test-api-secret');
-    });
-
-    it('should handle authentication test in debug mode', async () => {
-      // Enable debug mode to trigger getCallerInfo call
-      isDebugSpy.mockImplementation(() => true);
-
-      await run();
-
-      // Check that getCallerInfo was called in debug mode
-      expect(mockGetCallerInfo).toHaveBeenCalled();
-
-      // Check that debug messages were logged
-      const debugCalls = debugSpy.mock.calls.map(call => call[0]);
-      expect(debugCalls.some(msg => msg.includes('Debug mode: Testing authentication'))).toBe(true);
-    });
-
-    it('should handle authentication failure gracefully in debug mode', async () => {
-      // Enable debug mode to trigger getCallerInfo call
-      isDebugSpy.mockImplementation(() => true);
-
-      // Mock authentication to fail only on the first call (for getCallerInfo)
-      mockAuthenticate.mockRejectedValueOnce(new Error('Authentication failed'));
-
-      await run();
-
-      // Check that the authentication failure warning was logged
-      const warningCalls = warningSpy.mock.calls.map(call => call[0]);
-      const authFailureCalls = warningCalls.filter(msg =>
-        msg.includes('Authentication test failed: Authentication failed')
-      );
-      expect(authFailureCalls.length).toBeGreaterThanOrEqual(1);
-
-      // Despite auth failure in getCallerInfo, the function should still complete
-      const expectedResources = [
-        {
-          ID: 'test-resource-1',
-          Type: 'test-type',
-          Name: 'test-name',
-          Asset: {
-            ID: 'test-asset-id',
-          },
-          Issues: [
-            {
-              ID: 'issue-1',
-              OrgID: 'test-org-id',
-              CloudID: 'test-cloud-id',
-            },
-            {
-              ID: 'issue-2',
-              OrgID: 'test-org-id',
-              CloudID: 'test-cloud-id',
-            },
-          ],
-        },
-      ];
-      expect(setOutputSpy).toHaveBeenCalledWith('scan-result', JSON.stringify(expectedResources));
-    });
-
-    it('should skip GitHub issues creation when github-token is missing', async () => {
-      delete process.env.INPUT_GITHUB_TOKEN;
-      delete process.env.GITHUB_TOKEN;
-
-      await run();
-
-      // GitHub issues creation should be skipped when token is missing
-      // Action should still complete successfully
-      expect(infoSpy).toHaveBeenCalledWith('Action completed successfully');
-      const infoCalls = infoSpy.mock.calls.map(call => call[0]);
-      expect(infoCalls.some(msg => msg.includes('GitHub token not provided'))).toBe(true);
-    });
-
-    it('should handle GitHub issues creation failure gracefully', async () => {
-      // This test verifies that GitHub issues creation failures don't fail the entire action
-      process.env.GITHUB_REPOSITORY = 'test-owner/test-repo';
-      process.env.INPUT_GITHUB_TOKEN = 'test-token';
-
-      // Force GitHub issues creation to fail fast
-      createBatchedIssuesSpy.mockRejectedValueOnce(new Error('Issues creation failed'));
-
-      await run();
-
-      // Check that warning was logged if issues creation fails
-      const warningCalls = warningSpy.mock.calls.map(call => call[0]);
-      // The action should complete successfully even if issues creation fails
-      expect(infoSpy).toHaveBeenCalledWith('Action completed successfully');
-
-      // Action should still complete successfully
-      const expectedResources = [
-        {
-          ID: 'test-resource-1',
-          Type: 'test-type',
-          Name: 'test-name',
-          Asset: {
-            ID: 'test-asset-id',
-          },
-          Issues: [
-            {
-              ID: 'issue-1',
-              OrgID: 'test-org-id',
-              CloudID: 'test-cloud-id',
-            },
-            {
-              ID: 'issue-2',
-              OrgID: 'test-org-id',
-              CloudID: 'test-cloud-id',
-            },
-          ],
-        },
-      ];
-      expect(setOutputSpy).toHaveBeenCalledWith('scan-result', JSON.stringify(expectedResources));
-    }, 10000);
+    expect(mockOrgOpenSearchQuery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        QueryID: 2,
+        FilterQuery: expect.stringContaining('arn:aws:s3:::iac-bucket'),
+      })
+    );
+    expect(setOutputSpy).toHaveBeenCalledWith('scan-result', expect.stringContaining('issue-1'));
+    expect(setOutputSpy).toHaveBeenCalledWith(
+      'scan-result',
+      expect.not.stringContaining('aws_iam_role.admin')
+    );
+    expect(createBatchedIssuesSpy).toHaveBeenCalled();
   });
 
-  describe('input validation', () => {
-    it('should set failed when required API key is missing', async () => {
-      delete process.env.INPUT_AVERLON_API_KEY;
-      getInputSpy.mockReturnValue('');
-
-      await run();
-
-      expect(setFailedSpy).toHaveBeenCalledWith(
-        expect.stringContaining(
-          'Averlon API key required: provide averlon-api-key (preferred) or api-key (deprecated)'
-        )
-      );
-    });
-
-    it('should set failed when required API secret is missing', async () => {
-      delete process.env.INPUT_AVERLON_API_SECRET;
-      getInputSpy.mockReturnValue('');
-
-      await run();
-
-      expect(setFailedSpy).toHaveBeenCalledWith(
-        expect.stringContaining(
-          'Averlon API secret required: provide averlon-api-secret (preferred) or api-secret (deprecated)'
-        )
-      );
-    });
-
-    it('should use default commit from GITHUB_SHA when commit input is missing', async () => {
-      delete process.env.INPUT_COMMIT;
-      delete process.env.GITHUB_SHA;
-      getInputSpy.mockReturnValue('');
-
-      // The code doesn't validate commit, it just uses defaultCommit from parseGitHubRepository
-      // If both INPUT_COMMIT and GITHUB_SHA are missing, commit will be undefined
-      // But the code doesn't throw an error for this, so the test should verify the action
-      // continues (though it may fail later when commit is actually used)
-      // For now, we'll just verify it doesn't fail at input validation
-      await run();
-
-      // The action should proceed (may fail later when commit is used in API calls)
-      // Since commit is optional with a default, we don't expect an error here
-      expect(setFailedSpy).not.toHaveBeenCalledWith(
-        expect.stringContaining('Input required and not supplied: commit')
-      );
-    });
-
-    it('should set failed when required plan-path is missing', async () => {
-      delete process.env.INPUT_PLAN_PATH;
-      getInputSpy.mockReturnValue('');
-
-      await run();
-
-      expect(setFailedSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Input required and not supplied: plan-path')
-      );
-    });
-
-    it('should use default scan-poll-interval when not provided', async () => {
-      delete process.env.INPUT_SCAN_POLL_INTERVAL;
-
-      await run();
-
-      // Should complete successfully with default value
-      expect(mockStartScanTerraform).toHaveBeenCalled();
-    });
-
-    it('should use default scan-timeout when not provided', async () => {
-      delete process.env.INPUT_SCAN_TIMEOUT;
-
-      await run();
-
-      // Should complete successfully with default value
-      expect(mockStartScanTerraform).toHaveBeenCalled();
-    });
-
-    it('should handle missing GITHUB_REPOSITORY gracefully', async () => {
-      delete process.env.GITHUB_REPOSITORY;
-
-      await run();
-
-      // Should fail with appropriate error message
-      expect(setFailedSpy).toHaveBeenCalledWith(
-        expect.stringContaining('GITHUB_REPOSITORY environment variable is not set')
-      );
-    });
-
-    it('should set failed for invalid scan-poll-interval (NaN)', async () => {
-      process.env.INPUT_SCAN_POLL_INTERVAL = 'invalid';
-
-      await run();
-
-      expect(setFailedSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Invalid scan-poll-interval: "invalid"')
-      );
-    });
-
-    it('should set failed for invalid scan-poll-interval (negative)', async () => {
-      process.env.INPUT_SCAN_POLL_INTERVAL = '-5';
-
-      await run();
-
-      expect(setFailedSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Invalid scan-poll-interval: "-5"')
-      );
-    });
-
-    it('should set failed for invalid scan-poll-interval (zero)', async () => {
-      process.env.INPUT_SCAN_POLL_INTERVAL = '0';
-
-      await run();
-
-      expect(setFailedSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Invalid scan-poll-interval: "0"')
-      );
-    });
-
-    it('should set failed for invalid scan-timeout (NaN)', async () => {
-      process.env.INPUT_SCAN_TIMEOUT = 'not-a-number';
-
-      await run();
-
-      expect(setFailedSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Invalid scan-timeout: "not-a-number"')
-      );
-    });
-
-    it('should set failed for invalid scan-timeout (negative)', async () => {
-      process.env.INPUT_SCAN_TIMEOUT = '-10';
-
-      await run();
-
-      expect(setFailedSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Invalid scan-timeout: "-10"')
-      );
-    });
-
-    it('should set failed for invalid scan-timeout (zero)', async () => {
-      process.env.INPUT_SCAN_TIMEOUT = '0';
-
-      await run();
-
-      expect(setFailedSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Invalid scan-timeout: "0"')
-      );
-    });
-
-    it('should set failed when scan-timeout is less than scan-poll-interval', async () => {
-      process.env.INPUT_SCAN_POLL_INTERVAL = '60';
-      process.env.INPUT_SCAN_TIMEOUT = '30';
-
-      await run();
-
-      expect(setFailedSpy).toHaveBeenCalledWith(
-        expect.stringContaining('scan-timeout (30s) must be greater than scan-poll-interval (60s)')
-      );
-    });
-
-    describe('file upload', () => {
-      it('should upload plan file successfully', async () => {
-        await run();
-
-        // Check that readFile was called with the correct path
-        expect(readFileSpy).toHaveBeenCalledWith('./test/plan.json');
-
-        // Check that uploadTerraformFile was called with correct parameters
-        expect(mockUploadTerraformFile).toHaveBeenCalled();
-        // Verify the call arguments by checking the mock was called
-        // The actual parameters are verified through the mock implementation
-        const callArgs = (mockUploadTerraformFile.mock as any).calls[0];
-        if (callArgs && callArgs[0]) {
-          const uploadCall = callArgs[0] as UploadTerraformFileRequest;
-          expect(uploadCall.RepoName).toBe('test-owner/test-repo');
-          expect(uploadCall.Commit).toBe(
-            gitLikeHash(
-              'commit:abc123githubRepo:test-repogithubOwner:test-ownerplanPath:./test/plan.json'
-            )
-          );
-          expect(uploadCall.FileType).toBe('Plan');
-          expect(uploadCall.FileData).toBe(Buffer.from('test-file-content').toString('base64'));
-        }
-      });
-
-      it('should set failed when file read errors occur', async () => {
-        const fileError = new Error('File not found');
-        readFileSpy.mockRejectedValueOnce(fileError);
-
-        await run();
-
-        expect(setFailedSpy).toHaveBeenCalledWith(
-          expect.stringContaining('Failed to read file ./test/plan.json: File not found')
-        );
-
-        // Check that error was logged
-        const errorCalls = errorSpy.mock.calls.map(call => call[0]);
-        expect(errorCalls.some(msg => msg.includes('File read error for ./test/plan.json'))).toBe(
-          true
-        );
-      });
-
-      it('should set failed when file upload API errors occur', async () => {
-        mockUploadTerraformFile.mockRejectedValueOnce(new Error('Upload failed'));
-
-        await run();
-
-        expect(setFailedSpy).toHaveBeenCalledWith(
-          expect.stringContaining('Some file uploads failed')
-        );
-
-        // Check that error was logged
-        const errorCalls = errorSpy.mock.calls.map(call => call[0]);
-        expect(errorCalls.some(msg => msg.includes('Failed to upload'))).toBe(true);
-      });
-    });
-
-    describe('scan execution', () => {
-      it('should start scan and return results immediately when status is Succeeded', async () => {
-        await run();
-
-        // Check that startScanTerraform was called with correct parameters (commit is gitLikeHash of inputs)
-        expect(mockStartScanTerraform).toHaveBeenCalledWith({
-          RepoName: 'test-owner/test-repo',
-          Commit: gitLikeHash(
-            'commit:abc123githubRepo:test-repogithubOwner:test-ownerplanPath:./test/plan.json'
-          ),
-          ResourceTypes: undefined,
-          IncludeResourcesWithoutIssues: false,
-          Severities: [IssueSeverityEnum.Critical, IssueSeverityEnum.High],
-        });
-
-        // Check that getScanTerraformResult was called
-        expect(mockGetScanTerraformResult).toHaveBeenCalledWith({ JobID: 'test-job-123' });
-
-        // Check that results were set
-        const expectedResources = [
-          {
-            ID: 'test-resource-1',
-            Type: 'test-type',
-            Name: 'test-name',
-            Asset: {
-              ID: 'test-asset-id',
-            },
-            Issues: [
+  it('correlates Pulumi stack resources without backend upload or scan', async () => {
+    process.env.INPUT_IAC_TYPE = 'pulumi';
+    process.env.INPUT_PULUMI_STACK_PATH = './pulumi-stack.json';
+    mockReadFile.mockImplementationOnce(() =>
+      Promise.resolve(
+        JSON.stringify({
+          deployment: {
+            resources: [
               {
-                ID: 'issue-1',
-                OrgID: 'test-org-id',
-                CloudID: 'test-cloud-id',
-              },
-              {
-                ID: 'issue-2',
-                OrgID: 'test-org-id',
-                CloudID: 'test-cloud-id',
+                urn: 'urn:pulumi:dev::app::aws:s3/bucket:Bucket::iac-bucket',
+                type: 'aws:s3/bucket:Bucket',
+                id: 'iac-bucket',
+                outputs: { arn: 'arn:aws:s3:::iac-bucket' },
               },
             ],
           },
-        ];
-        expect(setOutputSpy).toHaveBeenCalledWith('scan-result', JSON.stringify(expectedResources));
-      });
-
-      it('should handle scan with no Resources (missing property)', async () => {
-        mockGetScanTerraformResult.mockResolvedValueOnce({
-          JobID: 'test-job-123',
-          Status: 'Succeeded',
-        } as unknown as ScanTerraformResult);
-
-        await run();
-
-        // Check that warning was logged
-        const warningCalls = warningSpy.mock.calls.map(call => call[0]);
-        expect(
-          warningCalls.some(msg => msg.includes('Scan completed but no result data was returned'))
-        ).toBe(true);
-
-        // Check that empty array was returned
-        expect(setOutputSpy).toHaveBeenCalledWith('scan-result', JSON.stringify([]));
-      });
-
-      it('should handle scan with empty Resources array', async () => {
-        mockGetScanTerraformResult.mockResolvedValueOnce({
-          JobID: 'test-job-123',
-          Status: 'Succeeded',
-          Resources: [],
-        } as ScanTerraformResult);
-
-        await run();
-
-        // Check that empty array was returned
-        expect(setOutputSpy).toHaveBeenCalledWith('scan-result', JSON.stringify([]));
-      });
-
-      it('should set failed when scan status is Failed', async () => {
-        mockGetScanTerraformResult.mockResolvedValueOnce({
-          JobID: 'test-job-123',
-          Status: 'Failed',
-          Resources: [
-            {
-              ID: 'test-resource-1',
-              Type: 'test-type',
-              Name: 'test-name',
-              Asset: {
-                ID: 'test-asset-id',
-              },
-              Issues: [],
-            },
-          ],
-        } as ScanTerraformResult);
-
-        await run();
-
-        expect(setFailedSpy).toHaveBeenCalledWith(expect.stringContaining('Terraform scan failed'));
-
-        // Check that error was logged
-        const errorCalls = errorSpy.mock.calls.map(call => call[0]);
-        expect(errorCalls.some(msg => msg.includes('Scan failed'))).toBe(true);
-      });
-
-      it('should set failed when scan status is Cancelled', async () => {
-        mockGetScanTerraformResult.mockResolvedValueOnce({
-          JobID: 'test-job-123',
-          Status: 'Cancelled',
-          Resources: [],
-        } as ScanTerraformResult);
-
-        await run();
-
-        expect(setFailedSpy).toHaveBeenCalledWith(
-          expect.stringContaining('Terraform scan was cancelled')
-        );
-
-        // Check that error was logged
-        const errorCalls = errorSpy.mock.calls.map(call => call[0]);
-        expect(errorCalls.some(msg => msg.includes('Scan was cancelled'))).toBe(true);
-      });
-
-      it('should poll multiple times when status is Running', async () => {
-        let callCount = 0;
-        mockGetScanTerraformResult.mockImplementation(() => {
-          callCount++;
-          if (callCount === 1) {
-            return Promise.resolve({
-              JobID: 'test-job-123',
-              Status: 'Running',
-              Resources: [],
-            } as ScanTerraformResult);
-          } else {
-            return Promise.resolve({
-              JobID: 'test-job-123',
-              Status: 'Succeeded',
-              Resources: [
-                {
-                  ID: 'test-resource-1',
-                  Type: 'test-type',
-                  Name: 'test-name',
-                  Asset: {
-                    ID: 'test-asset-id',
-                  },
-                  Issues: [
-                    {
-                      ID: 'issue-1',
-                      OrgID: 'test-org-id',
-                      CloudID: 'test-cloud-id',
-                    },
-                  ],
-                },
-              ],
-            } as ScanTerraformResult);
-          }
-        });
-
-        // Mock setTimeout to speed up tests
-        const originalSetTimeout = global.setTimeout;
-        const mockSetTimeout = mock((fn: () => void, delay: number) => {
-          // Execute immediately for testing
-          fn();
-          return {} as any;
-        });
-        global.setTimeout = mockSetTimeout as any;
-
-        try {
-          await run();
-
-          // Check that getScanTerraformResult was called multiple times
-          expect(mockGetScanTerraformResult.mock.calls.length).toBeGreaterThan(1);
-
-          // Check that final result was set
-          const expectedResources = [
-            {
-              ID: 'test-resource-1',
-              Type: 'test-type',
-              Name: 'test-name',
-              Asset: {
-                ID: 'test-asset-id',
-              },
-              Issues: [
-                {
-                  ID: 'issue-1',
-                  OrgID: 'test-org-id',
-                  CloudID: 'test-cloud-id',
-                },
-              ],
-            },
-          ];
-          expect(setOutputSpy).toHaveBeenCalledWith(
-            'scan-result',
-            JSON.stringify(expectedResources)
-          );
-        } finally {
-          global.setTimeout = originalSetTimeout;
-        }
-      });
-
-      it('should handle various in-progress statuses (Scheduled, Ready, Unknown)', async () => {
-        const statuses = ['Scheduled', 'Ready', 'Unknown'];
-        let statusIndex = 0;
-
-        mockGetScanTerraformResult.mockImplementation(() => {
-          if (statusIndex < statuses.length) {
-            return Promise.resolve({
-              JobID: 'test-job-123',
-              Status: statuses[statusIndex++] as any,
-              Resources: [],
-            } as ScanTerraformResult);
-          } else {
-            return Promise.resolve({
-              JobID: 'test-job-123',
-              Status: 'Succeeded',
-              Resources: [
-                {
-                  ID: 'test-resource-1',
-                  Type: 'test-type',
-                  Name: 'test-name',
-                  Asset: {
-                    ID: 'test-asset-id',
-                  },
-                  Issues: [
-                    {
-                      ID: 'issue-1',
-                      OrgID: 'test-org-id',
-                      CloudID: 'test-cloud-id',
-                    },
-                  ],
-                },
-              ],
-            } as ScanTerraformResult);
-          }
-        });
-
-        // Mock setTimeout to speed up tests
-        const originalSetTimeout = global.setTimeout;
-        const mockSetTimeout = mock((fn: () => void) => {
-          fn();
-          return {} as any;
-        });
-        global.setTimeout = mockSetTimeout as any;
-
-        try {
-          await run();
-
-          // Check that getScanTerraformResult was called multiple times
-          expect(mockGetScanTerraformResult.mock.calls.length).toBeGreaterThan(statuses.length);
-
-          // Check that final result was set
-          const expectedResources = [
-            {
-              ID: 'test-resource-1',
-              Type: 'test-type',
-              Name: 'test-name',
-              Asset: {
-                ID: 'test-asset-id',
-              },
-              Issues: [
-                {
-                  ID: 'issue-1',
-                  OrgID: 'test-org-id',
-                  CloudID: 'test-cloud-id',
-                },
-              ],
-            },
-          ];
-          expect(setOutputSpy).toHaveBeenCalledWith(
-            'scan-result',
-            JSON.stringify(expectedResources)
-          );
-        } finally {
-          global.setTimeout = originalSetTimeout;
-        }
-      });
-
-      it('should set failed when timeout is exceeded', async () => {
-        // Set a very short timeout
-        process.env.INPUT_SCAN_TIMEOUT = '1';
-        process.env.INPUT_SCAN_POLL_INTERVAL = '1';
-
-        // Mock getScanTerraformResult to always return Running status
-        mockGetScanTerraformResult.mockResolvedValue({
-          JobID: 'test-job-123',
-          Status: 'Running',
-          Resources: [],
-        } as ScanTerraformResult);
-
-        // Mock Date.now to simulate time passing
-        const originalDateNow = Date.now;
-        let currentTime = 1000000;
-        Date.now = () => currentTime;
-
-        // Mock setTimeout to advance time
-        const originalSetTimeout = global.setTimeout;
-        const mockSetTimeout = mock((fn: () => void) => {
-          currentTime += 2000; // Advance time by 2 seconds (exceeding 1 second timeout)
-          fn();
-          return {} as any;
-        });
-        global.setTimeout = mockSetTimeout as any;
-
-        try {
-          await run();
-
-          expect(setFailedSpy).toHaveBeenCalledWith(
-            expect.stringContaining('Terraform scan timed out')
-          );
-
-          // Check that error was logged
-          const errorCalls = errorSpy.mock.calls.map(call => call[0]);
-          expect(errorCalls.some(msg => msg.includes('Scan exceeded timeout'))).toBe(true);
-        } finally {
-          Date.now = originalDateNow;
-          global.setTimeout = originalSetTimeout;
-        }
-      });
-
-      it('should set failed when API errors occur during status polling', async () => {
-        mockGetScanTerraformResult.mockRejectedValueOnce(new Error('API error'));
-
-        await run();
-
-        expect(setFailedSpy).toHaveBeenCalledWith(
-          expect.stringContaining('Failed to scan terraform')
-        );
-
-        // Check that warning was logged
-        const warningCalls = warningSpy.mock.calls.map(call => call[0]);
-        expect(warningCalls.some(msg => msg.includes('API error checking scan status'))).toBe(true);
-      });
-
-      it('should pass resource-type-filter to scan request when provided', async () => {
-        process.env.INPUT_RESOURCE_TYPE_FILTER = 'aws_s3_bucket,aws_ec2_instance';
-
-        await run();
-
-        // Check that startScanTerraform was called with resource type filter
-        expect(mockStartScanTerraform).toHaveBeenCalledWith({
-          RepoName: 'test-owner/test-repo',
-          Commit: gitLikeHash(
-            'commit:abc123githubRepo:test-repogithubOwner:test-ownerplanPath:./test/plan.json'
-          ),
-          ResourceTypes: ['aws_s3_bucket', 'aws_ec2_instance'],
-          IncludeResourcesWithoutIssues: false,
-          Severities: [IssueSeverityEnum.Critical, IssueSeverityEnum.High],
-        });
-      });
-
-      it('should handle resource-type-filter with whitespace and empty values', async () => {
-        process.env.INPUT_RESOURCE_TYPE_FILTER = ' aws_s3_bucket , , aws_ec2_instance , ';
-
-        await run();
-
-        // Check that startScanTerraform was called with cleaned resource type filter
-        expect(mockStartScanTerraform).toHaveBeenCalledWith({
-          RepoName: 'test-owner/test-repo',
-          Commit: gitLikeHash(
-            'commit:abc123githubRepo:test-repogithubOwner:test-ownerplanPath:./test/plan.json'
-          ),
-          ResourceTypes: ['aws_s3_bucket', 'aws_ec2_instance'],
-          IncludeResourcesWithoutIssues: false,
-          Severities: [IssueSeverityEnum.Critical, IssueSeverityEnum.High],
-        });
-      });
-
-      it('should pass include-resources-without-issues to scan request when enabled', async () => {
-        process.env.INPUT_INCLUDE_RESOURCES_WITHOUT_ISSUES = 'true';
-
-        await run();
-
-        // Check that startScanTerraform was called with verbose enabled
-        expect(mockStartScanTerraform).toHaveBeenCalledWith({
-          RepoName: 'test-owner/test-repo',
-          Commit: gitLikeHash(
-            'commit:abc123githubRepo:test-repogithubOwner:test-ownerplanPath:./test/plan.json'
-          ),
-          ResourceTypes: undefined,
-          IncludeResourcesWithoutIssues: true,
-          Severities: [IssueSeverityEnum.Critical, IssueSeverityEnum.High],
-        });
-      });
-
-      it('should use false for include-resources-without-issues when not provided', async () => {
-        delete process.env.INPUT_INCLUDE_RESOURCES_WITHOUT_ISSUES;
-
-        await run();
-
-        // Check that startScanTerraform was called with verbose disabled (default)
-        expect(mockStartScanTerraform).toHaveBeenCalledWith({
-          RepoName: 'test-owner/test-repo',
-          Commit: gitLikeHash(
-            'commit:abc123githubRepo:test-repogithubOwner:test-ownerplanPath:./test/plan.json'
-          ),
-          ResourceTypes: undefined,
-          IncludeResourcesWithoutIssues: false,
-          Severities: [IssueSeverityEnum.Critical, IssueSeverityEnum.High],
-        });
-      });
-
-      it('should combine resource-type-filter and include-resources-without-issues correctly', async () => {
-        process.env.INPUT_RESOURCE_TYPE_FILTER = 'aws_s3_bucket';
-        process.env.INPUT_INCLUDE_RESOURCES_WITHOUT_ISSUES = 'true';
-
-        await run();
-
-        // Check that startScanTerraform was called with both parameters
-        expect(mockStartScanTerraform).toHaveBeenCalledWith({
-          RepoName: 'test-owner/test-repo',
-          Commit: gitLikeHash(
-            'commit:abc123githubRepo:test-repogithubOwner:test-ownerplanPath:./test/plan.json'
-          ),
-          ResourceTypes: ['aws_s3_bucket'],
-          IncludeResourcesWithoutIssues: true,
-          Severities: [IssueSeverityEnum.Critical, IssueSeverityEnum.High],
-        });
-      });
-
-      it('should pass severities to scan request when provided', async () => {
-        process.env.INPUT_SEVERITIES = 'Critical,High';
-
-        await run();
-
-        expect(mockStartScanTerraform).toHaveBeenCalledWith({
-          RepoName: 'test-owner/test-repo',
-          Commit: gitLikeHash(
-            'commit:abc123githubRepo:test-repogithubOwner:test-ownerplanPath:./test/plan.json'
-          ),
-          ResourceTypes: undefined,
-          IncludeResourcesWithoutIssues: false,
-          Severities: [IssueSeverityEnum.Critical, IssueSeverityEnum.High],
-        });
-      });
-
-      it('should pass single severity to scan request', async () => {
-        process.env.INPUT_FILTERS = 'Medium';
-
-        await run();
-
-        expect(mockStartScanTerraform).toHaveBeenCalledWith({
-          RepoName: 'test-owner/test-repo',
-          Commit: gitLikeHash(
-            'commit:abc123githubRepo:test-repogithubOwner:test-ownerplanPath:./test/plan.json'
-          ),
-          ResourceTypes: undefined,
-          IncludeResourcesWithoutIssues: false,
-          Severities: [IssueSeverityEnum.Medium],
-        });
-      });
-
-      it('should trim and dedupe severities', async () => {
-        process.env.INPUT_FILTERS = ' high , High , Low ';
-
-        await run();
-
-        expect(mockStartScanTerraform).toHaveBeenCalledWith({
-          RepoName: 'test-owner/test-repo',
-          Commit: gitLikeHash(
-            'commit:abc123githubRepo:test-repogithubOwner:test-ownerplanPath:./test/plan.json'
-          ),
-          ResourceTypes: undefined,
-          IncludeResourcesWithoutIssues: false,
-          Severities: [IssueSeverityEnum.High, IssueSeverityEnum.Low],
-        });
-      });
-
-      it('should combine severities with resource-type-filter and include-resources-without-issues', async () => {
-        process.env.INPUT_FILTERS = 'Critical,Low';
-        process.env.INPUT_RESOURCE_TYPE_FILTER = 'aws_s3_bucket';
-        process.env.INPUT_INCLUDE_RESOURCES_WITHOUT_ISSUES = 'true';
-
-        await run();
-
-        expect(mockStartScanTerraform).toHaveBeenCalledWith({
-          RepoName: 'test-owner/test-repo',
-          Commit: gitLikeHash(
-            'commit:abc123githubRepo:test-repogithubOwner:test-ownerplanPath:./test/plan.json'
-          ),
-          ResourceTypes: ['aws_s3_bucket'],
-          IncludeResourcesWithoutIssues: true,
-          Severities: [IssueSeverityEnum.Critical, IssueSeverityEnum.Low],
-        });
-      });
-    });
-
-    describe('error handling', () => {
-      it('should set failed when API client creation fails', async () => {
-        createApiClientSpy.mockImplementationOnce(() => {
-          throw new Error('Failed to create API client');
-        });
-
-        await run();
-
-        expect(setFailedSpy).toHaveBeenCalledWith(
-          expect.stringContaining('Failed to create API client')
-        );
-      });
-
-      it('should handle non-Error objects in catch blocks', async () => {
-        mockUploadTerraformFile.mockRejectedValueOnce('string error');
-
-        await run();
-
-        // Check that error was handled - the error gets converted to Error in the upload function
-        expect(setFailedSpy).toHaveBeenCalled();
-        const failedCalls = setFailedSpy.mock.calls.map(call => call[0]);
-        expect(failedCalls.some(msg => typeof msg === 'string' && msg.length > 0)).toBe(true);
-      });
-
-      it('should set failed with error message when Error is thrown', async () => {
-        mockStartScanTerraform.mockRejectedValueOnce(new Error('Scan start failed'));
-
-        await run();
-
-        // Check that setFailed was called with error message
-        expect(setFailedSpy).toHaveBeenCalledWith('Action failed: Scan start failed');
-      });
-
-      it('should set failed with generic message when non-Error is thrown', async () => {
-        mockStartScanTerraform.mockRejectedValueOnce('string error');
-
-        await run();
-
-        // Check that setFailed was called with generic message
-        expect(setFailedSpy).toHaveBeenCalledWith('An unknown error occurred');
-      });
-    });
-
-    // Note: Comment mode behavior is tested in:
-    // 1. Main successful flow test - verifies GitHub issues work
-    // 2. Input validation tests
-    // 3. GitHub issues skip tests - verifies creation is skipped when appropriate
+        })
+      )
+    );
+
+    await run();
+
+    expect(mockOrgOpenSearchQuery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        QueryID: 2,
+        FilterQuery: expect.stringContaining('arn:aws:s3:::iac-bucket'),
+      })
+    );
+    expect(setOutputSpy).toHaveBeenCalledWith('scan-result', expect.stringContaining('issue-1'));
+  });
+
+  it('applies resource and severity filters to correlation lookup', async () => {
+    process.env.INPUT_RESOURCE_TYPE_FILTER = 'aws_s3_bucket';
+    process.env.INPUT_FILTERS = 'Critical,High';
+
+    await run();
+
+    const calls = mockOrgOpenSearchQuery.mock.calls as unknown as Array<[{ FilterQuery: string }]>;
+    const request = calls[0]?.[0];
+    expect(request?.FilterQuery).toContain('arn:aws:s3:::iac-bucket');
+    expect(request?.FilterQuery).not.toContain('arn:aws:iam::123456789012:role/admin-role');
+    expect(request?.FilterQuery).toContain('16');
+    expect(request?.FilterQuery).toContain('8');
+  });
+
+  it('fails clearly for missing Pulumi stack path', async () => {
+    process.env.INPUT_IAC_TYPE = 'pulumi';
+    delete process.env.INPUT_PULUMI_STACK_PATH;
+
+    await run();
+
+    expect(setFailedSpy).toHaveBeenCalledWith(
+      expect.stringContaining('pulumi-stack-path is required')
+    );
+  });
+
+  it('fails clearly for invalid Terraform plan JSON', async () => {
+    mockReadFile.mockImplementationOnce(() => Promise.resolve('{bad json'));
+
+    await run();
+
+    expect(setFailedSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Invalid Terraform plan JSON')
+    );
+  });
+
+  it('fails clearly for invalid Pulumi stack JSON', async () => {
+    process.env.INPUT_IAC_TYPE = 'pulumi';
+    process.env.INPUT_PULUMI_STACK_PATH = './pulumi-stack.json';
+    mockReadFile.mockImplementationOnce(() => Promise.resolve('{bad json'));
+
+    await run();
+
+    expect(setFailedSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Invalid Pulumi stack export JSON')
+    );
+  });
+
+  it('accepts deprecated api-key and api-secret inputs', async () => {
+    delete process.env.INPUT_AVERLON_API_KEY;
+    delete process.env.INPUT_AVERLON_API_SECRET;
+    process.env.INPUT_API_KEY = 'deprecated-api-key';
+    process.env.INPUT_API_SECRET = 'deprecated-api-secret';
+
+    await run();
+
+    expect(setFailedSpy).not.toHaveBeenCalled();
+    expect(createApiClientSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        apiKey: 'deprecated-api-key',
+        apiSecret: 'deprecated-api-secret',
+      })
+    );
   });
 });

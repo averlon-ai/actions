@@ -1,5 +1,5 @@
 name: 'Averlon Misconfiguration Remediation Agent for IaC'
-description: 'Security analysis for Terraform infrastructure changes with misconfiguration detection and remediation'
+description: 'Correlate Terraform and Pulumi plan changes with existing Averlon misconfigurations'
 author: 'Averlon'
 inputs:
   averlon-api-key:
@@ -17,23 +17,28 @@ inputs:
   commit:
     description: 'Commit SHA to scan'
     required: false
+  iac-type:
+    description: 'IaC type to analyze: terraform or pulumi'
+    required: false
+    default: 'terraform'
   plan-path:
-    description: 'Path to the Terraform plan file'
-    required: true
+    description: 'Path to the Terraform plan file (required for terraform)'
+    required: false
+  pulumi-stack-path:
+    description: 'Path to JSON output from `pulumi stack export` (required for pulumi)'
+    required: false
+  cloud-id:
+    description: 'Averlon cloud ID used for existing issue correlation'
+    required: false
   base-url:
     description: 'Averlon API base URL'
     required: false
     default: 'https://wfe.prod.averlon.io/'
-  scan-poll-interval:
-    description: 'Polling interval (seconds) for scan status'
-    required: false
-    default: '5'
-  scan-timeout:
-    description: 'Timeout (seconds) for scan completion'
-    required: false
-    default: '300'
   github-token:
-    description: 'GitHub token for creating issues and assigning Copilot'
+    description: |
+      GitHub token for creating issues and syncing linked pull requests.
+      Workflow must grant pull-requests: read (in addition to issues: write) so linked Copilot PRs can be registered.
+      Provide a PAT with Copilot access when auto-assign-copilot is true.
     required: false
   auto-assign-copilot:
     description: "Auto-assign issues to GitHub Copilot agent for automatic fixes (requires github-token to be a PAT with GitHub Copilot access, not GITHUB_TOKEN)"
@@ -41,14 +46,11 @@ inputs:
     default: "false"
   resource-type-filter:
     description: |
-      Filter by specific Terraform resource types (comma-separated). 
-      Example: "aws_s3_bucket,aws_lambda_function"
+      Filter by specific resource types (comma-separated).
+      Terraform example: "aws_s3_bucket,aws_lambda_function"
+      Pulumi example: "aws:s3/bucket:Bucket,aws:iam/role:Role"
       If not specified, all resource types are included.
     required: false
-  include-resources-without-issues:
-    description: "If true, will get the resources present in terraform plan file with or without issues. Default is false."
-    required: false
-    default: "false"
   filters:
     description: |
       Severity filters (comma-separated). Supported values: Critical, High, Medium, Low.

@@ -6,12 +6,12 @@ A collection of GitHub Actions for security analysis and risk assessment of infr
 
 <!-- ACTION_LIST:START -->
 
-| Action                                                                                     | Description                                                                                            | Documentation                                    |
-| ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------ |
-| **[Averlon Vulnerability Remediation Agent for Containers](container-analysis/README.md)** | Docker and container security analysis with vulnerability detection and remediation                    | [📖 Read More](container-analysis/README.md)     |
-| **[Averlon Misconfiguration Remediation Agent for IaC](iac-misconfig-analysis/README.md)** | Security analysis for Terraform infrastructure changes with misconfiguration detection and remediation | [📖 Read More](iac-misconfig-analysis/README.md) |
-| **[Averlon Infrastructure Risk PreCog Agent](iac-risk-analysis/README.md)**                | Proactive infrastructure risk prediction and security guardrails for IaC deployments                   | [📖 Read More](iac-risk-analysis/README.md)      |
-| **[Averlon Misconfiguration Remediation Agent for Kubernetes](k8s-analysis/README.md)**    | Kubernetes Helm chart misconfiguration detection and remediation                                       | [📖 Read More](k8s-analysis/README.md)           |
+| Action                                                                                     | Description                                                                          | Documentation                                    |
+| ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------ | ------------------------------------------------ |
+| **[Averlon Vulnerability Remediation Agent for Containers](container-analysis/README.md)** | Docker and container security analysis with vulnerability detection and remediation  | [📖 Read More](container-analysis/README.md)     |
+| **[Averlon Misconfiguration Remediation Agent for IaC](iac-misconfig-analysis/README.md)** | Correlate Terraform and Pulumi plan changes with existing Averlon misconfigurations  | [📖 Read More](iac-misconfig-analysis/README.md) |
+| **[Averlon Infrastructure Risk PreCog Agent](iac-risk-analysis/README.md)**                | Proactive infrastructure risk prediction and security guardrails for IaC deployments | [📖 Read More](iac-risk-analysis/README.md)      |
+| **[Averlon Misconfiguration Remediation Agent for Kubernetes](k8s-analysis/README.md)**    | Kubernetes Helm chart misconfiguration detection and remediation                     | [📖 Read More](k8s-analysis/README.md)           |
 
 <!-- ACTION_LIST:END -->
 

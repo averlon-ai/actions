@@ -1,48 +1,68 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import * as zlib from 'node:zlib';
 import * as core from '@actions/core';
-import { createApiClient, RemediationAgentSkill } from '@averlon/shared';
+import { createApiClient } from '@averlon/shared';
 import { DEFAULT_MCP_IMAGE, DEFAULT_MAX_TURNS } from './constants';
 
 const SKILLS_DIR = path.resolve('.claude/skills');
 
+// The server-built archive wraps all skills in this top-level directory,
+// e.g. "remediation-agent-skills/<skillName>/<file>".
+const ARCHIVE_WRAPPER_DIR = 'remediation-agent-skills';
+
+const TAR_BLOCK_SIZE = 512;
+const TAR_TYPEFLAG_DIRECTORY = '5';
+
+interface TarEntry {
+  name: string;
+  typeflag: string;
+  data: Buffer;
+}
+
 /**
- * Parse a single-file tar archive from a Buffer and return the filename and content.
- * Tar header: 512 bytes. Filename at offset 0 (100 bytes, null-terminated),
- * file size at offset 124 (12 bytes, octal null-terminated).
- * File data starts at offset 512.
+ * Parse a standard USTAR tar buffer into its entries.
+ * Each entry has a 512-byte header followed by its data, padded to the next
+ * 512-byte boundary. The archive ends at a zero-filled header or end of buffer.
  */
-function extractTar(buf: Buffer): { filename: string; data: Buffer } {
-  if (buf.length < 512) {
-    throw new Error('Tar archive too short to contain a header');
+function parseTar(buf: Buffer): TarEntry[] {
+  const entries: TarEntry[] = [];
+  let offset = 0;
+
+  while (offset + TAR_BLOCK_SIZE <= buf.length) {
+    const header = buf.subarray(offset, offset + TAR_BLOCK_SIZE);
+
+    // A zero-filled header marks the end of the archive.
+    if (header.every(byte => byte === 0)) {
+      break;
+    }
+
+    const nameField = header.subarray(0, 100);
+    const nameEnd = nameField.indexOf(0);
+    const name = nameField.subarray(0, nameEnd >= 0 ? nameEnd : 100).toString('utf8');
+
+    const sizeStr = header.subarray(124, 136).toString('utf8').replace(/\0.*$/, '').trim();
+    const size = parseInt(sizeStr, 8);
+
+    if (!name || isNaN(size) || size < 0) {
+      throw new Error(`Invalid tar header at offset ${offset}: name="${name}", size="${sizeStr}"`);
+    }
+
+    const typeflag = header.subarray(156, 157).toString('utf8');
+
+    const dataStart = offset + TAR_BLOCK_SIZE;
+    const dataEnd = dataStart + size;
+    if (dataEnd > buf.length) {
+      throw new Error(`Tar archive is incomplete: expected ${dataEnd} bytes but got ${buf.length}`);
+    }
+
+    entries.push({ name, typeflag, data: buf.subarray(dataStart, dataEnd) });
+
+    const paddedSize = Math.ceil(size / TAR_BLOCK_SIZE) * TAR_BLOCK_SIZE;
+    offset = dataStart + paddedSize;
   }
 
-  // Read filename: first 100 bytes, null-terminated
-  const filenameEnd = buf.indexOf(0, 0);
-  const filename = buf
-    .subarray(0, Math.min(filenameEnd >= 0 ? filenameEnd : 100, 100))
-    .toString('utf8');
-
-  if (!filename) {
-    throw new Error('Tar header contains empty filename');
-  }
-
-  // Read size: 12 bytes at offset 124, octal string null/space terminated
-  const sizeStr = buf.subarray(124, 136).toString('utf8').replace(/\0.*$/, '').trim();
-  const size = parseInt(sizeStr, 8);
-
-  if (isNaN(size) || size < 0) {
-    throw new Error(`Invalid tar file size: ${sizeStr}`);
-  }
-
-  if (512 + size > buf.length) {
-    throw new Error(
-      `Tar archive is incomplete: expected ${512 + size} bytes but got ${buf.length}`
-    );
-  }
-
-  const data = buf.subarray(512, 512 + size);
-  return { filename, data };
+  return entries;
 }
 
 /**
@@ -60,24 +80,50 @@ function validatePath(destDir: string, filePath: string): string {
 }
 
 /**
- * Write a single skill's files to disk.
+ * Extract a base64-encoded tar.gz skills archive into destDir.
+ * Returns the sorted, deduplicated list of skill names found in the archive.
  */
-function writeSkill(skill: RemediationAgentSkill): void {
-  const skillDir = validatePath(SKILLS_DIR, skill.Name);
+function extractSkillsArchive(base64Data: string, destDir: string): string[] {
+  const gzipped = Buffer.from(base64Data, 'base64');
+  const tarBuf = zlib.gunzipSync(gzipped);
+  const entries = parseTar(tarBuf);
 
-  for (const file of skill.Files) {
-    // Base64-decode the tar archive
-    const tarBuf = Buffer.from(file.Content, 'base64');
-    const { filename, data } = extractTar(tarBuf);
+  const skillNames = new Set<string>();
 
-    // Use the tar's embedded filename for the output path
-    const outPath = validatePath(skillDir, filename);
+  for (const entry of entries) {
+    if (entry.typeflag === TAR_TYPEFLAG_DIRECTORY) {
+      continue;
+    }
 
-    // Create intermediate directories
+    let relName = entry.name;
+    if (relName.startsWith(`${ARCHIVE_WRAPPER_DIR}/`)) {
+      relName = relName.slice(ARCHIVE_WRAPPER_DIR.length + 1);
+    }
+    if (!relName) {
+      continue;
+    }
+
+    const sepIndex = relName.indexOf('/');
+    if (sepIndex <= 0) {
+      // Not a "<skillName>/<file>" entry (e.g. a stray top-level file); skip it.
+      continue;
+    }
+
+    const skillName = relName.slice(0, sepIndex);
+    const filePath = relName.slice(sepIndex + 1);
+    if (!filePath) {
+      continue;
+    }
+
+    const outPath = validatePath(destDir, relName);
     fs.mkdirSync(path.dirname(outPath), { recursive: true });
-    fs.writeFileSync(outPath, data);
-    core.info(`  Wrote ${skill.Name}/${filename}`);
+    fs.writeFileSync(outPath, entry.data);
+    core.info(`  Wrote ${skillName}/${filePath}`);
+
+    skillNames.add(skillName);
   }
+
+  return Array.from(skillNames).sort();
 }
 
 async function main(): Promise<void> {
@@ -97,20 +143,12 @@ async function main(): Promise<void> {
 
   const apiClient = createApiClient({ apiKey, apiSecret, baseUrl });
 
-  core.info('Fetching remediation agent skills...');
-  const response = await apiClient.getRemediationAgentSkills();
+  core.info('Downloading remediation agent skills...');
+  const response = await apiClient.downloadRemediationAgentSkills();
 
-  const skills = response.Skills ?? [];
-  if (skills.length === 0) {
+  const skillNames = response.Data ? extractSkillsArchive(response.Data, SKILLS_DIR) : [];
+  if (skillNames.length === 0) {
     core.warning('No skills returned from API');
-  }
-
-  const skillNames: string[] = [];
-
-  for (const skill of skills) {
-    core.info(`Installing skill: ${skill.Name}`);
-    writeSkill(skill);
-    skillNames.push(skill.Name);
   }
 
   // Fetch agent config (MCP image ref, max turns) with fallback defaults
@@ -157,7 +195,7 @@ async function run(): Promise<void> {
   }
 }
 
-export { run, extractTar, writeSkill };
+export { run, parseTar, extractSkillsArchive };
 
 // Run the action if this file is executed directly
 if (require.main === module) {

@@ -1,5 +1,6 @@
 import * as core from '@actions/core';
 import { getInputSafe, parseBoolean } from './input-utils';
+import { logDebug, logInfo } from './log-utils';
 import { parseGitHubRepository } from './github-utils';
 
 /**
@@ -45,8 +46,8 @@ export function getAverlonCommonInputs(): AverlonCommonInputs {
   const { owner: githubOwner, repo: githubRepo } = parseGitHubRepository();
 
   // Debug logging
-  core.debug(`Base URL: ${baseUrl}`);
-  core.info(`Auto-assign Copilot ${autoAssignCopilot ? 'enabled' : 'disabled'}`);
+  logDebug(`Base URL: ${baseUrl}`);
+  logInfo(`Auto-assign Copilot ${autoAssignCopilot ? 'enabled' : 'disabled'}`);
 
   // Mask sensitive values
   if (githubToken) {

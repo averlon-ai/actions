@@ -53,3 +53,7 @@ temp/
 
 # Test artifacts
 k8s-analysis/test/integration/run-artifacts/*
+iac-misconfig-analysis/test/integration/run-artifacts/*
+iac-misconfig-analysis/scan-result.json
+
+.agents/

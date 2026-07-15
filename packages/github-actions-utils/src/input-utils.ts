@@ -1,4 +1,5 @@
 import * as core from '@actions/core';
+import { logDebug, logWarn } from './log-utils';
 import { IssueSeverityEnum } from '@averlon/shared/types';
 
 /**
@@ -14,12 +15,12 @@ export function getInputSafe(name: string, required: boolean = true): string {
   try {
     const value = core.getInput(name, { required: false });
     if (value) {
-      core.debug(`Got input '${name}' from GitHub Actions core`);
+      logDebug(`Got input '${name}' from GitHub Actions core`);
       return value;
     }
   } catch {
     // Ignore errors when not in GitHub Actions environment (e.g., local testing)
-    core.debug('GitHub Actions core not available, falling back to env vars');
+    logDebug('GitHub Actions core not available, falling back to env vars');
   }
 
   // Fallback to environment variables (for local testing)
@@ -33,7 +34,7 @@ export function getInputSafe(name: string, required: boolean = true): string {
   }
 
   if (value) {
-    core.debug(`Got input '${name}' from environment variable ${envName}`);
+    logDebug(`Got input '${name}' from environment variable ${envName}`);
   }
 
   return value || '';
@@ -84,7 +85,7 @@ export function parseIssueSeverityFilters(filtersRaw: string): IssueSeverityEnum
         severitySet.add(IssueSeverityEnum.Low);
         break;
       default:
-        core.warning(
+        logWarn(
           `Unknown filter "${token}" ignored. Supported values: Critical, High, Medium, Low.`
         );
     }

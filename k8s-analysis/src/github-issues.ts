@@ -1,11 +1,13 @@
 import * as core from '@actions/core';
 import * as github from '@actions/github';
-import { CopilotIssueManager, IssueState } from '@averlon/github-copilot-utils';
+import { CopilotIssueManager } from '@averlon/github-copilot-utils';
 import {
   AVERLON_CREATED_LABEL,
   createOrUpdateIssue,
   createPRForIssue,
   closeIssue,
+  listLabeledIssues,
+  syncOpenLabeledIssuesToBackend,
 } from '@averlon/github-actions-utils';
 import {
   getExistingState,
@@ -17,11 +19,11 @@ import {
 import type { ParsedResource } from './resource-parser';
 import { generateIssueBody, generateIssueTitle } from './issue-template';
 import type { ApiClient } from '@averlon/shared';
-import { SourceControlIssueType } from '@averlon/shared';
+import { GitIssueType } from '@averlon/shared';
 
 // Action-specific constants
-const AVERLON_K8S_ANALYSIS_LABEL = 'averlon-k8s-analysis';
-const ISSUE_LABELS = [AVERLON_CREATED_LABEL, AVERLON_K8S_ANALYSIS_LABEL];
+export const AVERLON_K8S_ANALYSIS_LABEL = 'averlon-k8s-analysis';
+export const ISSUE_LABELS = [AVERLON_CREATED_LABEL, AVERLON_K8S_ANALYSIS_LABEL];
 
 /** One resource with chart context for batching (enables overflow into multiple issues) */
 export interface ChartResourceItem {
@@ -112,6 +114,28 @@ export class GithubIssuesService extends CopilotIssueManager {
    * Tries one issue with all resources first; only when the body would overflow
    * GitHub's limit do we break it down into multiple issues (Batch 1 of N, 2 of N, ...).
    */
+  /**
+   * Sync labeled Averlon Helm issues (open and closed, not touched this run) to the source-control backend.
+   */
+  async syncOpenIssuesToBackend(touchedIssueNumbers: number[]): Promise<void> {
+    if (!this.apiClient) {
+      core.debug('apiClient required for open-issue source control sync; skipping');
+      return;
+    }
+    await syncOpenLabeledIssuesToBackend({
+      octokit: this.octokit,
+      orgName: this.owner,
+      repo: this.repo,
+      label: AVERLON_K8S_ANALYSIS_LABEL,
+      issueLabels: ISSUE_LABELS,
+      type: GitIssueType.Helm,
+      apiClient: this.apiClient,
+      cloudId: this.cloudId || '',
+      touchedIssueNumbers,
+      findPRsLinkedToIssue: issueNumber => this.findPRsLinkedToIssue(issueNumber),
+    });
+  }
+
   async createResourceListIssue(options: {
     chartName: string;
     releaseName: string;
@@ -120,7 +144,7 @@ export class GithubIssuesService extends CopilotIssueManager {
     assignCopilot: boolean;
     workflowRunUrl?: string;
     artifactsUrl?: string;
-  }): Promise<void> {
+  }): Promise<number[]> {
     const {
       chartName,
       releaseName,
@@ -155,7 +179,7 @@ export class GithubIssuesService extends CopilotIssueManager {
 
     if (items.length === 0) {
       core.info(`No resources for chart ${chartName}; skipping issue creation`);
-      return;
+      return [];
     }
 
     // Create GI only when at least one resource has issues (derived from issueIds collected above).
@@ -163,7 +187,7 @@ export class GithubIssuesService extends CopilotIssueManager {
       core.info(
         `No issues (misconfiguration or image) found for chart ${chartName}; skipping GitHub issue creation`
       );
-      return;
+      return [];
     }
 
     const accessors = {
@@ -200,7 +224,7 @@ export class GithubIssuesService extends CopilotIssueManager {
 
     if (itemsToSync.length === 0) {
       core.info(`No batches to create or update for chart ${chartName} (already up to date)`);
-      return;
+      return [];
     }
 
     // One issue per namespace that has at least one resource with issues (no issue if no resources in that namespace have issues).
@@ -297,10 +321,10 @@ export class GithubIssuesService extends CopilotIssueManager {
         issueNumber,
         issueTitle,
         riskSummary: '',
-        type: SourceControlIssueType.Helm,
+        type: GitIssueType.Helm,
         labels: ISSUE_LABELS,
         issueIDs: relatedIssueIDs,
-        cloudId: this.cloudId,
+        cloudId: this.cloudId || '',
       });
       const linkedPRs = await this.findPRsLinkedToIssue(issueNumber);
       if (linkedPRs.length > 0) {
@@ -310,7 +334,7 @@ export class GithubIssuesService extends CopilotIssueManager {
           repo: this.repo,
           issueNumber,
           linkedPRs,
-          cloudId: this.cloudId,
+          cloudId: this.cloudId || '',
         });
       }
       await this.assignCopilot(issueNumber, assignCopilot).catch(err => {
@@ -324,6 +348,7 @@ export class GithubIssuesService extends CopilotIssueManager {
     core.info(
       `GitHub issue(s) for chart ${chartName} created/updated: #${allIssueNumbers.join(', #')}`
     );
+    return allIssueNumbers;
   }
 
   async closeIssueByResourceIdentifier(
@@ -374,13 +399,13 @@ export class GithubIssuesService extends CopilotIssueManager {
   }
 
   private async findExistingAverlonIssue(resourceIdentifier: string): Promise<number | null> {
-    const { data: issues } = await this.octokit.rest.issues.listForRepo({
-      owner: this.owner,
-      repo: this.repo,
-      labels: AVERLON_K8S_ANALYSIS_LABEL,
-      state: IssueState.OPEN,
-      per_page: 100,
-    });
+    const issues = await listLabeledIssues(
+      this.octokit,
+      this.owner,
+      this.repo,
+      AVERLON_K8S_ANALYSIS_LABEL,
+      'open'
+    );
 
     const normalizedTargetId = normalizeResourceIdentifier(resourceIdentifier);
 
@@ -401,23 +426,23 @@ export class GithubIssuesService extends CopilotIssueManager {
       issueNumber,
       message,
       apiClient: this.apiClient,
-      type: SourceControlIssueType.Helm,
+      type: GitIssueType.Helm,
       findPRsLinkedToIssue: (num: number) => this.findPRsLinkedToIssue(num),
       logMessage: `Closed Helm recommendation #${issueNumber}`,
-      cloudId: this.cloudId,
+      cloudId: this.cloudId || '',
     });
   }
 
   private async getAllAverlonIssues(): Promise<
     Array<{ number: number; title: string; resourceIdentifier: string }>
   > {
-    const { data: issues } = await this.octokit.rest.issues.listForRepo({
-      owner: this.owner,
-      repo: this.repo,
-      labels: AVERLON_K8S_ANALYSIS_LABEL,
-      state: IssueState.OPEN,
-      per_page: 100,
-    });
+    const issues = await listLabeledIssues(
+      this.octokit,
+      this.owner,
+      this.repo,
+      AVERLON_K8S_ANALYSIS_LABEL,
+      'open'
+    );
 
     return issues.map(issue => {
       const resourceIdentifier = extractResourceIdentifierFromTitle(issue.title);

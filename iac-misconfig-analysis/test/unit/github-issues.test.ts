@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach, afterEach, spyOn, mock } from 'bun:te
 import {
   mockCreateOrUpdateIssue,
   mockCreatePRForIssue,
+  mockSyncOpenLabeledIssuesToBackend,
 } from '@averlon/github-actions-utils/test/github-actions-utils-bun-mock';
 
 // Create mock functions for @actions/core
@@ -672,6 +673,31 @@ describe('GithubIssuesService', () => {
 
       // Should not try to close issue #2 since it doesn't match the pattern
       expect(mockCreateComment).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('syncOpenIssuesToBackend', () => {
+    it('delegates to syncOpenLabeledIssuesToBackend with IaC label and touched set', async () => {
+      const service = new GithubIssuesService(
+        mockOctokit as unknown as any,
+        'test-owner',
+        'test-repo',
+        {} as any,
+        'test-cloud-id'
+      );
+      mockSyncOpenLabeledIssuesToBackend.mockClear();
+
+      await service.syncOpenIssuesToBackend([5]);
+
+      expect(mockSyncOpenLabeledIssuesToBackend).toHaveBeenCalledWith(
+        expect.objectContaining({
+          orgName: 'test-owner',
+          repo: 'test-repo',
+          label: 'averlon-iac-misconfiguration-analysis',
+          cloudId: 'test-cloud-id',
+          touchedIssueNumbers: [5],
+        })
+      );
     });
   });
 

@@ -1,13 +1,13 @@
 # Averlon Misconfiguration Remediation Agent for IaC Action
 
-Security analysis for Terraform infrastructure changes with misconfiguration detection and remediation
+Security correlation for Terraform and Pulumi infrastructure changes with existing Averlon misconfigurations
 
 ## 🚀 What It Does
 
-The Averlon Misconfiguration Remediation Agent for IaC Action helps you identify security issues in your Terraform infrastructure by:
+The Averlon Misconfiguration Remediation Agent for IaC Action helps you identify security issues in your Terraform or Pulumi changes by:
 
-- **🔍 Misconfiguration Detection**: Scans Terraform plans for security misconfigurations
-- **⚠️ Issue Identification**: Identifies specific security issues in your infrastructure
+- **🔍 Existing Misconfiguration Correlation**: Parses local Terraform plan or Pulumi stack export JSON and finds resources in the change
+- **⚠️ Issue Identification**: Correlates those resources with existing Averlon misconfiguration issues already discovered in the live cloud
 - **📊 Issue Reporting**: Provides detailed issue IDs and resource information
 - **📝 GitHub Issues**: Automatically creates GitHub issues for resources with misconfigurations (batched 10 resources per issue)
 - **🤖 Copilot Integration**: Optionally assigns GitHub Copilot to issues for automated remediation
@@ -22,7 +22,7 @@ Before using this action, ensure you have:
 3. **Terraform Setup**: Terraform installed and configured in your workflow
 4. **Terraform Plan File**: A JSON-formatted Terraform plan file to scan
 5. **GitHub Token**: A GitHub token with permissions to create and manage issues
-   - For basic usage: Use `${{ secrets.GITHUB_TOKEN }}` with appropriate GitHub Actions workflow `permissions` declared in your workflow (see [permissions docs](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#permissions))
+   - For basic usage: Use `${{ secrets.GITHUB_TOKEN }}` with workflow `permissions` including `issues: write` and `pull-requests: read` (required to register linked Copilot PRs in the backend; see [permissions docs](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#permissions))
    - For Copilot auto-assignment: **Optional** - Use a Personal Access Token (PAT) with Copilot access (the default `GITHUB_TOKEN` does not support Copilot assignment)
 
 ## 🔐 Create Averlon API Keys and MCP Setup
@@ -112,13 +112,11 @@ Skip GitHub issue creation if you only need the output:
     # Optional: GitHub issues creation
     github-token: ${{ secrets.GITHUB_TOKEN }} # Creates issues when provided
 
-    # Optional: Scan configuration
-    scan-poll-interval: '45' # Poll every 45 seconds
-    scan-timeout: '3600' # 1 hour timeout for large infrastructure
+    # Optional: Correlation configuration
     base-url: 'https://wfe.prod.averlon.io/' # Custom API endpoint
+    cloud-id: 'your-averlon-cloud-id' # Optional: correlate with existing issues in this cloud
     auto-assign-copilot: 'true' #auto assign created issue to copilot
-    resource-type-filter: 'aws_s3_bucket,aws_lambda_function' # filter the misconfiguration for specific terraform resource types
-    include-resources-without-issues: 'true' # If true, will get the resources present in terraform plan file with or without issues. Default is false.
+    resource-type-filter: 'aws_s3_bucket,aws_lambda_function' # filter by Terraform resource types
     filters: 'Critical,High' # Filter by severity levels (comma-separated). Supported: Critical, High, Medium, Low.
 ```
 
@@ -142,15 +140,15 @@ Skip GitHub issue creation if you only need the output:
 
 ### Optional Inputs
 
-| Input                              | Description                                                                                                                       | Default                        |
-| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
-| `base-url`                         | Base URL for Averlon API                                                                                                          | `https://wfe.prod.averlon.io/` |
-| `scan-poll-interval`               | Polling interval in seconds for scan result checking                                                                              | `30`                           |
-| `scan-timeout`                     | Maximum timeout in seconds to wait for scan completion                                                                            | `1800` (30 minutes)            |
-| `github-token`                     | GitHub token for creating issues. Provide a PAT with Copilot access to enable automated assignment; otherwise uses workflow token | `''` (optional)                |
-| `resource-type-filter`             | Comma-separated Terraform resource types to include (e.g. `aws_s3_bucket,aws_lambda_function`). Omit to include all types.        | (all types)                    |
-| `include-resources-without-issues` | If `true`, results include resources with or without issues.                                                                      | `false`                        |
-| `filters`                          | Comma-separated severity levels to include. Supported: `Critical`, `High`, `Medium`, `Low`. Example: `Critical,High`.             | `Critical,High`                |
+| Input                  | Description                                                                                                                       | Default                        |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
+| `base-url`             | Base URL for Averlon API                                                                                                          | `https://wfe.prod.averlon.io/` |
+| `cloud-id`             | Averlon cloud ID used for existing issue correlation                                                                              | (optional)                     |
+| `iac-type`             | IaC type to analyze: `terraform` or `pulumi`                                                                                      | `terraform`                    |
+| `pulumi-stack-path`    | Path to JSON output from `pulumi stack export` when `iac-type` is `pulumi`                                                        | (optional)                     |
+| `github-token`         | GitHub token for creating issues. Provide a PAT with Copilot access to enable automated assignment; otherwise uses workflow token | `''` (optional)                |
+| `resource-type-filter` | Comma-separated resource types to include. Terraform example: `aws_s3_bucket`. Pulumi example: `aws:s3/bucket:Bucket`.            | (all types)                    |
+| `filters`              | Comma-separated severity levels to include. Supported: `Critical`, `High`, `Medium`, `Low`. Example: `Critical,High`.             | `Critical,High`                |
 
 ## 📤 Outputs
 
@@ -203,12 +201,14 @@ The `scan-result` output is a JSON stringified array of `TerraformResource` obje
 
 The action follows this workflow:
 
-1. **File Upload**: Uploads the Terraform plan file to the Averlon platform
-2. **Scan Initiation**: Starts a misconfiguration scan job for the specified commit
-3. **Polling**: Monitors scan progress with configurable polling intervals and exponential backoff
-4. **Results Extraction**: Extracts Terraform resources and their associated issues from the scan results
+1. **Parse Local IaC Output**: Reads Terraform plan JSON or Pulumi stack export JSON from the workflow
+2. **Extract Cloud Resource IDs**: Identifies Terraform resources with stable cloud resource ID candidates from plan state, including unchanged applied resources
+3. **Correlate Existing Issues**: Queries Averlon for existing misconfiguration issues already discovered in the live cloud
+4. **Filter Results**: Returns only resources with matched existing misconfigurations
 5. **Output**: Sets the JSON stringified array of resources to the `scan-result` output
-6. **GitHub Issues Creation** (optional): If `github-token` is provided, creates GitHub issues for resources with misconfigurations
+6. **GitHub Issues Creation** (optional): If `github-token` is provided, creates GitHub issues for correlated resources
+
+This action does not upload plans or run a backend Terraform scan job. It correlates identifiable Terraform plan resources with issues Averlon already knows about from cloud scanning.
 
 ### GitHub Issues Format
 
@@ -271,28 +271,6 @@ with:
     ls -la ./plan.json
     # Verify the file is valid JSON
     cat ./plan.json | jq .
-```
-
-**Timeout Issues**
-
-```yaml
-# Increase timeout for large infrastructure
-scan-timeout: '3600' # 1 hour instead of default 30 minutes
-scan-poll-interval: '60' # Poll every 60 seconds for large scans
-```
-
-**Invalid Poll Configuration**
-
-The `scan-timeout` must be greater than `scan-poll-interval`:
-
-```yaml
-# ❌ Invalid - timeout is less than poll interval
-scan-poll-interval: '60'
-scan-timeout: '30'
-
-# ✅ Valid - timeout is greater than poll interval
-scan-poll-interval: '30'
-scan-timeout: '1800'
 ```
 
 ### Debug Mode

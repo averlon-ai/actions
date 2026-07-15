@@ -5,9 +5,10 @@ import {
   AVERLON_CREATED_LABEL,
   createOrUpdateIssue,
   createPRForIssue,
+  syncOpenLabeledIssuesToBackend,
 } from '@averlon/github-actions-utils';
 import type { TerraformResource, ApiClient } from '@averlon/shared';
-import { SourceControlIssueType } from '@averlon/shared';
+import { GitIssueType } from '@averlon/shared';
 import {
   getExistingState,
   getNewIssueIds,
@@ -18,8 +19,8 @@ import {
 import { generateIssueBody, generateIssueTitle } from './issue-template';
 
 // Action-specific constants
-const AVERLON_MISCONFIG_ANALYSIS_LABEL = 'averlon-iac-misconfiguration-analysis';
-const ISSUE_LABELS = [AVERLON_CREATED_LABEL, AVERLON_MISCONFIG_ANALYSIS_LABEL];
+export const AVERLON_MISCONFIG_ANALYSIS_LABEL = 'averlon-iac-misconfiguration-analysis';
+export const ISSUE_LABELS = [AVERLON_CREATED_LABEL, AVERLON_MISCONFIG_ANALYSIS_LABEL];
 const RESOURCES_PER_ISSUE = 10;
 const MAX_WEIGHT_PER_BATCH = 200;
 
@@ -99,6 +100,28 @@ export class GithubIssuesService extends CopilotIssueManager {
   }
 
   /**
+   * Sync labeled Averlon IaC issues (open and closed, not touched this run) to the source-control backend.
+   */
+  async syncOpenIssuesToBackend(touchedIssueNumbers: number[]): Promise<void> {
+    if (!this.apiClient) {
+      core.debug('apiClient required for open-issue source control sync; skipping');
+      return;
+    }
+    await syncOpenLabeledIssuesToBackend({
+      octokit: this.octokit,
+      orgName: this.owner,
+      repo: this.repo,
+      label: AVERLON_MISCONFIG_ANALYSIS_LABEL,
+      issueLabels: ISSUE_LABELS,
+      type: GitIssueType.IaC,
+      apiClient: this.apiClient,
+      cloudId: this.cloudId || '',
+      touchedIssueNumbers,
+      findPRsLinkedToIssue: issueNumber => this.findPRsLinkedToIssue(issueNumber),
+    });
+  }
+
+  /**
    * Create or update GitHub issues for Terraform resources via the shared batching package
    */
   async createBatchedIssues(
@@ -107,10 +130,10 @@ export class GithubIssuesService extends CopilotIssueManager {
     commit: string,
     assignCopilot: boolean = false,
     workflowRunUrl?: string
-  ): Promise<void> {
+  ): Promise<number[]> {
     if (resources.length === 0) {
       core.info('No Terraform resources to create issues for');
-      return;
+      return [];
     }
 
     const resourcesWithIssues = resources.filter(
@@ -119,7 +142,7 @@ export class GithubIssuesService extends CopilotIssueManager {
 
     if (resourcesWithIssues.length === 0) {
       core.info('No Terraform resources with issues found');
-      return;
+      return [];
     }
 
     const accessors = {
@@ -173,7 +196,7 @@ export class GithubIssuesService extends CopilotIssueManager {
 
     if (itemsToSync.length === 0) {
       core.info('No batches to create or update (all items already up to date)');
-      return;
+      return [];
     }
 
     core.info(
@@ -230,7 +253,7 @@ export class GithubIssuesService extends CopilotIssueManager {
     });
 
     for (const issueNumber of issueNumbers) {
-      if (this.cloudId && this.apiClient) {
+      if (this.apiClient) {
         const { data: issue } = await this.octokit.rest.issues.get({
           owner: this.owner,
           repo: this.repo,
@@ -243,10 +266,10 @@ export class GithubIssuesService extends CopilotIssueManager {
           issueNumber,
           issueTitle: (issue.title?.trim() ?? '') || `Issue #${issueNumber}`,
           riskSummary: '',
-          type: SourceControlIssueType.IaC,
+          type: GitIssueType.IaC,
           labels: ISSUE_LABELS,
           issueIDs: relatedIssueIDs,
-          cloudId: this.cloudId,
+          cloudId: this.cloudId || '',
         });
         const linkedPRs = await this.findPRsLinkedToIssue(issueNumber);
         if (linkedPRs.length > 0) {
@@ -256,7 +279,7 @@ export class GithubIssuesService extends CopilotIssueManager {
             repo: this.repo,
             issueNumber,
             linkedPRs,
-            cloudId: this.cloudId,
+            cloudId: this.cloudId || '',
           });
         }
       }
@@ -264,5 +287,6 @@ export class GithubIssuesService extends CopilotIssueManager {
     }
 
     core.info(`✓ GitHub issues created/updated: #${issueNumbers.join(', #')}`);
+    return issueNumbers;
   }
 }

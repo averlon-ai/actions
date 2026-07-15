@@ -8,6 +8,8 @@ export const DEFAULT_MCP_IMAGE = 'ghcr.io/averlon-security/averlon-mcp:sha-a8e5b
 export const DEFAULT_MAX_TURNS = '250';
 export const DEFAULT_CLAUDE_MODEL = 'claude-opus-4-6';
 
+export const AVERLON_CONTAINER_LABEL = 'averlon-container-analysis';
+
 // ----- Claude tool allowlists -----
 
 export const ALLOWED_BASE_TOOLS = ['Bash(*)', 'Edit', 'Write', 'Read', 'Glob', 'Grep'];

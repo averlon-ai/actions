@@ -123,6 +123,7 @@ runs:
         AVERLON_API_SECRET: ${{ inputs.averlon-api-secret }}
         AVERLON_BASE_URL: ${{ inputs.base-url }}
         AVERLON_CLOUD_ID: ${{ steps.averlon.outputs.cloud-id }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
         CODING_AGENT_OUTPUT: ${{ steps.codingagent.outputs.structured_output }}
         ALL_CODE_DEFECT_IDS: ${{ steps.averlon.outputs.code-defect-ids }}
 

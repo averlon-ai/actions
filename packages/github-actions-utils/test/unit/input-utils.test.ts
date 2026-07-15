@@ -1,58 +1,51 @@
-import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
+import { describe, it, expect, beforeEach, afterEach, spyOn } from 'bun:test';
+import * as core from '@actions/core';
 import { getInputSafe, parseBoolean } from '../../src/input-utils';
 
-// Mock @actions/core
-const mockGetInput = mock(() => '');
-const mockDebug = mock(() => {});
-
-mock.module('@actions/core', () => ({
-  getInput: mockGetInput,
-  debug: mockDebug,
-}));
-
 describe('input-utils', () => {
+  let getInputSpy: ReturnType<typeof spyOn>;
+  let debugSpy: ReturnType<typeof spyOn>;
+
   beforeEach(() => {
-    // Clear all mocks before each test
-    mockGetInput.mockClear();
-    mockDebug.mockClear();
+    getInputSpy = spyOn(core, 'getInput').mockReturnValue('');
+    debugSpy = spyOn(core, 'debug').mockImplementation(() => {});
     // Clear environment variables
     delete process.env['INPUT_AVERLON_API_KEY'];
     delete process.env['INPUT_TEST_VALUE'];
   });
 
   afterEach(() => {
-    // Clean up environment variables
+    getInputSpy?.mockRestore();
+    debugSpy?.mockRestore();
     delete process.env['INPUT_AVERLON_API_KEY'];
     delete process.env['INPUT_TEST_VALUE'];
   });
 
   describe('getInputSafe', () => {
     it('should return value from GitHub Actions core when available', () => {
-      mockGetInput.mockReturnValue('test-value');
+      getInputSpy.mockReturnValue('test-value');
 
       const result = getInputSafe('averlon-api-key', true);
 
       expect(result).toBe('test-value');
-      expect(mockGetInput).toHaveBeenCalledWith('averlon-api-key', { required: false });
-      expect(mockDebug).toHaveBeenCalledWith(
-        "Got input 'averlon-api-key' from GitHub Actions core"
-      );
+      expect(getInputSpy).toHaveBeenCalledWith('averlon-api-key', { required: false });
+      expect(debugSpy).toHaveBeenCalledWith("Got input 'averlon-api-key' from GitHub Actions core");
     });
 
     it('should fallback to environment variables when core returns empty', () => {
-      mockGetInput.mockReturnValue('');
+      getInputSpy.mockReturnValue('');
       process.env['INPUT_AVERLON_API_KEY'] = 'env-value';
 
       const result = getInputSafe('averlon-api-key', true);
 
       expect(result).toBe('env-value');
-      expect(mockDebug).toHaveBeenCalledWith(
+      expect(debugSpy).toHaveBeenCalledWith(
         "Got input 'averlon-api-key' from environment variable INPUT_AVERLON_API_KEY"
       );
     });
 
     it('should convert kebab-case to UPPER_SNAKE_CASE for env vars', () => {
-      mockGetInput.mockReturnValue('');
+      getInputSpy.mockReturnValue('');
       process.env['INPUT_TEST_VALUE'] = 'env-test-value';
 
       const result = getInputSafe('test-value', true);
@@ -61,7 +54,7 @@ describe('input-utils', () => {
     });
 
     it('should throw error when required input is missing', () => {
-      mockGetInput.mockReturnValue('');
+      getInputSpy.mockReturnValue('');
 
       expect(() => getInputSafe('missing-input', true)).toThrow(
         'Input required and not supplied: missing-input (INPUT_MISSING_INPUT)'
@@ -69,7 +62,7 @@ describe('input-utils', () => {
     });
 
     it('should return empty string when optional input is missing', () => {
-      mockGetInput.mockReturnValue('');
+      getInputSpy.mockReturnValue('');
 
       const result = getInputSafe('optional-input', false);
 
@@ -77,7 +70,7 @@ describe('input-utils', () => {
     });
 
     it('should handle core.getInput throwing an error', () => {
-      mockGetInput.mockImplementation(() => {
+      getInputSpy.mockImplementation(() => {
         throw new Error('Core not available');
       });
       process.env['INPUT_AVERLON_API_KEY'] = 'fallback-value';
@@ -85,7 +78,7 @@ describe('input-utils', () => {
       const result = getInputSafe('averlon-api-key', true);
 
       expect(result).toBe('fallback-value');
-      expect(mockDebug).toHaveBeenCalledWith(
+      expect(debugSpy).toHaveBeenCalledWith(
         'GitHub Actions core not available, falling back to env vars'
       );
     });

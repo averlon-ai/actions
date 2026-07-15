@@ -13,7 +13,8 @@
   },
   "dependencies": {
     "@actions/core": "^3.0.0",
-    "@actions/github": "^7.0.0"
+    "@actions/github": "^9.1.1",
+    "@averlon/github-actions-utils": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "latest"

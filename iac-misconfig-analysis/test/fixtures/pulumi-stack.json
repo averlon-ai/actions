@@ -1,0 +1,41 @@
+{
+  "version": 3,
+  "deployment": {
+    "resources": [
+      {
+        "urn": "urn:pulumi:dev::app::pulumi:pulumi:Stack::app-dev",
+        "type": "pulumi:pulumi:Stack"
+      },
+      {
+        "urn": "urn:pulumi:dev::app::pulumi:providers:aws::default_6_0_0",
+        "type": "pulumi:providers:aws",
+        "id": "provider-id"
+      },
+      {
+        "urn": "urn:pulumi:dev::app::aws:s3/bucket:Bucket::public-bucket",
+        "type": "aws:s3/bucket:Bucket",
+        "id": "public-bucket",
+        "outputs": {
+          "arn": "arn:aws:s3:::public-bucket",
+          "bucket": "public-bucket"
+        }
+      },
+      {
+        "urn": "urn:pulumi:dev::app::aws:iam/role:Role::admin-role",
+        "type": "aws:iam/role:Role",
+        "id": "admin-role",
+        "outputs": {
+          "arn": "arn:aws:iam::123456789012:role/admin-role"
+        }
+      },
+      {
+        "urn": "urn:pulumi:dev::app::aws:ec2/securityGroup:SecurityGroup::open-sg",
+        "type": "aws:ec2/securityGroup:SecurityGroup",
+        "id": "sg-12345678",
+        "outputs": {
+          "id": "sg-12345678"
+        }
+      }
+    ]
+  }
+}
