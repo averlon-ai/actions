@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach, afterEach, spyOn, mock } from 'bun:te
 import {
   mockCreateOrUpdateIssue,
   mockCreatePRForIssue,
+  mockSyncOpenLabeledIssuesToBackend,
 } from '@averlon/github-actions-utils/test/github-actions-utils-bun-mock';
 
 import * as core from '@actions/core';
@@ -661,6 +662,31 @@ describe('GithubIssuesService', () => {
     });
   });
 
+  describe('syncOpenIssuesToBackend', () => {
+    it('delegates to syncOpenLabeledIssuesToBackend with Helm label and touched set', async () => {
+      const service = new GithubIssuesService(
+        mockOctokit,
+        'test-owner',
+        'test-repo',
+        {} as any,
+        'test-cloud-id'
+      );
+      mockSyncOpenLabeledIssuesToBackend.mockClear();
+
+      await service.syncOpenIssuesToBackend([1, 2]);
+
+      expect(mockSyncOpenLabeledIssuesToBackend).toHaveBeenCalledWith(
+        expect.objectContaining({
+          orgName: 'test-owner',
+          repo: 'test-repo',
+          label: 'averlon-k8s-analysis',
+          cloudId: 'test-cloud-id',
+          touchedIssueNumbers: [1, 2],
+        })
+      );
+    });
+  });
+
   describe('backend source-control registration via createResourceListIssue', () => {
     let issuesServiceWithBackend: GithubIssuesService;
     let mockFindPRsLinkedToIssue: ReturnType<typeof mock>;
@@ -716,7 +742,7 @@ describe('GithubIssuesService', () => {
       );
     });
 
-    it('calls createOrUpdateIssue with undefined apiClient/cloudId when not configured', async () => {
+    it('calls createOrUpdateIssue with undefined apiClient and empty cloudId when not configured', async () => {
       const noBackendService = new GithubIssuesService(mockOctokit, 'test-owner', 'test-repo');
       (noBackendService as any).assignCopilot = mock(() => Promise.resolve());
       (noBackendService as any).findPRsLinkedToIssue = mock(() => Promise.resolve([]));
@@ -732,7 +758,7 @@ describe('GithubIssuesService', () => {
       });
 
       expect(mockCreateOrUpdateIssue).toHaveBeenCalledWith(
-        expect.objectContaining({ apiClient: undefined, cloudId: undefined })
+        expect.objectContaining({ apiClient: undefined, cloudId: '' })
       );
       expect(mockCreatePRForIssue).not.toHaveBeenCalled();
     });

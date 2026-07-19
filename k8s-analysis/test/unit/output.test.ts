@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, mock, spyOn } from 'bun:test';
+import { describe, it, expect, beforeEach, afterEach, afterAll, mock, spyOn } from 'bun:test';
 import * as core from '@actions/core';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -20,14 +20,14 @@ const mockCoreWarning = mock(() => {});
 const mockCoreSetOutput = mock(() => {});
 const mockSummaryWrite = mock(() => Promise.resolve());
 
-spyOn(core, 'info').mockImplementation(mockCoreInfo);
-spyOn(core, 'warning').mockImplementation(mockCoreWarning);
-spyOn(core, 'setOutput').mockImplementation(mockCoreSetOutput);
-spyOn(core.summary, 'write').mockImplementation(mockSummaryWrite);
+const coreInfoSpy = spyOn(core, 'info').mockImplementation(mockCoreInfo);
+const coreWarningSpy = spyOn(core, 'warning').mockImplementation(mockCoreWarning);
+const coreSetOutputSpy = spyOn(core, 'setOutput').mockImplementation(mockCoreSetOutput);
+const summaryWriteSpy = spyOn(core.summary, 'write').mockImplementation(mockSummaryWrite);
 
 // Mock fs
 const mockWriteFileSync = mock(() => {});
-spyOn(fs, 'writeFileSync').mockImplementation(mockWriteFileSync);
+const writeFileSyncSpy = spyOn(fs, 'writeFileSync').mockImplementation(mockWriteFileSync);
 
 describe('output', () => {
   beforeEach(() => {
@@ -46,6 +46,14 @@ describe('output', () => {
     mockCoreSetOutput.mockClear();
     mockWriteFileSync.mockClear();
     mockSummaryWrite.mockClear();
+  });
+
+  afterAll(() => {
+    writeFileSyncSpy.mockRestore();
+    coreInfoSpy.mockRestore();
+    coreWarningSpy.mockRestore();
+    coreSetOutputSpy.mockRestore();
+    summaryWriteSpy.mockRestore();
   });
 
   describe('buildAnalysisResult', () => {

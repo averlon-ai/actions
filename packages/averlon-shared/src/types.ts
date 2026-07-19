@@ -510,18 +510,9 @@ export interface AccessRiskAssessment {
   };
 }
 
-export interface RemediationAgentSkillFile {
-  Path: string;
-  Content: string; // base64-encoded tar archive
-}
-
-export interface RemediationAgentSkill {
-  Name: string;
-  Files: RemediationAgentSkillFile[];
-}
-
-export interface GetRemediationAgentSkillsResponse {
-  Skills: RemediationAgentSkill[];
+export interface DownloadRemediationAgentSkillsResponse {
+  Data: string; // base64-encoded tar.gz archive containing all skills
+  ContentType: string;
 }
 
 export interface GetRemediationAgentConfigResponse {
@@ -530,4 +521,4 @@ export interface GetRemediationAgentConfigResponse {
   AgentMaxTurns: number;
 }
 
-export * from './source-control.types';
+export * from './git.types';

@@ -1,6 +1,6 @@
 import { describe, it, expect, spyOn, beforeEach, afterEach } from 'bun:test';
 import * as core from '@actions/core';
-import { RiskStatus } from '@averlon/shared';
+import { GitIssueRiskStatus } from '@averlon/shared';
 import * as githubActionsUtils from '@averlon/github-actions-utils';
 import { deriveRiskStatusAndSummary, registerPrWithSourceControl } from '../../src/github-issue';
 
@@ -15,7 +15,7 @@ describe('deriveRiskStatusAndSummary', () => {
       },
     });
     const result = deriveRiskStatusAndSummary(scanResult);
-    expect(result.riskStatus).toBe(RiskStatus.Detected);
+    expect(result.riskStatus).toBe(GitIssueRiskStatus.Detected);
     expect(result.riskSummary).toContain('New internet exposures');
     expect(result.riskSummary).toContain('New internet egress exposures');
   });
@@ -30,7 +30,7 @@ describe('deriveRiskStatusAndSummary', () => {
       },
     });
     const result = deriveRiskStatusAndSummary(scanResult);
-    expect(result.riskStatus).toBe(RiskStatus.Detected);
+    expect(result.riskStatus).toBe(GitIssueRiskStatus.Detected);
     expect(result.riskSummary).toBe('New internet exposures detected');
   });
 
@@ -44,7 +44,7 @@ describe('deriveRiskStatusAndSummary', () => {
       },
     });
     const result = deriveRiskStatusAndSummary(scanResult);
-    expect(result.riskStatus).toBe(RiskStatus.Detected);
+    expect(result.riskStatus).toBe(GitIssueRiskStatus.Detected);
     expect(result.riskSummary).toBe('New internet egress exposures detected');
   });
 
@@ -58,7 +58,7 @@ describe('deriveRiskStatusAndSummary', () => {
       },
     });
     const result = deriveRiskStatusAndSummary(scanResult);
-    expect(result.riskStatus).toBe(RiskStatus.None);
+    expect(result.riskStatus).toBe(GitIssueRiskStatus.None);
   });
 
   it('should return Detected when AccessAnalysis has risks', () => {
@@ -75,7 +75,7 @@ describe('deriveRiskStatusAndSummary', () => {
       },
     });
     const result = deriveRiskStatusAndSummary(scanResult);
-    expect(result.riskStatus).toBe(RiskStatus.Detected);
+    expect(result.riskStatus).toBe(GitIssueRiskStatus.Detected);
     expect(result.riskSummary).toBe('Access risks detected');
   });
 
@@ -92,7 +92,7 @@ describe('deriveRiskStatusAndSummary', () => {
       },
     });
     const result = deriveRiskStatusAndSummary(scanResult);
-    expect(result.riskStatus).toBe(RiskStatus.Detected);
+    expect(result.riskStatus).toBe(GitIssueRiskStatus.Detected);
     expect(result.riskSummary).toContain('New internet exposures');
     expect(result.riskSummary).toContain('Access risks');
   });
@@ -114,7 +114,7 @@ describe('registerPrWithSourceControl', () => {
     createOrUpdateIssueSpy.mockRestore();
   });
 
-  it('should pass RiskStatus.Detected when both exposures are present', async () => {
+  it('should pass GitIssueRiskStatus.Detected when both exposures are present', async () => {
     const scanResult = JSON.stringify({
       ReachabilityAnalysis: {
         Summary: {
@@ -137,12 +137,12 @@ describe('registerPrWithSourceControl', () => {
 
     expect(createOrUpdateIssueSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        riskStatus: RiskStatus.Detected,
+        riskStatus: GitIssueRiskStatus.Detected,
       })
     );
   });
 
-  it('should pass RiskStatus.None when scan result has no exposures', async () => {
+  it('should not register when scan result has no exposures', async () => {
     const scanResult = JSON.stringify({
       ReachabilityAnalysis: {
         Summary: {
@@ -153,7 +153,7 @@ describe('registerPrWithSourceControl', () => {
     });
     const mockApiClient = {} as any;
 
-    await registerPrWithSourceControl({
+    const result = await registerPrWithSourceControl({
       apiClient: mockApiClient,
       owner: 'org',
       repo: 'repo',
@@ -163,11 +163,22 @@ describe('registerPrWithSourceControl', () => {
       cloudId: 'cloud-1',
     });
 
-    expect(createOrUpdateIssueSpy).toHaveBeenCalledWith(
-      expect.objectContaining({
-        riskStatus: RiskStatus.None,
-      })
-    );
+    expect(result).toBe(false);
+    expect(createOrUpdateIssueSpy).not.toHaveBeenCalled();
+  });
+
+  it('should not register when no scan result and no risk summary override', async () => {
+    const result = await registerPrWithSourceControl({
+      apiClient: {} as any,
+      owner: 'org',
+      repo: 'repo',
+      prNumber: 1,
+      prUrl: 'https://github.com/org/repo/pull/1',
+      cloudId: 'cloud-1',
+    });
+
+    expect(result).toBe(false);
+    expect(createOrUpdateIssueSpy).not.toHaveBeenCalled();
   });
 
   it('should return false and not call createOrUpdateIssue when scan was skipped', async () => {
@@ -188,6 +199,11 @@ describe('registerPrWithSourceControl', () => {
   });
 
   it('should use prTitle when provided', async () => {
+    const scanResult = JSON.stringify({
+      ReachabilityAnalysis: {
+        Summary: { NewInternetExposures: ['r1'], NewInternetEgressExposures: [] },
+      },
+    });
     await registerPrWithSourceControl({
       apiClient: {} as any,
       owner: 'org',
@@ -195,6 +211,7 @@ describe('registerPrWithSourceControl', () => {
       prNumber: 5,
       prUrl: 'https://github.com/org/repo/pull/5',
       prTitle: 'Fix: reduce egress exposure',
+      scanResult,
       cloudId: 'cloud-1',
     });
 
@@ -204,12 +221,18 @@ describe('registerPrWithSourceControl', () => {
   });
 
   it('should default issueTitle to "Infrastructure Risk Analysis - PR #N" when prTitle absent', async () => {
+    const scanResult = JSON.stringify({
+      ReachabilityAnalysis: {
+        Summary: { NewInternetExposures: ['r1'], NewInternetEgressExposures: [] },
+      },
+    });
     await registerPrWithSourceControl({
       apiClient: {} as any,
       owner: 'org',
       repo: 'repo',
       prNumber: 7,
       prUrl: 'https://github.com/org/repo/pull/7',
+      scanResult,
       cloudId: 'cloud-1',
     });
 
@@ -242,7 +265,12 @@ describe('registerPrWithSourceControl', () => {
   });
 
   it('should register as InfrastructureRisk type with PR URL as issueUrl', async () => {
-    const { SourceControlIssueType } = await import('@averlon/shared');
+    const { GitIssueType } = await import('@averlon/shared');
+    const scanResult = JSON.stringify({
+      ReachabilityAnalysis: {
+        Summary: { NewInternetExposures: ['r1'], NewInternetEgressExposures: [] },
+      },
+    });
 
     await registerPrWithSourceControl({
       apiClient: {} as any,
@@ -250,12 +278,13 @@ describe('registerPrWithSourceControl', () => {
       repo: 'repo',
       prNumber: 3,
       prUrl: 'https://github.com/org/repo/pull/3',
+      scanResult,
       cloudId: 'cloud-1',
     });
 
     expect(createOrUpdateIssueSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: SourceControlIssueType.InfrastructureRisk,
+        type: GitIssueType.InfrastructureRisk,
         issueUrl: 'https://github.com/org/repo/pull/3',
         issueNumber: 3,
       })

@@ -1,6 +1,7 @@
 import { createHmac } from 'node:crypto';
 import { Agent } from 'node:https';
 import * as core from '@actions/core';
+import { createProxyDispatcherForUrl, logProxyConfiguration, logProxyRouting } from './http-proxy';
 import {
   ApiConfig,
   CallerInfo,
@@ -25,18 +26,18 @@ import {
   Cloud,
   AssetV2,
   IssueV2,
-  RegisterSourceControlIssueRequest,
-  RegisterSourceControlIssueResponse,
-  GetSourceControlIssueRequest,
-  GetSourceControlIssueResponse,
-  UpdateSourceControlIssueStatusRequest,
-  RegisterSourceControlPullRequestRequest,
-  GetSourceControlPullRequestRequest,
-  GetSourceControlPullRequestResponse,
-  UpdateSourceControlPullRequestStatusRequest,
+  RegisterGitIssueRequest,
+  RegisterGitIssueResponse,
+  GetGitIssueRequest,
+  GetGitIssueResponse,
+  UpdateGitIssueStatusRequest,
+  RegisterGitPullRequestRequest,
+  GetGitPullRequestRequest,
+  GetGitPullRequestResponse,
+  UpdateGitPullRequestStatusRequest,
   UpdateCodeDefectFeedbackRequest,
   CodeDefect,
-  GetRemediationAgentSkillsResponse,
+  DownloadRemediationAgentSkillsResponse,
   GetRemediationAgentConfigResponse,
 } from './types';
 
@@ -51,6 +52,7 @@ export class ApiClient {
   private accessToken: string | null = null;
   private tokenExpiresAt: Date | null = null;
   private httpsAgent: Agent | undefined;
+  private loggedProxyConfiguration = false;
 
   constructor(config: ApiConfig) {
     if (!config.apiKey || !config.apiSecret) {
@@ -80,6 +82,26 @@ export class ApiClient {
         checkServerIdentity: () => undefined, // Skip hostname verification
       });
     }
+  }
+
+  private buildFetchOptions(requestUrl: string, options: RequestInit): RequestInit {
+    if (!this.loggedProxyConfiguration) {
+      logProxyConfiguration();
+      this.loggedProxyConfiguration = true;
+    }
+
+    logProxyRouting(requestUrl);
+
+    const proxyDispatcher = createProxyDispatcherForUrl(requestUrl);
+    if (proxyDispatcher) {
+      return { ...options, dispatcher: proxyDispatcher };
+    }
+
+    if (this.httpsAgent) {
+      return { ...options, agent: this.httpsAgent as RequestInit['agent'] };
+    }
+
+    return options;
   }
 
   /**
@@ -151,15 +173,8 @@ export class ApiClient {
         body: JSON.stringify({}),
       };
 
-      // Add custom agent if certificate validation is disabled
-      const finalOptions = this.httpsAgent
-        ? { ...fetchOptions, agent: this.httpsAgent }
-        : fetchOptions;
-
-      const response = await fetch(
-        `${this.config.baseUrl}/pb.Auth/AuthenticateAPIKey`,
-        finalOptions
-      );
+      const authUrl = `${this.config.baseUrl}/pb.Auth/AuthenticateAPIKey`;
+      const response = await fetch(authUrl, this.buildFetchOptions(authUrl, fetchOptions));
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -210,12 +225,8 @@ export class ApiClient {
     try {
       core.debug(`Making ${method} request to: ${endpoint}`);
 
-      // Add custom agent if certificate validation is disabled
-      const finalOptions = this.httpsAgent
-        ? { ...requestOptions, agent: this.httpsAgent }
-        : requestOptions;
-
-      const response = await fetch(`${this.config.baseUrl}${endpoint}`, finalOptions);
+      const requestUrl = `${this.config.baseUrl}${endpoint}`;
+      const response = await fetch(requestUrl, this.buildFetchOptions(requestUrl, requestOptions));
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -246,7 +257,7 @@ export class ApiClient {
     request: UploadTerraformFileRequest
   ): Promise<UploadTerraformFileResponse> {
     return this.makeAuthenticatedRequest<UploadTerraformFileResponse>(
-      '/pb.Queries/UploadTerraformFile',
+      '/pb.GitActions/UploadTerraformFile',
       'POST',
       request
     );
@@ -260,7 +271,7 @@ export class ApiClient {
       `Starting Terraform scan for repo: ${request.RepoName}, base: ${request.BaseCommit}, head: ${request.HeadCommit}`
     );
     return this.makeAuthenticatedRequest<JobStatusNotification>(
-      '/pb.Queries/StartAnalyzeTerraform',
+      '/pb.GitActions/StartAnalyzeTerraform',
       'POST',
       request
     );
@@ -271,7 +282,7 @@ export class ApiClient {
    */
   async getAnalyzeTerraformResult(request: JobStatusNotification): Promise<AnalyzeTerraformResult> {
     return this.makeAuthenticatedRequest<AnalyzeTerraformResult>(
-      '/pb.Queries/GetAnalyzeTerraformResult',
+      '/pb.GitActions/GetAnalyzeTerraformResult',
       'POST',
       request
     );
@@ -282,7 +293,7 @@ export class ApiClient {
    */
   async startScanTerraform(request: ScanTerraformRequest): Promise<JobStatusNotification> {
     return this.makeAuthenticatedRequest<JobStatusNotification>(
-      '/pb.Queries/StartScanTerraform',
+      '/pb.GitActions/StartScanTerraform',
       'POST',
       request
     );
@@ -293,7 +304,7 @@ export class ApiClient {
    */
   async getScanTerraformResult(request: JobStatusNotification): Promise<ScanTerraformResult> {
     const result = await this.makeAuthenticatedRequest<ScanTerraformResult>(
-      '/pb.Queries/GetScanTerraformResult',
+      '/pb.GitActions/GetScanTerraformResult',
       'POST',
       request
     );
@@ -421,89 +432,77 @@ export class ApiClient {
   }
 
   /**
-   * Register a source control issue with SECDI
+   * Register a Git issue with SECDI
    */
-  async registerSourceControlIssue(
-    request: RegisterSourceControlIssueRequest
-  ): Promise<RegisterSourceControlIssueResponse> {
-    return this.makeAuthenticatedRequest<RegisterSourceControlIssueResponse>(
-      '/pb.Reports/RegisterSourceControlIssue',
+  async registerGitIssue(request: RegisterGitIssueRequest): Promise<RegisterGitIssueResponse> {
+    return this.makeAuthenticatedRequest<RegisterGitIssueResponse>(
+      '/pb.GitActions/RegisterGitIssue',
       'POST',
       request
     );
   }
 
   /**
-   * Get or find a source control issue by external identifiers
+   * Get or find a Git issue by external identifiers
    */
-  async getSourceControlIssue(
-    request: GetSourceControlIssueRequest
-  ): Promise<GetSourceControlIssueResponse> {
-    return this.makeAuthenticatedRequest<GetSourceControlIssueResponse>(
-      '/pb.Reports/GetSourceControlIssue',
+  async getGitIssue(request: GetGitIssueRequest): Promise<GetGitIssueResponse> {
+    return this.makeAuthenticatedRequest<GetGitIssueResponse>(
+      '/pb.GitActions/GetGitIssue',
       'POST',
       request
     );
   }
 
   /**
-   * Update the status of a source control issue
+   * Update the status of a Git issue
    */
-  async updateSourceControlIssueStatus(
-    request: UpdateSourceControlIssueStatusRequest
-  ): Promise<void> {
+  async updateGitIssueStatus(request: UpdateGitIssueStatusRequest): Promise<void> {
     await this.makeAuthenticatedRequest<void>(
-      '/pb.Reports/UpdateSourceControlIssueStatus',
+      '/pb.GitActions/UpdateGitIssueStatus',
       'POST',
       request
     );
   }
 
   /**
-   * Register a pull request associated with a source control issue
+   * Register a pull request associated with a Git issue
    */
-  async registerSourceControlPullRequest(
-    request: RegisterSourceControlPullRequestRequest
-  ): Promise<void> {
+  async registerGitPullRequest(request: RegisterGitPullRequestRequest): Promise<void> {
     await this.makeAuthenticatedRequest<void>(
-      '/pb.Reports/RegisterSourceControlPullRequest',
+      '/pb.GitActions/RegisterGitPullRequest',
       'POST',
       request
     );
   }
 
   /**
-   * Get a source control pull request by external identifiers
+   * Get a Git pull request by external identifiers
    */
-  async getSourceControlPullRequest(
-    request: GetSourceControlPullRequestRequest
-  ): Promise<GetSourceControlPullRequestResponse> {
-    return this.makeAuthenticatedRequest<GetSourceControlPullRequestResponse>(
-      '/pb.Reports/GetSourceControlPullRequest',
+  async getGitPullRequest(request: GetGitPullRequestRequest): Promise<GetGitPullRequestResponse> {
+    return this.makeAuthenticatedRequest<GetGitPullRequestResponse>(
+      '/pb.GitActions/GetGitPullRequest',
       'POST',
       request
     );
   }
 
   /**
-   * Update the status of a source control pull request
+   * Update the status of a Git pull request
    */
-  async updateSourceControlPullRequestStatus(
-    request: UpdateSourceControlPullRequestStatusRequest
-  ): Promise<void> {
+  async updateGitPullRequestStatus(request: UpdateGitPullRequestStatusRequest): Promise<void> {
     await this.makeAuthenticatedRequest<void>(
-      '/pb.Reports/UpdateSourceControlPullRequestStatus',
+      '/pb.GitActions/UpdateGitPullRequestStatus',
       'POST',
       request
     );
   }
 
   /**
-   * Get remediation agent skills from the server
+   * Download remediation agent skills archive from the server
    */
-  async getRemediationAgentSkills(): Promise<GetRemediationAgentSkillsResponse> {
-    return this.makeAuthenticatedRequest<GetRemediationAgentSkillsResponse>(
-      '/pb.Queries/GetRemediationAgentSkills',
+  async downloadRemediationAgentSkills(): Promise<DownloadRemediationAgentSkillsResponse> {
+    return this.makeAuthenticatedRequest<DownloadRemediationAgentSkillsResponse>(
+      '/pb.GitActions/DownloadRemediationAgentSkills',
       'POST',
       {}
     );
@@ -514,7 +513,7 @@ export class ApiClient {
    */
   async getRemediationAgentConfig(): Promise<GetRemediationAgentConfigResponse> {
     return this.makeAuthenticatedRequest<GetRemediationAgentConfigResponse>(
-      '/pb.Queries/GetRemediationAgentConfig',
+      '/pb.GitActions/GetRemediationAgentConfig',
       'POST',
       {}
     );
@@ -525,7 +524,7 @@ export class ApiClient {
    */
   async updateCodeDefectFeedback(request: UpdateCodeDefectFeedbackRequest): Promise<CodeDefect> {
     return this.makeAuthenticatedRequest<CodeDefect>(
-      '/pb.Reports/UpdateCodeDefectFeedback',
+      '/pb.GitActions/UpdateCodeDefectFeedback',
       'POST',
       request
     );

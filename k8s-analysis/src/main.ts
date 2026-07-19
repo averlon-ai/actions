@@ -2,7 +2,12 @@ import * as core from '@actions/core';
 import * as github from '@actions/github';
 import * as fs from 'node:fs';
 import { IssueSeverityEnum, createApiClient } from '@averlon/shared';
-import { getInputSafe, parseBoolean } from '@averlon/github-actions-utils';
+import {
+  getInputSafe,
+  parseBoolean,
+  configureActionLogging,
+  logVerbose,
+} from '@averlon/github-actions-utils';
 import {
   parseHelmDryRunOutput,
   parseHelmManifest,
@@ -79,7 +84,9 @@ async function getInputs(): Promise<ActionInputs> {
     );
   }
 
-  const copilotAssignmentEnabled = Boolean(explicitGithubToken);
+  const copilotAssignmentEnabled = Boolean(
+    explicitGithubToken && explicitGithubToken !== fallbackGithubToken
+  );
 
   const baseUrl = getInputSafe('base-url', false) || 'https://wfe.prod.averlon.io/';
   const releaseName = getInputSafe('release-name', false) || undefined;
@@ -124,8 +131,13 @@ async function getInputs(): Promise<ActionInputs> {
   core.info(
     copilotAssignmentEnabled
       ? 'Copilot assignment enabled (custom GitHub token provided).'
-      : 'Copilot assignment disabled (using default GITHUB_TOKEN).'
+      : 'Copilot assignment disabled (using workflow GITHUB_TOKEN).'
   );
+  if (explicitGithubToken && explicitGithubToken === fallbackGithubToken) {
+    core.info(
+      'github-token is the workflow GITHUB_TOKEN; grant pull-requests: read in workflow permissions to sync linked Copilot PRs to the backend.'
+    );
+  }
 
   if (githubToken) {
     core.setSecret(githubToken);
@@ -157,19 +169,20 @@ async function main(): Promise<void> {
   core.info('Starting Averlon Misconfiguration Remediation Agent for Kubernetes...');
 
   const inputs = await getInputs();
+  configureActionLogging({ verbose: inputs.verbose });
   const apiClient = createApiClient({
     apiKey: inputs.apiKey,
     apiSecret: inputs.apiSecret,
     baseUrl: inputs.baseUrl,
   });
 
-  core.info(`Reading manifest file: ${inputs.manifestFilePath}`);
+  logVerbose(`Reading manifest file: ${inputs.manifestFilePath}`);
   if (!fs.existsSync(inputs.manifestFilePath)) {
     throw new Error(`Manifest file not found: ${inputs.manifestFilePath}`);
   }
 
   const manifestContent = fs.readFileSync(inputs.manifestFilePath, 'utf-8');
-  core.info('Parsing Helm manifest YAML...');
+  logVerbose('Parsing Helm manifest YAML...');
 
   let parsed: ReturnType<typeof parseHelmDryRunOutput>;
   try {
@@ -208,32 +221,32 @@ async function main(): Promise<void> {
   const releaseName = inputs.releaseName || derivedReleaseName || 'helm-release';
   const namespace = inputs.namespace || derivedNamespace || 'default';
 
-  core.info(`✓ Parsed dry run output successfully`);
-  core.info(`Chart name: ${chartName}`);
-  core.info(`userSuppliedValues length: ${userSuppliedValues?.length || 0} characters`);
+  logVerbose(`✓ Parsed dry run output successfully`);
+  logVerbose(`Chart name: ${chartName}`);
+  logVerbose(`userSuppliedValues length: ${userSuppliedValues?.length || 0} characters`);
   if (userSuppliedValues) {
     core.debug(
       `userSuppliedValues content (first 500 chars): ${userSuppliedValues.substring(0, 500)}`
     );
   }
-  core.info(`Release name: ${releaseName}`);
-  core.info(`Namespace: ${namespace}`);
+  logVerbose(`Release name: ${releaseName}`);
+  logVerbose(`Namespace: ${namespace}`);
 
-  core.info('═══ Extracting Deployment Metadata ═══');
-  core.info(`Input cloudId: ${inputs.cloudId || 'not provided'}`);
-  core.info(`Input region: ${inputs.region || 'not provided'}`);
-  core.info(`Input cluster: ${inputs.cluster || 'not provided'}`);
+  logVerbose('═══ Extracting Deployment Metadata ═══');
+  logVerbose(`Input cloudId: ${inputs.cloudId || 'not provided'}`);
+  logVerbose(`Input region: ${inputs.region || 'not provided'}`);
+  logVerbose(`Input cluster: ${inputs.cluster || 'not provided'}`);
 
   const extractedMetadata = extractDeploymentMetadata(userSuppliedValues);
   if (extractedMetadata) {
     core.info(`Extracted from user-supplied values: ${JSON.stringify(extractedMetadata, null, 2)}`);
   }
 
-  core.info('Parsing Kubernetes manifests...');
+  logVerbose('Parsing Kubernetes manifests...');
   let resources = parseHelmManifest(manifestYaml);
-  core.info(`✓ Parsed ${resources.length} Kubernetes resources`);
+  logVerbose(`✓ Parsed ${resources.length} Kubernetes resources`);
 
-  core.info('Extracting region/cluster/accountId from resources...');
+  logVerbose('Extracting region/cluster/accountId from resources...');
   const resourceMetadata = extractMetadataFromResources(resources);
 
   const azureRegionPattern =
@@ -247,7 +260,7 @@ async function main(): Promise<void> {
 
   let accountId = extractedMetadata?.accountId ?? resourceMetadata.accountId;
   if (userIntentAzure && accountId && /^\d{12}$/.test(accountId)) {
-    core.info('Using Azure context; ignoring detected AWS account ID');
+    logVerbose('Using Azure context; ignoring detected AWS account ID');
     accountId = undefined;
   }
 
@@ -385,7 +398,7 @@ async function main(): Promise<void> {
         : undefined;
     const artifactsUrl = workflowRunUrl ? `${workflowRunUrl}#artifacts` : undefined;
 
-    await issuesService.createResourceListIssue({
+    const touchedIssueNumbers = await issuesService.createResourceListIssue({
       chartName,
       releaseName,
       namespace,
@@ -394,6 +407,12 @@ async function main(): Promise<void> {
       workflowRunUrl,
       artifactsUrl,
     });
+    try {
+      await issuesService.syncOpenIssuesToBackend(touchedIssueNumbers);
+    } catch (syncError) {
+      const syncErrorMessage = syncError instanceof Error ? syncError.message : String(syncError);
+      core.warning(`Failed to sync labeled issues to source control backend: ${syncErrorMessage}`);
+    }
   } else {
     core.info('\nSkipping issue creation (SKIP_ISSUE_CREATION is set)');
     const issueIds = new Set<string>();

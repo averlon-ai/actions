@@ -1,4 +1,5 @@
 import * as core from '@actions/core';
+import { buildListForRepoParams, issueIncludesLabel } from '@averlon/github-actions-utils';
 import type { ExistingState, ExistingIssueState, SyncBatchedIssuesOptions } from './types';
 import {
   parseBatchStateFromBody,
@@ -41,15 +42,16 @@ export async function getExistingState(
   const byKey = new Map<string, { fingerprint: string; issueNumber: number }>();
   const issues: ExistingIssueState[] = [];
 
-  const { data: list } = await octokit.rest.issues.listForRepo({
-    owner,
-    repo,
-    state: OPEN_STATE,
-    labels: label,
-    per_page: 100,
-  });
+  const listParams = buildListForRepoParams({ owner, repo, label, state: OPEN_STATE });
+  const { data: list } = await octokit.rest.issues.listForRepo(listParams);
 
   for (const issue of list) {
+    if (issue.pull_request) {
+      continue;
+    }
+    if (!issueIncludesLabel(issue, listParams.labels)) {
+      continue;
+    }
     const body = issue.body ?? '';
     const state = parseBatchStateFromBody(body);
     if (!state) continue;
@@ -180,14 +182,14 @@ export async function syncBatchedIssues<T>(
   };
   const chunksToCreate: ChunkWithState[] = [];
   let overflow: T[] = [];
-  let overflowCreateOnly = false;
+  let overflowCreateOnly: boolean = false;
 
   for (let i = 0; i < batches.length; i++) {
     const batch = (batches[i] ?? []) as T[];
-    const batchCreateOnly = i >= createOnlyStartIndex;
+    const batchCreateOnly: boolean = i >= createOnlyStartIndex;
     if (batch.length === 0 && overflow.length === 0) continue;
     const chunk = [...overflow, ...batch];
-    const chunkCreateOnly = overflowCreateOnly || batchCreateOnly;
+    const chunkCreateOnly: boolean = overflowCreateOnly || batchCreateOnly;
     overflow = [];
     overflowCreateOnly = false;
     if (chunk.length === 0) continue;

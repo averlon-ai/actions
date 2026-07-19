@@ -43,9 +43,10 @@ inputs:
     required: false
   github-token:
     description: |
-      GitHub token for creating issues / pull requests.
-      Defaults to the workflow GITHUB_TOKEN when omitted (Copilot assignment disabled).
-      Provide a PAT with Copilot access to automatically assign Copilot.
+      GitHub token for creating issues and syncing linked pull requests.
+      Defaults to the workflow GITHUB_TOKEN when omitted.
+      Workflow must grant pull-requests: read (in addition to issues: write) so linked Copilot PRs can be registered.
+      Provide a separate PAT with Copilot access to enable automatic Copilot assignment.
     required: false
   filters:
     description: |

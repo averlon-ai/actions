@@ -1,0 +1,100 @@
+{
+  "format_version": "1.0",
+  "terraform_version": "1.5.0",
+  "planned_values": {
+    "root_module": {
+      "resources": [
+        {
+          "address": "aws_s3_bucket.example",
+          "mode": "managed",
+          "type": "aws_s3_bucket",
+          "name": "example",
+          "values": {
+            "bucket": "my-test-bucket",
+            "arn": "arn:aws:s3:::my-test-bucket"
+          }
+        }
+      ]
+    }
+  },
+  "resource_changes": [
+    {
+      "address": "aws_s3_bucket.example",
+      "mode": "managed",
+      "type": "aws_s3_bucket",
+      "name": "example",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "change": {
+        "actions": ["create"],
+        "before": null,
+        "after": {
+          "arn": "arn:aws:s3:::my-test-bucket",
+          "bucket": "my-test-bucket",
+          "id": "my-test-bucket"
+        },
+        "after_unknown": {
+          "region": true
+        },
+        "before_sensitive": false,
+        "after_sensitive": {}
+      }
+    },
+    {
+      "address": "aws_iam_role.lambda_role",
+      "mode": "managed",
+      "type": "aws_iam_role",
+      "name": "lambda_role",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "change": {
+        "actions": ["create"],
+        "before": null,
+        "after": {
+          "arn": "arn:aws:iam::123456789012:role/lambda-execution-role",
+          "id": "lambda-execution-role",
+          "name": "lambda-execution-role"
+        },
+        "after_unknown": {
+          "inline_policy": true
+        },
+        "before_sensitive": false,
+        "after_sensitive": {}
+      }
+    },
+    {
+      "address": "aws_security_group.web",
+      "mode": "managed",
+      "type": "aws_security_group",
+      "name": "web",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "change": {
+        "actions": ["no-op"],
+        "before": {
+          "id": "sg-existing",
+          "name": "web-sg"
+        },
+        "after": {
+          "id": "sg-existing",
+          "name": "web-sg"
+        }
+      }
+    },
+    {
+      "address": "aws_lambda_function.processor",
+      "mode": "managed",
+      "type": "aws_lambda_function",
+      "name": "processor",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "change": {
+        "actions": ["update"],
+        "before": {
+          "arn": "arn:aws:lambda:us-east-1:123456789012:function:processor",
+          "function_name": "processor"
+        },
+        "after": {
+          "arn": "arn:aws:lambda:us-east-1:123456789012:function:processor-v2",
+          "function_name": "processor-v2"
+        }
+      }
+    }
+  ]
+}

@@ -1,17 +1,17 @@
 import * as core from '@actions/core';
 import type { ApiClient, AnalyzeTerraformResult } from '@averlon/shared';
-import { RiskStatus, SourceControlIssueType } from '@averlon/shared';
+import { GitIssueRiskStatus, GitIssueType } from '@averlon/shared';
 import { createOrUpdateIssue } from '@averlon/github-actions-utils';
 import { hasAccessRisksInParsed, getReachabilityExposureTypes } from './pr-comment';
 
 const AVERLON_IAC_RISK_LABEL = 'averlon-iac-risk-analysis';
 
 /**
- * Derives RiskStatus and RiskSummary from scan result.
- * RiskStatus = Detected when NewInternetExposures, NewInternetEgressExposures, or AccessAnalysis risks are present.
+ * Derives GitIssueRiskStatus and RiskSummary from scan result.
+ * GitIssueRiskStatus = Detected when NewInternetExposures, NewInternetEgressExposures, or AccessAnalysis risks are present.
  */
 export function deriveRiskStatusAndSummary(scanResult: string): {
-  riskStatus: RiskStatus;
+  riskStatus: GitIssueRiskStatus;
   riskSummary: string;
 } {
   try {
@@ -27,7 +27,7 @@ export function deriveRiskStatusAndSummary(scanResult: string): {
       if (hasAccessRisks) parts.push('Access risks');
       const riskSummary = parts.join(' and ') + ' detected';
       return {
-        riskStatus: RiskStatus.Detected,
+        riskStatus: GitIssueRiskStatus.Detected,
         riskSummary,
       };
     }
@@ -36,7 +36,7 @@ export function deriveRiskStatusAndSummary(scanResult: string): {
   }
 
   return {
-    riskStatus: RiskStatus.None,
+    riskStatus: GitIssueRiskStatus.None,
     riskSummary: '',
   };
 }
@@ -83,7 +83,7 @@ export async function registerPrWithSourceControl(params: RegisterPrParams): Pro
   }
 
   let riskSummary = riskSummaryOverride;
-  let riskStatus: RiskStatus | undefined;
+  let riskStatus: GitIssueRiskStatus | undefined;
 
   if (scanResult !== undefined && scanResult !== '') {
     const derived = deriveRiskStatusAndSummary(scanResult);
@@ -92,8 +92,23 @@ export async function registerPrWithSourceControl(params: RegisterPrParams): Pro
     }
     riskStatus = derived.riskStatus;
   }
-  if (riskSummary === undefined) {
-    riskSummary = 'Infrastructure risk analysis';
+
+  const hasRisk =
+    riskStatus === GitIssueRiskStatus.Detected ||
+    (riskSummaryOverride !== undefined && riskSummaryOverride.trim().length > 0);
+
+  if (!hasRisk) {
+    core.debug(
+      'No infrastructure risk detected; skipping source control registration for this PR.'
+    );
+    return false;
+  }
+
+  if (riskSummary === undefined || riskSummary.trim().length === 0) {
+    riskSummary = 'Infrastructure risk detected';
+  }
+  if (riskStatus === undefined) {
+    riskStatus = GitIssueRiskStatus.Detected;
   }
 
   const issueTitle = prTitle ?? `Infrastructure Risk Analysis - PR #${prNumber}`;
@@ -107,9 +122,9 @@ export async function registerPrWithSourceControl(params: RegisterPrParams): Pro
     issueUrl: prUrl,
     riskSummary,
     riskStatus,
-    type: SourceControlIssueType.InfrastructureRisk,
+    type: GitIssueType.InfrastructureRisk,
     labels: [AVERLON_IAC_RISK_LABEL],
-    cloudId,
+    cloudId: cloudId || '',
   });
 
   if (registered) {
