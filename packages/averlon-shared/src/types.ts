@@ -326,9 +326,10 @@ export interface OpenSearchIssue {
   ID?: string;
   ResourceID?: string;
   Severity?: number;
-  /** Preferred: severity from OpenSearch field issue.SeverityV2.Severity */
-  SeverityV2?: { Severity?: number };
-  Classification?: number;
+  /** Preferred: severity from OpenSearch field issue.SeverityInfo.Severity */
+  SeverityInfo?: { Severity?: number };
+  /** Vulnerability classifications (bitmask enum values) from issue.Classifications */
+  Classifications?: number[];
   Title?: string;
   Summary?: string;
   Type?: number;

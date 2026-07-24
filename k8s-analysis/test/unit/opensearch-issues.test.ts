@@ -420,7 +420,7 @@ describe('opensearch-issues', () => {
             {
               ID: 'issue-1',
               ResourceID: 'us-west-2:test-cluster:default:Deployment:app',
-              SeverityV2: { Severity: IssueSeverityEnum.High },
+              SeverityInfo: { Severity: IssueSeverityEnum.High },
               Title: 'Test Issue',
               Summary: 'Test Summary',
               Type: IssueTypeEnum.Misconfiguration,
@@ -471,13 +471,13 @@ describe('opensearch-issues', () => {
       expect(mockQuery).toHaveBeenCalled();
       const filterQuery = JSON.parse(mockQuery.mock.calls[0][0].FilterQuery);
       const severityFilter = filterQuery.bool.filter.find(
-        (f: any) => f.terms && f.terms['issue.SeverityV2.Severity']
+        (f: any) => f.terms && f.terms['issue.SeverityInfo.Severity']
       );
       expect(severityFilter).toBeDefined();
-      expect(severityFilter.terms['issue.SeverityV2.Severity']).toContain(
+      expect(severityFilter.terms['issue.SeverityInfo.Severity']).toContain(
         IssueSeverityEnum.High.toString()
       );
-      expect(severityFilter.terms['issue.SeverityV2.Severity']).toContain(
+      expect(severityFilter.terms['issue.SeverityInfo.Severity']).toContain(
         IssueSeverityEnum.Critical.toString()
       );
     });
@@ -699,7 +699,7 @@ describe('opensearch-issues', () => {
                 ID: 'vuln-1',
                 ResourceID: deploymentResourceId,
                 ImageRepository: 'nginx',
-                SeverityV2: { Severity: IssueSeverityEnum.High },
+                SeverityInfo: { Severity: IssueSeverityEnum.High },
                 Title: 'CVE-1',
                 Type: IssueTypeEnum.Vulnerability,
                 Status: 2,
@@ -708,7 +708,7 @@ describe('opensearch-issues', () => {
                 ID: 'vuln-2',
                 ResourceID: 'arn:unknown/other/resource',
                 ImageRepository: 'nginx',
-                SeverityV2: { Severity: IssueSeverityEnum.High },
+                SeverityInfo: { Severity: IssueSeverityEnum.High },
                 Title: 'CVE-2',
                 Type: IssueTypeEnum.Vulnerability,
                 Status: 2,
@@ -777,7 +777,7 @@ describe('opensearch-issues', () => {
             {
               ID: 'i1',
               ResourceID: deploymentResourceId,
-              SeverityV2: { Severity: IssueSeverityEnum.Invalid },
+              SeverityInfo: { Severity: IssueSeverityEnum.Invalid },
               Title: 'A',
               Type: IssueTypeEnum.Misconfiguration,
               Status: 2,
@@ -785,7 +785,7 @@ describe('opensearch-issues', () => {
             {
               ID: 'i2',
               ResourceID: deploymentResourceId,
-              SeverityV2: { Severity: IssueSeverityEnum.Unknown },
+              SeverityInfo: { Severity: IssueSeverityEnum.Unknown },
               Title: 'B',
               Type: IssueTypeEnum.Misconfiguration,
               Status: 2,
@@ -793,7 +793,7 @@ describe('opensearch-issues', () => {
             {
               ID: 'i3',
               ResourceID: deploymentResourceId,
-              SeverityV2: { Severity: IssueSeverityEnum.Low },
+              SeverityInfo: { Severity: IssueSeverityEnum.Low },
               Title: 'C',
               Type: IssueTypeEnum.Misconfiguration,
               Status: 2,
@@ -801,7 +801,7 @@ describe('opensearch-issues', () => {
             {
               ID: 'i4',
               ResourceID: deploymentResourceId,
-              SeverityV2: { Severity: IssueSeverityEnum.Medium },
+              SeverityInfo: { Severity: IssueSeverityEnum.Medium },
               Title: 'D',
               Type: IssueTypeEnum.Misconfiguration,
               Status: 2,
@@ -809,7 +809,7 @@ describe('opensearch-issues', () => {
             {
               ID: 'i5',
               ResourceID: deploymentResourceId,
-              SeverityV2: { Severity: IssueSeverityEnum.High },
+              SeverityInfo: { Severity: IssueSeverityEnum.High },
               Title: 'E',
               Type: IssueTypeEnum.Misconfiguration,
               Status: 2,
@@ -817,7 +817,7 @@ describe('opensearch-issues', () => {
             {
               ID: 'i6',
               ResourceID: deploymentResourceId,
-              SeverityV2: { Severity: IssueSeverityEnum.Critical },
+              SeverityInfo: { Severity: IssueSeverityEnum.Critical },
               Title: 'F',
               Type: IssueTypeEnum.Misconfiguration,
               Status: 2,
@@ -849,7 +849,7 @@ describe('opensearch-issues', () => {
       const issues: OpenSearchIssue[] = Array.from({ length: 60 }, (_, i) => ({
         ID: `issue-${i}`,
         ResourceID: 'us-west-2:test-cluster:default:Deployment:app',
-        SeverityV2: { Severity: IssueSeverityEnum.High },
+        SeverityInfo: { Severity: IssueSeverityEnum.High },
         Title: `Issue ${i}`,
         Summary: `Summary ${i}`,
         Type: IssueTypeEnum.Misconfiguration,
@@ -965,22 +965,22 @@ describe('opensearch-issues', () => {
               {
                 ID: 'misconfig-deploy-1',
                 ResourceID: deploymentResourceId,
-                SeverityV2: { Severity: IssueSeverityEnum.High },
+                SeverityInfo: { Severity: IssueSeverityEnum.High },
                 Title: 'Deployment Security Issue',
                 Summary: 'Missing security context',
                 Type: IssueTypeEnum.Misconfiguration,
                 Status: 2,
-                Classification: 0,
+                Classifications: [],
               },
               {
                 ID: 'misconfig-deploy-2',
                 ResourceID: deploymentResourceId,
-                SeverityV2: { Severity: IssueSeverityEnum.Critical },
+                SeverityInfo: { Severity: IssueSeverityEnum.Critical },
                 Title: 'Critical Deployment Issue',
                 Summary: 'Privileged container',
                 Type: IssueTypeEnum.Misconfiguration,
                 Status: 2,
-                Classification: 0,
+                Classifications: [],
               },
             ],
           });
@@ -996,7 +996,7 @@ describe('opensearch-issues', () => {
           // Check if severity filter is applied - if so, Medium issues won't be returned
           const filterQuery = JSON.parse(params.FilterQuery);
           const hasSeverityFilter = filterQuery.bool.filter.some(
-            (f: any) => f.terms && f.terms['issue.SeverityV2.Severity']
+            (f: any) => f.terms && f.terms['issue.SeverityInfo.Severity']
           );
           if (hasSeverityFilter) {
             // Severity filter is applied, so Medium issues are filtered out
@@ -1008,12 +1008,12 @@ describe('opensearch-issues', () => {
               {
                 ID: 'misconfig-stateful-1',
                 ResourceID: statefulSetResourceId,
-                SeverityV2: { Severity: IssueSeverityEnum.Medium },
+                SeverityInfo: { Severity: IssueSeverityEnum.Medium },
                 Title: 'StatefulSet Issue',
                 Summary: 'Volume mount issue',
                 Type: IssueTypeEnum.Misconfiguration,
                 Status: 2,
-                Classification: 0,
+                Classifications: [],
               },
             ],
           });
@@ -1029,7 +1029,7 @@ describe('opensearch-issues', () => {
           // Check if severity filter is applied - if so, Low issues won't be returned
           const filterQuery = JSON.parse(params.FilterQuery);
           const hasSeverityFilter = filterQuery.bool.filter.some(
-            (f: any) => f.terms && f.terms['issue.SeverityV2.Severity']
+            (f: any) => f.terms && f.terms['issue.SeverityInfo.Severity']
           );
           if (hasSeverityFilter) {
             // Severity filter is applied, so Low issues are filtered out
@@ -1041,12 +1041,12 @@ describe('opensearch-issues', () => {
               {
                 ID: 'misconfig-svc-1',
                 ResourceID: serviceResourceId,
-                SeverityV2: { Severity: IssueSeverityEnum.Low },
+                SeverityInfo: { Severity: IssueSeverityEnum.Low },
                 Title: 'Service Issue',
                 Summary: 'Service configuration issue',
                 Type: IssueTypeEnum.Misconfiguration,
                 Status: 2,
-                Classification: 0,
+                Classifications: [],
               },
             ],
           });
@@ -1070,23 +1070,23 @@ describe('opensearch-issues', () => {
               ID: 'vuln-nginx-1',
               ResourceID: deploymentResourceId,
               ImageRepository: 'nginx',
-              SeverityV2: { Severity: IssueSeverityEnum.Critical },
+              SeverityInfo: { Severity: IssueSeverityEnum.Critical },
               Title: 'CVE-2023-1234 in nginx',
               Summary: 'Critical vulnerability in nginx image',
               Type: IssueTypeEnum.Vulnerability,
               Status: 2,
-              Classification: VulnerabilityClassEnum.RemoteCodeExecution,
+              Classifications: [VulnerabilityClassEnum.RemoteCodeExecution],
             });
             issues.push({
               ID: 'vuln-nginx-2',
               ResourceID: deploymentResourceId,
               ImageRepository: 'nginx',
-              SeverityV2: { Severity: IssueSeverityEnum.High },
+              SeverityInfo: { Severity: IssueSeverityEnum.High },
               Title: 'CVE-2023-5678 in nginx',
               Summary: 'High severity vulnerability',
               Type: IssueTypeEnum.Vulnerability,
               Status: 2,
-              Classification: VulnerabilityClassEnum.PrivilegeEscalation,
+              Classifications: [VulnerabilityClassEnum.PrivilegeEscalation],
             });
           }
 
@@ -1095,12 +1095,12 @@ describe('opensearch-issues', () => {
               ID: 'vuln-redis-1',
               ResourceID: deploymentResourceId,
               ImageRepository: 'redis',
-              SeverityV2: { Severity: IssueSeverityEnum.High },
+              SeverityInfo: { Severity: IssueSeverityEnum.High },
               Title: 'CVE-2023-9999 in redis',
               Summary: 'High severity vulnerability in redis',
               Type: IssueTypeEnum.Vulnerability,
               Status: 2,
-              Classification: VulnerabilityClassEnum.InformationDisclosure,
+              Classifications: [VulnerabilityClassEnum.InformationDisclosure],
             });
           }
 
@@ -1201,26 +1201,26 @@ describe('opensearch-issues', () => {
       // Verify: Severity filtering is applied in queries
       const deploymentFilterQuery = JSON.parse(deploymentQuery.FilterQuery);
       const deploymentSeverityFilter = deploymentFilterQuery.bool.filter.find(
-        (f: any) => f.terms && f.terms['issue.SeverityV2.Severity']
+        (f: any) => f.terms && f.terms['issue.SeverityInfo.Severity']
       );
       expect(deploymentSeverityFilter).toBeDefined();
-      expect(deploymentSeverityFilter.terms['issue.SeverityV2.Severity']).toContain(
+      expect(deploymentSeverityFilter.terms['issue.SeverityInfo.Severity']).toContain(
         IssueSeverityEnum.Critical.toString()
       );
-      expect(deploymentSeverityFilter.terms['issue.SeverityV2.Severity']).toContain(
+      expect(deploymentSeverityFilter.terms['issue.SeverityInfo.Severity']).toContain(
         IssueSeverityEnum.High.toString()
       );
 
       // Verify: Image vulnerability query also has severity filter
       const imageVulnFilterQuery = JSON.parse(imageVulnQuery.FilterQuery);
       const imageVulnSeverityFilter = imageVulnFilterQuery.bool.filter.find(
-        (f: any) => f.terms && f.terms['issue.SeverityV2.Severity']
+        (f: any) => f.terms && f.terms['issue.SeverityInfo.Severity']
       );
       expect(imageVulnSeverityFilter).toBeDefined();
-      expect(imageVulnSeverityFilter.terms['issue.SeverityV2.Severity']).toContain(
+      expect(imageVulnSeverityFilter.terms['issue.SeverityInfo.Severity']).toContain(
         IssueSeverityEnum.Critical.toString()
       );
-      expect(imageVulnSeverityFilter.terms['issue.SeverityV2.Severity']).toContain(
+      expect(imageVulnSeverityFilter.terms['issue.SeverityInfo.Severity']).toContain(
         IssueSeverityEnum.High.toString()
       );
 

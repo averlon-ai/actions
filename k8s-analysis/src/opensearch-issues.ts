@@ -298,14 +298,14 @@ export function extractImageIssuesForDisplay(
   return result;
 }
 
-const ISSUE_SEVERITY_FIELD = 'issue.SeverityV2.Severity';
+const ISSUE_SEVERITY_FIELD = 'issue.SeverityInfo.Severity';
 
 /** Common OpenSearch Issue fields returned for both misconfig and image issue queries */
 const ISSUE_INCLUDE_FIELDS_BASE = [
   'issue.ResourceID',
   'issue.ID',
   ISSUE_SEVERITY_FIELD,
-  'issue.Classification',
+  'issue.Classifications',
   'issue.Title',
   'issue.Summary',
   'issue.Type',
@@ -500,7 +500,7 @@ function buildOpenSearchFilter(options: {
   const baseFilters: Array<Record<string, unknown>> = [
     { term: { 'issue.Type': IssueTypeEnum.Misconfiguration } },
     { term: { 'issue.Status': 2 } },
-    { term: { 'issue.ResourceType': options.resourceType } },
+    { term: { 'issue.AssetType': options.resourceType } },
     { terms: { 'issue.ResourceID': options.resourceIds } },
     { terms: { 'issue.CloudID': [options.cloudId] } },
   ];
@@ -528,7 +528,7 @@ function mapOpenSearchIssue(
 
   const issueType = imageRepository ? 'Vulnerability' : 'Misconfiguration';
 
-  const severityValue = issue.SeverityV2?.Severity;
+  const severityValue = issue.SeverityInfo?.Severity;
   return {
     id: issue.ID,
     severity: severityToString(severityValue),
@@ -536,7 +536,7 @@ function mapOpenSearchIssue(
     title: issue.Title,
     summary: issue.Summary,
     type: issueType,
-    classification: classificationNames(issue.Classification),
+    classification: classificationNames(issue.Classifications),
     status: issue.Status !== undefined ? issue.Status.toString() : undefined,
     ...(imageRepository && { imageRepository }),
     ...(imageId != null && imageId !== '' && { imageId }),
@@ -551,15 +551,25 @@ function chunkArray<T>(items: T[], size: number): T[][] {
   return chunks;
 }
 
-function classificationNames(classification?: number): string[] {
-  if (!classification) {
+function classificationNames(classifications?: number[]): string[] {
+  if (!classifications?.length) {
+    return [];
+  }
+
+  let mask = 0;
+  for (const value of classifications) {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      mask |= value;
+    }
+  }
+  if (!mask) {
     return [];
   }
 
   const labels: string[] = [];
   for (const [flagString, label] of Object.entries(vulnerabilityClassLabels)) {
     const flag = Number(flagString);
-    if ((classification & flag) === flag) {
+    if ((mask & flag) === flag) {
       labels.push(label);
     }
   }

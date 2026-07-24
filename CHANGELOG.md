@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.4] - 2026-07-23
+- Update the analysis for updated signature of backend
+- update dependencies
+
 ## [2.0.2] - 2026-07-15
 - Update to support Pulumi for IAC Misconfiguration Analysis
 - Update other actions for simplified Averlon API calls

@@ -18,7 +18,7 @@
     "@averlon/github-actions-utils": "workspace:*",
     "@averlon/github-copilot-utils": "workspace:*",
     "@averlon/shared": "workspace:*",
-    "js-yaml": "^4.1.0",
+    "js-yaml": "^5.2.1",
     "parse-docker-image-name": "^3.0.0",
     "semver": "^7.6.0"
   },
