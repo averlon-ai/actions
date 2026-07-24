@@ -25,7 +25,7 @@ function buildOpenSearchFilter(params: {
   ];
   const severities = severityValues(params.severities);
   if (severities.length > 0) {
-    filter.push({ terms: { 'issue.SeverityV2.Severity': severities } });
+    filter.push({ terms: { 'issue.SeverityInfo.Severity': severities } });
   }
   return JSON.stringify({ bool: { should: [{ bool: { filter } }] } });
 }
@@ -188,7 +188,7 @@ export async function correlateExistingIssues(params: {
     QueryID: OpenSearchNamedQueryEnum.Issue,
     FilterQuery: filterQuery,
     Limit: limit,
-    IncludeFields: ['issue.ID', 'issue.ResourceID', 'issue.SeverityV2.Severity'],
+    IncludeFields: ['issue.ID', 'issue.ResourceID', 'issue.SeverityInfo.Severity'],
     Aggregations: 'default',
   };
 
