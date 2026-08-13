@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.5] - 20206-08-12
+- handle expired anthropic key in container analysis
+- handle merged PR's properly
+
 ## [2.0.4] - 2026-07-23
 - Update the analysis for updated signature of backend
 - update dependencies

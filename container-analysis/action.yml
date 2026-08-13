@@ -52,6 +52,12 @@ inputs:
 runs:
   using: 'composite'
   steps:
+    - name: 'Validate Anthropic API key'
+      shell: bash
+      run: node "${{ github.action_path }}/dist/validate-anthropic-key.js"
+      env:
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
+
     - name: 'Download Averlon skills'
       id: setup-skill
       shell: bash
@@ -115,7 +121,7 @@ runs:
           --max-turns ${{ steps.setup-skill.outputs.agent-max-turns }}
 
     - name: 'Submit Agent Feedback'
-      if: always() && steps.averlon.outputs.has-recommendations == 'true'
+      if: always()
       shell: bash
       run: node "${{ github.action_path }}/dist/submit-feedback.js"
       env:
@@ -126,6 +132,14 @@ runs:
         GITHUB_TOKEN: ${{ inputs.github-token }}
         CODING_AGENT_OUTPUT: ${{ steps.codingagent.outputs.structured_output }}
         ALL_CODE_DEFECT_IDS: ${{ steps.averlon.outputs.code-defect-ids }}
+
+    - name: 'Verify Anthropic API key after agent failure'
+      if: always() && steps.codingagent.outcome == 'failure'
+      shell: bash
+      run: node "${{ github.action_path }}/dist/validate-anthropic-key.js"
+      env:
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
+        ANTHROPIC_KEY_CHECK_STAGE: 'post-agent'
 
     - name: 'Cleanup MCP Config'
       if: always()

@@ -140,6 +140,7 @@ async function main(): Promise<void> {
     core.setOutput('has-recommendations', 'false');
     core.setOutput('prompt', '');
     core.setOutput('allowed-tools', '');
+    core.setOutput('cloud-id', dockerfileRecs.find(df => df.CloudID)?.CloudID ?? '');
     return;
   }
 

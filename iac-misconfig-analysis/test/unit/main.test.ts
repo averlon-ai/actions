@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, it, expect, spyOn, beforeEach, afterEach, mock } from 'bun:test';
 
 const mockInfo = mock(() => {});
@@ -136,9 +139,12 @@ describe('iac-misconfig-analysis correlation flow', () => {
   let setFailedSpy: ReturnType<typeof spyOn>;
   let createBatchedIssuesSpy: ReturnType<typeof spyOn>;
   let originalEnv: NodeJS.ProcessEnv;
+  let scanResultDir: string;
 
   beforeEach(() => {
     originalEnv = { ...process.env };
+    scanResultDir = mkdtempSync(join(tmpdir(), 'iac-misconfig-test-'));
+    process.env.SCAN_RESULT_JSON_PATH = join(scanResultDir, 'scan-result.json');
     process.env.GITHUB_REPOSITORY = 'test-owner/test-repo';
     process.env.GITHUB_SHA = 'abc123';
     process.env.INPUT_AVERLON_API_KEY = 'test-api-key';
@@ -201,6 +207,7 @@ describe('iac-misconfig-analysis correlation flow', () => {
     setOutputSpy.mockRestore();
     setFailedSpy.mockRestore();
     createBatchedIssuesSpy.mockRestore();
+    rmSync(scanResultDir, { recursive: true, force: true });
     process.env = originalEnv;
   });
 

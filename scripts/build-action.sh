@@ -32,7 +32,7 @@ mkdir -p "$ACTION_NAME/dist"
 bun build "$ACTION_NAME/src/main.ts" --outdir "$ACTION_NAME/dist" --target node --format cjs --minify
 
 # Build additional entry points if they exist
-for extra in "$ACTION_NAME"/src/submit-feedback.ts "$ACTION_NAME"/src/setup-skills.ts "$ACTION_NAME"/src/cleanup-skills.ts; do
+for extra in "$ACTION_NAME"/src/submit-feedback.ts "$ACTION_NAME"/src/setup-skills.ts "$ACTION_NAME"/src/cleanup-skills.ts "$ACTION_NAME"/src/validate-anthropic-key.ts; do
   if [ -f "$extra" ]; then
     bun build "$extra" --outdir "$ACTION_NAME/dist" --target node --format cjs --minify
   fi
