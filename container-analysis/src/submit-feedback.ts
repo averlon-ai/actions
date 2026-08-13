@@ -61,6 +61,31 @@ export interface SyncLabeledContainerPRsParams {
 }
 
 /**
+ * Add the container label to a PR so later runs find it via the labeled listing.
+ * GitHub creates the label on demand.
+ */
+export async function ensureContainerLabel(
+  octokit: ReturnType<typeof github.getOctokit>,
+  owner: string,
+  repo: string,
+  prNumber: number
+): Promise<boolean> {
+  try {
+    await octokit.rest.issues.addLabels({
+      owner,
+      repo,
+      issue_number: prNumber,
+      labels: [AVERLON_CONTAINER_LABEL],
+    });
+    return true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logWarn(`Failed to label PR #${prNumber} with ${AVERLON_CONTAINER_LABEL}: ${message}`);
+    return false;
+  }
+}
+
+/**
  * Upsert labeled container remediation PRs to the backend (PR number = issue number).
  * Skips PRs already handled in the current workflow run.
  */
@@ -317,6 +342,7 @@ async function main(): Promise<void> {
           pull_number: prNumber,
         });
         prStatus = mapPullRequestToGitStatus(pull);
+        await ensureContainerLabel(octokit, scopedOwner, scopedRepo, prNumber);
       }
 
       const registered = await registerContainerRemediationPR({

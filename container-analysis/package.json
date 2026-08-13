@@ -13,9 +13,10 @@
   "dependencies": {
     "@actions/core": "^3.0.0",
     "@actions/github": "^9.1.1",
-    "fast-glob": "^3.3.2",
+    "@anthropic-ai/sdk": "^0.116.0",
+    "@averlon/github-actions-utils": "workspace:*",
     "@averlon/shared": "workspace:*",
-    "@averlon/github-actions-utils": "workspace:*"
+    "fast-glob": "^3.3.2"
   },
   "devDependencies": {
     "@types/bun": "latest"

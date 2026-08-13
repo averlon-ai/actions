@@ -46,7 +46,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Run Averlon Container Analysis
-        uses: averlon-ai/actions/container-analysis@v2.0.4
+        uses: averlon-ai/actions/container-analysis@v2.0.5
         with:
           averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
           averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -77,7 +77,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Run Averlon Container Analysis
-        uses: averlon-ai/actions/container-analysis@v2.0.4
+        uses: averlon-ai/actions/container-analysis@v2.0.5
         with:
           averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
           averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -113,7 +113,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Run Averlon Container Analysis
-        uses: averlon-ai/actions/container-analysis@v2.0.4
+        uses: averlon-ai/actions/container-analysis@v2.0.5
         with:
           averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
           averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -144,6 +144,17 @@ jobs:
 
 ### Common Issues
 
+**Issue: "The Anthropic API key was rejected (401)"**
+
+The action validates `anthropic-api-key` against the Anthropic API before doing any other work, and fails immediately if the key is unusable.
+
+- `401` — the key is invalid, expired, or revoked. Issue a new key and update the secret.
+- `403` — the key is valid but not permitted to use the API. Check its workspace and permissions.
+- `credit balance is too low` — the Anthropic account is out of credit. Top it up.
+- No key provided — confirm the `ANTHROPIC_API_KEY` secret exists and is exposed to the workflow (secrets are not available to workflows triggered by forked PRs).
+
+If Anthropic is unreachable or rate-limits the check, the action logs a warning and continues rather than failing. The key is also re-checked when the Coding Agent step fails, so a key that expires mid-run fails the action instead of passing silently.
+
 **Issue: "No recommendations found"**
 
 Averlon did not find any vulnerabilities matching your filters for the specified Dockerfile/image. This is normal if your image is already up to date.
@@ -159,7 +170,7 @@ The agent may fail if the remediation is complex or the repository context is in
 - Check the `prompt` output for what was sent to the agent
 - Ensure the GitHub token has `contents: write` and `pull-requests: write` permissions
 - Try a more capable model (e.g., `claude-opus-4-6`)
-- The step uses `continue-on-error: true`, so the workflow won't fail — check step logs for details
+- The step uses `continue-on-error: true`, so the workflow won't fail — check step logs for details. The one exception is an unusable Anthropic API key: the key is re-validated after a failed agent run and the action fails if it has become invalid.
 
 **Issue: MCP connection issues**
 
