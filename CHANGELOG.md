@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - support podman for container-analysis action
 - support claude-via-bedrock for container-analysis action
 
+## [2.0.6] - 20206-09-10
+- support podman for container-analysis action
+- support claude-via-bedrock for container-analysis action
+
 ## [2.0.5] - 20206-08-12
 - handle expired anthropic key in container analysis
 - handle merged PR's properly
