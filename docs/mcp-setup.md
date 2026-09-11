@@ -56,6 +56,9 @@ Use this key pair for the Github Copilot MCP Client.
 }
 ```
 
+> [!NOTE]
+> If the runner has `podman` instead of `docker`, change `"command"` to `"podman"`. The arguments stay the same.
+
 Reference: [Configure MCP for Copilot coding agent in the GitHub](https://docs.github.com/en/copilot/how-tos/use-copilot-agents/coding-agent/extend-coding-agent-with-mcp).
 
 > [!NOTE]

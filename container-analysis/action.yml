@@ -10,8 +10,9 @@ inputs:
     description: 'API secret for Averlon authentication (GitActions-scoped)'
     required: true
   anthropic-api-key:
-    description: 'API key for Anthropic Claude'
-    required: true
+    description: 'API key for Anthropic Claude. Not needed when use-bedrock is true.'
+    required: false
+    default: ''
   github-token:
     description: 'GitHub token for claude-code-action (contents: write, pull-requests: write)'
     required: true
@@ -45,14 +46,35 @@ inputs:
     required: false
     default: 'false'
   model:
-    description: 'Claude model to use for remediation. See supported models in README.'
+    description: 'Claude model to use for remediation. Defaults to claude-opus-5, or us.anthropic.claude-opus-5 with use-bedrock. See supported models in README.'
     required: false
-    default: 'claude-opus-4-6'
+    default: ''
+  use-bedrock:
+    description: 'Run the Coding Agent against Claude on Amazon Bedrock instead of the Anthropic API. AWS credentials and AWS_REGION must be in the workflow environment.'
+    required: false
+    default: 'false'
+  container-engine:
+    description: |
+      Command used to run the Averlon MCP server container, when the runner keeps
+      it outside PATH or under another name. Either a name on PATH ('docker',
+      'podman') or an absolute path (e.g. '/opt/podman/bin/podman').
+      Left empty, the action uses docker if present and podman otherwise.
+    required: false
+    default: ''
 
 runs:
   using: 'composite'
   steps:
+    - name: 'Prepare Coding Agent'
+      id: model
+      shell: bash
+      run: bash "${{ github.action_path }}/scripts/prepare-agent.sh"
+      env:
+        MODEL: ${{ inputs.model }}
+        USE_BEDROCK: ${{ inputs.use-bedrock }}
+
     - name: 'Validate Anthropic API key'
+      if: inputs.use-bedrock != 'true'
       shell: bash
       run: node "${{ github.action_path }}/dist/validate-anthropic-key.js"
       env:
@@ -70,26 +92,13 @@ runs:
     - name: 'Create MCP Config'
       id: mcp-config
       shell: bash
-      run: |
-        MCP_CONFIG=$(mktemp /tmp/averlon-mcp-config.XXXXXX.json)
-        cat > "$MCP_CONFIG" << 'MCPEOF'
-        {
-          "mcpServers": {
-            "averlon-mcp": {
-              "command": "docker",
-              "args": [
-                "run", "--rm", "-i",
-                "-e", "AVERLON_API_KEY=${{ inputs.mcp-api-key || inputs.averlon-api-key }}",
-                "-e", "AVERLON_API_SECRET=${{ inputs.mcp-api-secret || inputs.averlon-api-secret }}",
-                "-e", "SECDI_SERVER=${{ inputs.base-url }}",
-                "${{ steps.setup-skill.outputs.mcp-image-ref }}"
-              ]
-            }
-          }
-        }
-        MCPEOF
-        chmod 600 "$MCP_CONFIG"
-        echo "config-path=$MCP_CONFIG" >> "$GITHUB_OUTPUT"
+      run: bash "${{ github.action_path }}/scripts/create-mcp-config.sh"
+      env:
+        MCP_API_KEY: ${{ inputs.mcp-api-key || inputs.averlon-api-key }}
+        MCP_API_SECRET: ${{ inputs.mcp-api-secret || inputs.averlon-api-secret }}
+        SECDI_SERVER: ${{ inputs.base-url }}
+        MCP_IMAGE_REF: ${{ steps.setup-skill.outputs.mcp-image-ref }}
+        CONTAINER_ENGINE: ${{ inputs.container-engine }}
 
     - name: 'Get Averlon recommendations'
       id: averlon
@@ -110,11 +119,12 @@ runs:
       continue-on-error: true
       uses: anthropics/claude-code-action@v1
       with:
+        use_bedrock: ${{ inputs.use-bedrock }}
         anthropic_api_key: ${{ inputs.anthropic-api-key }}
         github_token: ${{ inputs.github-token }}
         prompt: ${{ steps.averlon.outputs.prompt }}
         claude_args: |
-          --model ${{ inputs.model }}
+          --model ${{ steps.model.outputs.model }}
           --mcp-config ${{ steps.mcp-config.outputs.config-path }}
           --allowedTools "${{ steps.averlon.outputs.allowed-tools }}"
           --json-schema '${{ steps.averlon.outputs.json-schema }}'
@@ -134,7 +144,7 @@ runs:
         ALL_CODE_DEFECT_IDS: ${{ steps.averlon.outputs.code-defect-ids }}
 
     - name: 'Verify Anthropic API key after agent failure'
-      if: always() && steps.codingagent.outcome == 'failure'
+      if: always() && steps.codingagent.outcome == 'failure' && inputs.use-bedrock != 'true'
       shell: bash
       run: node "${{ github.action_path }}/dist/validate-anthropic-key.js"
       env:
@@ -144,7 +154,7 @@ runs:
     - name: 'Cleanup MCP Config'
       if: always()
       shell: bash
-      run: rm -f "${{ steps.mcp-config.outputs.config-path }}"
+      run: rm -rf "${{ steps.mcp-config.outputs.config-dir }}"
 
     - name: 'Cleanup Averlon skill'
       if: always()
