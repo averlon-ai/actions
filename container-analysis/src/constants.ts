@@ -6,7 +6,7 @@ export const DEFAULT_BASE_URL = 'https://wfe.prod.averlon.io/';
 export const DEFAULT_FILTERS = 'Recommended,Critical,HighRCE';
 export const DEFAULT_MCP_IMAGE = 'ghcr.io/averlon-security/averlon-mcp:sha-a8e5b91';
 export const DEFAULT_MAX_TURNS = '250';
-export const DEFAULT_CLAUDE_MODEL = 'claude-opus-4-6';
+export const DEFAULT_CLAUDE_MODEL = 'claude-opus-5';
 
 export const AVERLON_CONTAINER_LABEL = 'averlon-container-analysis';
 
