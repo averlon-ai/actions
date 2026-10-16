@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as zlib from 'node:zlib';
@@ -126,6 +127,55 @@ function extractSkillsArchive(base64Data: string, destDir: string): string[] {
   return Array.from(skillNames).sort();
 }
 
+/**
+ * Add the installed skill directories to the repository's local exclude file
+ * (`.git/info/exclude`). The skills are written into the checkout, and the
+ * Coding Agent commits its fixes with `git add -A`, so without this the skill
+ * files can end up in a remediation PR. The exclude file is never committed,
+ * and skills the repository already tracks are not affected.
+ */
+function excludeSkillsFromGit(skillsDir: string, skillNames: string[]): void {
+  if (skillNames.length === 0) {
+    return;
+  }
+
+  let topLevel: string;
+  let excludeFile: string;
+  try {
+    const [top, exclude] = execFileSync(
+      'git',
+      ['rev-parse', '--show-toplevel', '--git-path', 'info/exclude'],
+      { cwd: skillsDir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }
+    )
+      .trim()
+      .split('\n');
+    if (!top || !exclude) {
+      throw new Error('unexpected git rev-parse output');
+    }
+    topLevel = top;
+    excludeFile = path.resolve(skillsDir, exclude);
+  } catch {
+    core.warning(
+      'Could not find the git repository of the checkout; the installed skills are not excluded from git'
+    );
+    return;
+  }
+
+  // git reports the top level with symlinks resolved (e.g. macOS /var -> /private/var).
+  const relDir = path.relative(topLevel, fs.realpathSync(skillsDir)).split(path.sep).join('/');
+  const existing = fs.existsSync(excludeFile) ? fs.readFileSync(excludeFile, 'utf8') : '';
+  const lines = new Set(existing.split('\n'));
+  const missing = skillNames.map(name => `/${relDir}/${name}/`).filter(line => !lines.has(line));
+  if (missing.length === 0) {
+    return;
+  }
+
+  fs.mkdirSync(path.dirname(excludeFile), { recursive: true });
+  const separator = existing === '' || existing.endsWith('\n') ? '' : '\n';
+  fs.appendFileSync(excludeFile, `${separator}${missing.join('\n')}\n`);
+  core.info(`Excluded ${missing.length} installed skill directories from git`);
+}
+
 async function main(): Promise<void> {
   const apiKey = process.env.AVERLON_API_KEY;
   const apiSecret = process.env.AVERLON_API_SECRET;
@@ -150,6 +200,7 @@ async function main(): Promise<void> {
   if (skillNames.length === 0) {
     core.warning('No skills returned from API');
   }
+  excludeSkillsFromGit(SKILLS_DIR, skillNames);
 
   // Fetch agent config (MCP image ref, max turns) with fallback defaults
   let mcpImageRef = DEFAULT_MCP_IMAGE;
@@ -195,7 +246,7 @@ async function run(): Promise<void> {
   }
 }
 
-export { run, parseTar, extractSkillsArchive };
+export { run, parseTar, extractSkillsArchive, excludeSkillsFromGit };
 
 // Run the action if this file is executed directly
 if (require.main === module) {

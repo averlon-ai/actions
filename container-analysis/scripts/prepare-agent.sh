@@ -1,14 +1,26 @@
 #!/usr/bin/env bash
 #
-# Resolves the agent model and, on Bedrock, checks the credentials
-# claude-code-action requires.
+# Checks the workflow trigger, resolves the agent model and, on Bedrock,
+# checks the credentials claude-code-action requires.
 #
-# Required environment: MODEL, USE_BEDROCK, GITHUB_OUTPUT
+# Required environment: GITHUB_EVENT_NAME, MODEL, USE_BEDROCK, GITHUB_OUTPUT
 
 set -euo pipefail
 
-DEFAULT_MODEL=claude-opus-5
-DEFAULT_BEDROCK_MODEL=us.anthropic.claude-opus-5
+DEFAULT_MODEL=claude-opus-5-5
+DEFAULT_BEDROCK_MODEL=us.anthropic.claude-opus-5-5
+SUPPORTED_EVENTS="workflow_dispatch, schedule, workflow_run"
+
+check_trigger() {
+  case "${GITHUB_EVENT_NAME:-}" in
+    workflow_dispatch|schedule|workflow_run)
+      return 0
+      ;;
+  esac
+
+  echo "::error::This workflow was triggered by '${GITHUB_EVENT_NAME:-}', which is not supported. Supported triggers are $SUPPORTED_EVENTS. Update the 'on:' section of the workflow."
+  return 1
+}
 
 # Sets MODEL_RESOLVED rather than printing it, so that the workflow command
 # below reaches the log instead of a substitution.
@@ -48,6 +60,8 @@ check_bedrock_credentials() {
 }
 
 main() {
+  check_trigger
+
   if [ "${USE_BEDROCK:-false}" = "true" ]; then
     resolve_bedrock_model
     check_bedrock_credentials

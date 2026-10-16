@@ -96,25 +96,6 @@ export interface ScanTerraformResult {
   Resources?: TerraformResource[];
 }
 
-export interface GetGitProjectRecommendationsRequest {
-  Requests: GitFileRecommendationRequest[];
-  GitRepo: string;
-  Filters: number;
-}
-
-export interface GitFileRecommendationRequest {
-  Path: string;
-  Type: number;
-  Content: string;
-  Metadata: KVPair[];
-  ImageRepository: string;
-}
-
-export interface GetGitProjectRecommendationsResponse {
-  DockerfileRecommendations: GitDockerfileRecommendation[];
-  TerraformRecommendations: GitTerraformRecommendation[];
-}
-
 // --- GetContainerRecommendations types ---
 
 export interface GitDockerfileRequest {
@@ -203,31 +184,8 @@ export interface GetContainerRecommendationsResponse {
   Dockerfiles: GitDockerfile[];
 }
 
-export interface GitDockerfileRecommendation {
-  CloudID: string;
-  AccountID: string;
-  Path: string;
-  ImageRepository?: ImageRepository;
-  Recommendations?: GitFileRecommendation[];
-  FixAllRecommendation?: GitFileRecommendation;
-}
-
-export interface GitTerraformRecommendation {
-  CloudID: string;
-  AccountID: string;
-  Path: string;
-  Recommendations?: GitFileRecommendation[];
-}
-
 export interface ImageRepository {
   RepositoryName?: string;
-}
-
-export interface GitFileRecommendation {
-  Prompt?: string;
-  Summary?: string;
-  Hint?: KVPair;
-  Command?: string;
 }
 
 export enum OpenSearchNamedQueryEnum {

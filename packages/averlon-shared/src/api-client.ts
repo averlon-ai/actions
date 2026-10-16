@@ -5,8 +5,6 @@ import { createProxyDispatcherForUrl, logProxyConfiguration, logProxyRouting } f
 import {
   ApiConfig,
   CallerInfo,
-  GetGitProjectRecommendationsRequest,
-  GetGitProjectRecommendationsResponse,
   GetContainerRecommendationsRequest,
   GetContainerRecommendationsResponse,
   AnalyzeTerraformResult,
@@ -46,6 +44,53 @@ import {
  * Tokens are refreshed if they expire within this window
  */
 const TOKEN_EXPIRATION_BUFFER_MS = 5 * 60 * 1000;
+
+/**
+ * Retry policy for 429 Too Many Requests responses.
+ * The backend limits requests per second, so short waits are enough.
+ */
+const RATE_LIMIT_MAX_ATTEMPTS = 6;
+const RATE_LIMIT_BASE_DELAY_MS = 1000;
+const RATE_LIMIT_MAX_DELAY_MS = 30 * 1000;
+
+/**
+ * Parse a Retry-After header (seconds or HTTP-date) into milliseconds.
+ * Returns undefined when the header is missing or invalid.
+ */
+export function parseRetryAfterMs(header: string | null, now = Date.now()): number | undefined {
+  if (!header) {
+    return undefined;
+  }
+  const value = header.trim();
+  if (/^\d+$/.test(value)) {
+    return Number(value) * 1000;
+  }
+  const date = Date.parse(value);
+  if (Number.isNaN(date)) {
+    return undefined;
+  }
+  return Math.max(0, date - now);
+}
+
+/**
+ * Error for an API response with a non-2xx status.
+ * Keeps the status so callers can report it without the full message.
+ */
+export class ApiRequestError extends Error {
+  readonly endpoint: string;
+  readonly status: number;
+  readonly statusText: string;
+
+  constructor(endpoint: string, status: number, statusText: string, body: string) {
+    super(
+      `API request to ${endpoint} failed: API request failed: ${status} ${statusText} - ${body}`
+    );
+    this.name = 'ApiRequestError';
+    this.endpoint = endpoint;
+    this.status = status;
+    this.statusText = statusText;
+  }
+}
 
 export class ApiClient {
   private config: ApiConfig;
@@ -150,7 +195,6 @@ export class ApiClient {
    */
   async authenticate(): Promise<void> {
     if (this.isTokenValid()) {
-      core.info('Using existing valid access token');
       return;
     }
 
@@ -198,6 +242,46 @@ export class ApiClient {
   }
 
   /**
+   * Wait for the given time. A separate method so tests can skip the wait.
+   */
+  protected async wait(ms: number): Promise<void> {
+    await new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Send the request and retry on 429 Too Many Requests.
+   * Uses Retry-After when the server sends it, else exponential backoff with jitter.
+   * Returns the last response when the retries are used up or Retry-After is too long.
+   */
+  private async fetchWithRateLimitRetry(
+    endpoint: string,
+    requestUrl: string,
+    requestOptions: RequestInit
+  ): Promise<Response> {
+    for (let attempt = 1; ; attempt++) {
+      const response = await fetch(requestUrl, this.buildFetchOptions(requestUrl, requestOptions));
+      if (response.status !== 429 || attempt >= RATE_LIMIT_MAX_ATTEMPTS) {
+        return response;
+      }
+
+      const retryAfterMs = parseRetryAfterMs(response.headers?.get('Retry-After') ?? null);
+      if (retryAfterMs !== undefined && retryAfterMs > RATE_LIMIT_MAX_DELAY_MS) {
+        return response;
+      }
+      const backoffMs = RATE_LIMIT_BASE_DELAY_MS * 2 ** (attempt - 1);
+      const delayMs =
+        retryAfterMs ??
+        Math.min(backoffMs + Math.floor(Math.random() * backoffMs), RATE_LIMIT_MAX_DELAY_MS);
+
+      core.debug(
+        `Rate limited on ${endpoint} (429). Retrying in ${Math.ceil(delayMs / 1000)}s (attempt ${attempt + 1}/${RATE_LIMIT_MAX_ATTEMPTS})`
+      );
+      await response.body?.cancel();
+      await this.wait(delayMs);
+    }
+  }
+
+  /**
    * Make authenticated API request
    */
   private async makeAuthenticatedRequest<T>(
@@ -226,18 +310,19 @@ export class ApiClient {
       core.debug(`Making ${method} request to: ${endpoint}`);
 
       const requestUrl = `${this.config.baseUrl}${endpoint}`;
-      const response = await fetch(requestUrl, this.buildFetchOptions(requestUrl, requestOptions));
+      const response = await this.fetchWithRateLimitRetry(endpoint, requestUrl, requestOptions);
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(
-          `API request failed: ${response.status} ${response.statusText} - ${errorText}`
-        );
+        throw new ApiRequestError(endpoint, response.status, response.statusText, errorText);
       }
 
       const result: T = await response.json();
       return result;
     } catch (error) {
+      if (error instanceof ApiRequestError) {
+        throw error;
+      }
       const errorMessage = error instanceof Error ? error.message : String(error);
       throw new Error(`API request to ${endpoint} failed: ${errorMessage}`);
     }
@@ -353,19 +438,6 @@ export class ApiClient {
       ...restResult,
       ...(resources !== undefined ? { Resources: resources } : {}),
     };
-  }
-
-  /**
-   * Get project recommendations for Git files (Dockerfile, Terraform, etc.)
-   */
-  async getGitProjectRecommendations(
-    request: GetGitProjectRecommendationsRequest
-  ): Promise<GetGitProjectRecommendationsResponse> {
-    return this.makeAuthenticatedRequest<GetGitProjectRecommendationsResponse>(
-      '/pb.Reports/GetGitProjectRecommendations',
-      'POST',
-      request
-    );
   }
 
   /**

@@ -82,3 +82,21 @@ describe('provider gating', () => {
     expect(agent?.with?.['claude_args']).not.toContain('${{ inputs.model }}');
   });
 });
+
+describe('coding agent failure', () => {
+  const agent = steps.find(step => step.uses?.startsWith('anthropics/claude-code-action') ?? false);
+
+  it('fails the action when the coding agent fails', () => {
+    expect(agent).toBeDefined();
+    expect((agent as Record<string, unknown>)['continue-on-error']).toBeUndefined();
+  });
+
+  it('still runs feedback and cleanup after the coding agent', () => {
+    const agentIndex = steps.indexOf(agent!);
+    const after = steps.slice(agentIndex + 1);
+    expect(after.length).toBeGreaterThan(0);
+    for (const step of after) {
+      expect(step.if ?? '').toContain('always()');
+    }
+  });
+});

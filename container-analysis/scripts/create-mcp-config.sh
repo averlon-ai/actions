@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# Writes the Averlon MCP server config for the Coding Agent and reports the
-# file path as the `config-path` step output.
+# Pulls the Averlon MCP server image, writes the server config for the Coding
+# Agent and reports the file path as the `config-path` step output.
 #
 # Required environment:
 #   MCP_API_KEY, MCP_API_SECRET, SECDI_SERVER, MCP_IMAGE_REF, GITHUB_OUTPUT
@@ -46,9 +46,26 @@ json_escape() {
   printf '%s' "${value//\"/\\\"}"
 }
 
+# The coding agent starts the MCP server with `<engine> run`, and gives up on a
+# server that does not answer within about 30 seconds. On a fresh runner that
+# `run` has to pull the image first, which takes longer, so the server is marked
+# failed for the whole run. Pulling here makes the agent's start take seconds.
+pull_image() {
+  if [ -z "${MCP_IMAGE_REF:-}" ]; then
+    return 0
+  fi
+  local start=$SECONDS
+  if "$ENGINE" pull -q "$MCP_IMAGE_REF" > /dev/null; then
+    echo "Pulled Averlon MCP server image $MCP_IMAGE_REF in $((SECONDS - start))s"
+  else
+    echo "::warning::Could not pull the Averlon MCP server image $MCP_IMAGE_REF; the coding agent may start without the Averlon MCP tools."
+  fi
+}
+
 main() {
   resolve_engine
   echo "Averlon MCP server container engine: $ENGINE"
+  pull_image
 
   # The X's have to end the template: BSD mktemp does not substitute them
   # mid-template, so a directory keeps the config named config.json.

@@ -18,7 +18,12 @@ async function runScript(env: Record<string, string>) {
   fs.writeFileSync(outputFile, '');
 
   const proc = Bun.spawn([bash, SCRIPT], {
-    env: { PATH: process.env['PATH'] ?? '', GITHUB_OUTPUT: outputFile, ...env },
+    env: {
+      PATH: process.env['PATH'] ?? '',
+      GITHUB_OUTPUT: outputFile,
+      GITHUB_EVENT_NAME: 'workflow_dispatch',
+      ...env,
+    },
     stdout: 'pipe',
     stderr: 'pipe',
   });
@@ -34,10 +39,30 @@ async function runScript(env: Record<string, string>) {
 }
 
 describe('prepare-agent.sh', () => {
+  it('accepts the supported workflow triggers', async () => {
+    for (const event of ['workflow_dispatch', 'schedule', 'workflow_run']) {
+      const { exitCode } = await runScript({ GITHUB_EVENT_NAME: event, USE_BEDROCK: 'false' });
+      expect(exitCode).toBe(0);
+    }
+  });
+
+  it('rejects other workflow triggers with the supported list', async () => {
+    for (const event of ['push', 'pull_request', '']) {
+      const { exitCode, stdout, model } = await runScript({
+        GITHUB_EVENT_NAME: event,
+        USE_BEDROCK: 'false',
+      });
+      expect(exitCode).not.toBe(0);
+      expect(stdout).toContain(`triggered by '${event}'`);
+      expect(stdout).toContain('workflow_dispatch, schedule, workflow_run');
+      expect(model).toBeNull();
+    }
+  });
+
   it('defaults to an Anthropic model id', async () => {
     const { exitCode, model } = await runScript({ MODEL: '', USE_BEDROCK: 'false' });
     expect(exitCode).toBe(0);
-    expect(model).toBe('claude-opus-5');
+    expect(model).toBe('claude-opus-5-5');
   });
 
   it('defaults to a Bedrock model id under use-bedrock', async () => {
@@ -47,7 +72,7 @@ describe('prepare-agent.sh', () => {
       ...BEDROCK_CREDS,
     });
     expect(exitCode).toBe(0);
-    expect(model).toBe('us.anthropic.claude-opus-5');
+    expect(model).toBe('us.anthropic.claude-opus-5-5');
   });
 
   it('keeps an explicit model on either provider', async () => {
@@ -94,7 +119,7 @@ describe('prepare-agent.sh', () => {
       AWS_BEARER_TOKEN_BEDROCK: 'token',
     });
     expect(exitCode).toBe(0);
-    expect(model).toBe('us.anthropic.claude-opus-5');
+    expect(model).toBe('us.anthropic.claude-opus-5-5');
   });
 
   it('fails when AWS_REGION is missing', async () => {
@@ -111,7 +136,7 @@ describe('prepare-agent.sh', () => {
   it('does not require AWS credentials on the Anthropic path', async () => {
     const { exitCode, model } = await runScript({ MODEL: '', USE_BEDROCK: 'false' });
     expect(exitCode).toBe(0);
-    expect(model).toBe('claude-opus-5');
+    expect(model).toBe('claude-opus-5-5');
   });
 
   it('rejects an Anthropic model id under use-bedrock', async () => {

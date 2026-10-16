@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { collectCodeDefects, buildDockerfilePrompt } from '../main';
+import { collectCodeDefects, buildDockerfilePrompt, describeMapping } from '../main';
 import {
   emptyDockerfile,
   singleLayerDockerfile,
@@ -86,5 +86,43 @@ describe('buildDockerfilePrompt', () => {
     expect(prompt).not.toContain('abc123hash');
     expect(prompt).not.toContain('CreatedAt');
     expect(prompt).not.toContain('UpdatedAt');
+  });
+});
+
+describe('describeMapping', () => {
+  const repo = '123456789012.dkr.ecr.us-west-2.amazonaws.com/app';
+
+  it('says no image was mapped when the response is empty', () => {
+    const lines = describeMapping('Dockerfile', repo, []);
+    expect(lines[0]).toBe(
+      `Averlon could not map Dockerfile (image repository: ${repo}) to an image.`
+    );
+  });
+
+  it('omits the image repository when none was given', () => {
+    const lines = describeMapping('Dockerfile', '', []);
+    expect(lines[0]).toBe('Averlon could not map Dockerfile to an image.');
+  });
+
+  it('names the mapped image and says nothing to upgrade', () => {
+    const lines = describeMapping('Dockerfile', repo, [
+      { ...emptyDockerfile, ImageID: 'img-1', CloudID: 'cloud-1' },
+    ]);
+    expect(lines).toEqual([
+      `Averlon mapped Dockerfile to ${repo} (image ID img-1, cloud cloud-1).`,
+      'No package upgrades are recommended for this image.',
+    ]);
+  });
+
+  it('falls back to the repository name from the response', () => {
+    const lines = describeMapping('Dockerfile', '', [
+      { ...emptyDockerfile, ImageRepository: { RepositoryName: 'app' } },
+    ]);
+    expect(lines[0]).toBe('Averlon mapped Dockerfile to app.');
+  });
+
+  it('counts packages to upgrade', () => {
+    const lines = describeMapping('Dockerfile', repo, [singleLayerDockerfile]);
+    expect(lines[1]).toBe('Found 1 package(s) to upgrade in 1 layer(s).');
   });
 });

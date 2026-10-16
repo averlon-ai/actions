@@ -1,6 +1,7 @@
 import * as core from '@actions/core';
 import * as github from '@actions/github';
 import {
+  ApiRequestError,
   createApiClient,
   CodeDefectStatus,
   GitIssueRiskStatus,
@@ -25,16 +26,47 @@ interface AgentFeedbackEntry {
   Feedback: string;
 }
 
+export interface AgentPullRequest {
+  pr_number: number;
+  pr_url: string;
+}
+
 interface StructuredOutput {
   feedback: AgentFeedbackEntry[];
-  pr_number?: number;
-  pr_url?: string;
+  pull_requests?: unknown;
 }
 
 export interface ParsedStructuredOutput {
   entries: AgentFeedbackEntry[];
-  pr_number?: number;
-  pr_url?: string;
+  /** Every PR the agent reported, deduplicated by number, in reported order. */
+  pull_requests: AgentPullRequest[];
+}
+
+function isAgentPullRequest(value: unknown): value is AgentPullRequest {
+  const pr = value as Partial<AgentPullRequest> | null;
+  return (
+    typeof pr === 'object' &&
+    pr !== null &&
+    typeof pr.pr_number === 'number' &&
+    Number.isInteger(pr.pr_number) &&
+    pr.pr_number > 0 &&
+    typeof pr.pr_url === 'string' &&
+    pr.pr_url !== ''
+  );
+}
+
+/** Collect the reported PRs, without duplicates. */
+function collectPullRequests(parsed: StructuredOutput): AgentPullRequest[] {
+  const candidates: unknown[] = Array.isArray(parsed.pull_requests) ? parsed.pull_requests : [];
+  const seen = new Set<number>();
+  const prs: AgentPullRequest[] = [];
+  for (const candidate of candidates) {
+    if (isAgentPullRequest(candidate) && !seen.has(candidate.pr_number)) {
+      seen.add(candidate.pr_number);
+      prs.push({ pr_number: candidate.pr_number, pr_url: candidate.pr_url });
+    }
+  }
+  return prs;
 }
 
 /** Map GitHub pull state to backend Git status (PR is the issue for container). */
@@ -194,33 +226,218 @@ export async function registerContainerRemediationPR(params: {
 
 export function parseStructuredAgentOutput(output: string): ParsedStructuredOutput {
   if (!output) {
-    return { entries: [] };
+    return { entries: [], pull_requests: [] };
   }
   try {
     const parsed = JSON.parse(output) as StructuredOutput;
+    // PRs are kept even when feedback is malformed: they exist on GitHub
+    // either way and still need the label.
+    const pullRequests = collectPullRequests(parsed);
+    let entries: AgentFeedbackEntry[] = [];
     if (!parsed.feedback || !Array.isArray(parsed.feedback)) {
       logWarn('Structured output missing "feedback" array');
-      return { entries: [] };
+    } else {
+      entries = parsed.feedback.filter(e => e.CodeDefectID && typeof e.Status === 'number');
     }
-    const entries = parsed.feedback.filter(e => e.CodeDefectID && typeof e.Status === 'number');
-    const out: ParsedStructuredOutput = { entries };
-    if (typeof parsed.pr_number === 'number') {
-      out.pr_number = parsed.pr_number;
-    }
-    if (typeof parsed.pr_url === 'string') {
-      out.pr_url = parsed.pr_url;
-    }
-    return out;
+    return { entries, pull_requests: pullRequests };
   } catch (err) {
     logWarn(
       `Failed to parse structured output: ${err instanceof Error ? err.message : String(err)}`
     );
-    return { entries: [] };
+    return { entries: [], pull_requests: [] };
   }
 }
 
 function parseFeedbackFromOutput(output: string): AgentFeedbackEntry[] {
   return parseStructuredAgentOutput(output).entries;
+}
+
+/**
+ * Label every PR the agent opened and register it with Averlon. One run can
+ * open several PRs (e.g. a runtime upgrade and a dependency upgrade); each one
+ * needs the label so later runs find it. A failure on one PR does not stop the
+ * others. Returns the PR numbers handled, for the bulk sync to skip.
+ */
+export async function labelAndRegisterAgentPRs(params: {
+  octokit?: ReturnType<typeof github.getOctokit>;
+  apiClient: ApiClient;
+  orgName: string;
+  repo: string;
+  cloudId: string;
+  pullRequests: AgentPullRequest[];
+}): Promise<number[]> {
+  const { octokit, apiClient, orgName, repo, cloudId, pullRequests } = params;
+  const handled: number[] = [];
+  for (const { pr_number: prNumber, pr_url: prUrl } of pullRequests) {
+    handled.push(prNumber);
+    try {
+      let prStatus: GitPullRequestStatus | undefined;
+      if (octokit) {
+        const { data: pull } = await octokit.rest.pulls.get({
+          owner: orgName,
+          repo,
+          pull_number: prNumber,
+        });
+        prStatus = mapPullRequestToGitStatus(pull);
+        await ensureContainerLabel(octokit, orgName, repo, prNumber);
+      }
+
+      const registered = await registerContainerRemediationPR({
+        apiClient,
+        orgName,
+        repo,
+        prNumber,
+        prUrl,
+        cloudId,
+        status: prStatus,
+      });
+
+      if (registered) {
+        logInfo(`Registered PR #${prNumber} with Averlon source control`);
+      } else {
+        logWarn(`Failed to register PR #${prNumber} with source control`);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logWarn(`Failed to register PR #${prNumber} with source control: ${msg}`);
+    }
+  }
+  return handled;
+}
+
+/** Wait between feedback requests so a run with many defects stays under the API rate limit. */
+export const FEEDBACK_REQUEST_INTERVAL_MS = 200;
+
+export interface FeedbackSubmissionResult {
+  succeeded: number;
+  failed: number;
+  /** Saved updates by status name, e.g. { NoFix: 70 }. */
+  savedByStatus: Record<string, number>;
+  /** Updates not saved, by status name. */
+  failedByStatus: Record<string, number>;
+  /** One line per update not saved, e.g. "Feedback for 123 (NoFix) not saved: 429 Too Many Requests". */
+  failureLines: string[];
+}
+
+interface FeedbackUpdate {
+  id: string;
+  status: CodeDefectStatus;
+  feedback: string;
+}
+
+function statusName(status: CodeDefectStatus): string {
+  return CodeDefectStatus[status] ?? String(status);
+}
+
+/** Short error text for logs: the HTTP status for API errors, the message otherwise. */
+function describeFeedbackError(err: unknown): string {
+  if (err instanceof ApiRequestError) {
+    return `${err.status} ${err.statusText}`.trim();
+  }
+  return err instanceof Error ? err.message : String(err);
+}
+
+function increment(counts: Record<string, number>, key: string): void {
+  counts[key] = (counts[key] ?? 0) + 1;
+}
+
+function formatCounts(counts: Record<string, number>): string {
+  return Object.entries(counts)
+    .map(([key, count]) => `${key} ${count}`)
+    .join(', ');
+}
+
+/**
+ * Send the agent's feedback for each defect, and Pending for each defect the
+ * agent did not report on. Requests go one at a time with a short wait between them.
+ * The caller logs the result with logFeedbackSummary.
+ */
+export async function submitDefectFeedback(params: {
+  apiClient: ApiClient;
+  entries: AgentFeedbackEntry[];
+  allCodeDefectIds: string[];
+  intervalMs?: number;
+  wait?: (ms: number) => Promise<void>;
+}): Promise<FeedbackSubmissionResult> {
+  const {
+    apiClient,
+    entries,
+    allCodeDefectIds,
+    intervalMs = FEEDBACK_REQUEST_INTERVAL_MS,
+    wait = ms => new Promise(resolve => setTimeout(resolve, ms)),
+  } = params;
+
+  const updates: FeedbackUpdate[] = [];
+  const reportedIds = new Set<string>();
+  for (const entry of entries) {
+    const status = entry.Status as CodeDefectStatus;
+    if (status !== CodeDefectStatus.Fixed && status !== CodeDefectStatus.NoFix) {
+      logWarn(
+        `Skipping CodeDefect ${entry.CodeDefectID}: invalid status ${entry.Status} (expected 3=Fixed or 4=NoFix)`
+      );
+      continue;
+    }
+    reportedIds.add(entry.CodeDefectID);
+    updates.push({ id: entry.CodeDefectID, status, feedback: entry.Feedback || '' });
+  }
+  for (const id of allCodeDefectIds) {
+    if (!reportedIds.has(id)) {
+      updates.push({
+        id,
+        status: CodeDefectStatus.Pending,
+        feedback: 'Coding Agent did not report on this defect',
+      });
+    }
+  }
+
+  const result: FeedbackSubmissionResult = {
+    succeeded: 0,
+    failed: 0,
+    savedByStatus: {},
+    failedByStatus: {},
+    failureLines: [],
+  };
+
+  for (const [index, update] of updates.entries()) {
+    if (index > 0 && intervalMs > 0) {
+      await wait(intervalMs);
+    }
+    const name = statusName(update.status);
+    try {
+      await apiClient.updateCodeDefectFeedback({
+        CodeDefectID: update.id,
+        Status: update.status,
+        Feedback: update.feedback,
+      });
+      logVerbose(
+        `Feedback for ${update.id} (${name}) saved${update.feedback ? ` — ${update.feedback}` : ''}`
+      );
+      result.succeeded++;
+      increment(result.savedByStatus, name);
+    } catch (err) {
+      const reason = describeFeedbackError(err);
+      result.failureLines.push(`Feedback for ${update.id} (${name}) not saved: ${reason}`);
+      result.failed++;
+      increment(result.failedByStatus, name);
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Log updates not saved as a collapsed group with counts by status in the title,
+ * then the saved counts by status.
+ */
+export function logFeedbackSummary(result: FeedbackSubmissionResult): void {
+  if (result.failed > 0) {
+    core.startGroup(`Feedback not saved (${formatCounts(result.failedByStatus)})`);
+    for (const line of result.failureLines) {
+      logInfo(line);
+    }
+    core.endGroup();
+  }
+  logInfo(`Feedback saved (${result.succeeded > 0 ? formatCounts(result.savedByStatus) : '0'})`);
 }
 
 function parseGitHubRepository(repository: string): { owner: string; repo: string } {
@@ -252,72 +469,19 @@ async function main(): Promise<void> {
         .filter(Boolean)
     : [];
 
-  const {
-    entries,
-    pr_number: prNumber,
-    pr_url: prUrl,
-  } = parseStructuredAgentOutput(codingAgentOutput);
-  logVerbose(`Found ${entries.length} feedback entries from Claude output`);
+  const { entries, pull_requests: pullRequests } = parseStructuredAgentOutput(codingAgentOutput);
+  logInfo(
+    `Found ${entries.length} feedback entries and ${pullRequests.length} PR(s) in agent output`
+  );
 
   const apiClient = createApiClient({ apiKey, apiSecret, baseUrl });
-  let succeeded = 0;
-  let failed = 0;
-
-  const reportedIds = new Set<string>();
-
-  for (const entry of entries) {
-    const status = entry.Status as CodeDefectStatus;
-    if (status !== CodeDefectStatus.Fixed && status !== CodeDefectStatus.NoFix) {
-      logWarn(
-        `Skipping CodeDefect ${entry.CodeDefectID}: invalid status ${entry.Status} (expected 3=Fixed or 4=NoFix)`
-      );
-      continue;
-    }
-
-    reportedIds.add(entry.CodeDefectID);
-
-    try {
-      await apiClient.updateCodeDefectFeedback({
-        CodeDefectID: entry.CodeDefectID,
-        Status: status,
-        Feedback: entry.Feedback || '',
-      });
-      const statusLabel = status === CodeDefectStatus.Fixed ? 'Fixed' : 'NoFix';
-      logVerbose(
-        `Submitted feedback for ${entry.CodeDefectID}: ${statusLabel}${entry.Feedback ? ` — ${entry.Feedback}` : ''}`
-      );
-      succeeded++;
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      logWarn(
-        `Failed to submit feedback for ${entry.CodeDefectID} (Status: ${entry.Status}): ${msg}`
-      );
-      failed++;
-    }
-  }
-
-  const missingIds = allCodeDefectIds.filter(id => !reportedIds.has(id));
-  if (missingIds.length > 0) {
-    for (const id of missingIds) {
-      try {
-        await apiClient.updateCodeDefectFeedback({
-          CodeDefectID: id,
-          Status: CodeDefectStatus.Pending,
-          Feedback: 'Coding Agent did not report on this defect',
-        });
-        logWarn(`Submitted feedback for ${id}: Pending`);
-        succeeded++;
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        logWarn(
-          `Failed to submit Pending feedback for ${id} (Status: ${CodeDefectStatus.Pending}): ${msg}`
-        );
-        failed++;
-      }
-    }
-  }
-
-  logInfo(`Feedback submission complete: ${succeeded} succeeded, ${failed} failed`);
+  logFeedbackSummary(
+    await submitDefectFeedback({
+      apiClient,
+      entries,
+      allCodeDefectIds,
+    })
+  );
 
   const cloudId = process.env['AVERLON_CLOUD_ID'] || '';
   const githubRepository = process.env['GITHUB_REPOSITORY'] || '';
@@ -326,44 +490,21 @@ async function main(): Promise<void> {
 
   const touchedPrNumbers: number[] = [];
 
-  if (prNumber && prUrl && owner && repo) {
-    touchedPrNumbers.push(prNumber);
+  if (pullRequests.length > 0 && owner && repo) {
     const { owner: scopedOwner, repo: scopedRepo } = githubActionsUtils.normalizeRepoScope(
       owner,
       repo
     );
-    try {
-      let prStatus: GitPullRequestStatus | undefined;
-      if (githubToken) {
-        const octokit = github.getOctokit(githubToken);
-        const { data: pull } = await octokit.rest.pulls.get({
-          owner: scopedOwner,
-          repo: scopedRepo,
-          pull_number: prNumber,
-        });
-        prStatus = mapPullRequestToGitStatus(pull);
-        await ensureContainerLabel(octokit, scopedOwner, scopedRepo, prNumber);
-      }
-
-      const registered = await registerContainerRemediationPR({
+    touchedPrNumbers.push(
+      ...(await labelAndRegisterAgentPRs({
+        octokit: githubToken ? github.getOctokit(githubToken) : undefined,
         apiClient,
         orgName: scopedOwner,
         repo: scopedRepo,
-        prNumber,
-        prUrl,
         cloudId,
-        status: prStatus,
-      });
-
-      if (registered) {
-        logInfo(`Registered PR #${prNumber} with Averlon source control`);
-      } else {
-        logWarn(`Failed to register PR #${prNumber} with source control`);
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      logWarn(`Failed to register PR #${prNumber} with source control: ${msg}`);
-    }
+        pullRequests,
+      }))
+    );
   }
 
   if (githubToken && owner && repo) {
@@ -399,7 +540,6 @@ async function run(): Promise<void> {
   try {
     logInfo('Starting agent feedback submission...');
     await main();
-    logInfo('Feedback submission completed');
   } catch (error) {
     if (error instanceof Error) {
       core.setFailed(`Feedback submission failed: ${error.message}`);

@@ -193,11 +193,12 @@ describe('api-client.ts', () => {
       // First authentication
       await client.authenticate();
       expect(mockFetch).toHaveBeenCalledTimes(1);
+      const infoCallsAfterFirstAuth = infoSpy.mock.calls.length;
 
-      // Second call should reuse token
+      // Second call should reuse token without logging
       await client.authenticate();
       expect(mockFetch).toHaveBeenCalledTimes(1); // Should not call fetch again
-      expect(infoSpy).toHaveBeenCalledWith('Using existing valid access token');
+      expect(infoSpy).toHaveBeenCalledTimes(infoCallsAfterFirstAuth);
     });
 
     it('should re-authenticate when token is about to expire', async () => {
