@@ -17,7 +17,7 @@ Before using this action, ensure you have:
 3. **Claude access** — either one:
    - **Anthropic API Key**: An API key from [Anthropic](https://console.anthropic.com/). Store it as a secret (e.g., `ANTHROPIC_API_KEY`).
    - **Amazon Bedrock**: Set `use-bedrock: true`, with AWS credentials and `AWS_REGION` in the workflow environment. See [Using Claude on Amazon Bedrock](#-using-claude-on-amazon-bedrock).
-4. **GitHub Token**: Workflow `GITHUB_TOKEN` with `contents: write` and `pull-requests: write` permissions configured (see [permissions docs](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#permissions))
+4. **GitHub Token**: Workflow `GITHUB_TOKEN` with `contents: write`, `pull-requests: write` and `issues: read` permissions configured (see [permissions docs](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#permissions))
 5. **Container engine**: `docker` or `podman` must be available on the runner (`ubuntu-latest` includes docker by default). The action uses docker when it is present and podman otherwise. If the engine is installed outside `PATH`, give its path with the `container-engine` input.
 
 ## 🔐 Create Averlon API Keys and MCP Setup
@@ -28,11 +28,12 @@ For detailed instructions on creating API keys, please refer to our [API Key Set
 
 ### Basic Workflow
 
+> [!IMPORTANT]
+> Supported triggers are `workflow_dispatch`, `schedule`, and `workflow_run`. The action fails on any other trigger, such as `push` or `pull_request`.
+
 ```yaml
 name: Averlon Container Analysis
 on:
-  push:
-    branches: [main]
   workflow_dispatch: {}
   schedule:
     - cron: '0 2 * * *'
@@ -43,12 +44,13 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      issues: read
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
 
       - name: Run Averlon Container Analysis
-        uses: averlon-ai/actions/container-analysis@v2.0.7
+        uses: averlon-ai/actions/container-analysis@v2.0.8
         with:
           averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
           averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -74,12 +76,13 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      issues: read
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
 
       - name: Run Averlon Container Analysis
-        uses: averlon-ai/actions/container-analysis@v2.0.7
+        uses: averlon-ai/actions/container-analysis@v2.0.8
         with:
           averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
           averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -103,6 +106,7 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      issues: read
     strategy:
       matrix:
         include:
@@ -115,7 +119,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Run Averlon Container Analysis
-        uses: averlon-ai/actions/container-analysis@v2.0.7
+        uses: averlon-ai/actions/container-analysis@v2.0.8
         with:
           averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
           averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -127,22 +131,22 @@ jobs:
 
 ## 📥 Inputs
 
-| Input                | Description                                                                                                                                                                                                                                                                                                        | Required | Default                        |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------- | ------------------------------ |
-| `averlon-api-key`    | API key for Averlon authentication (GitActions-scoped)                                                                                                                                                                                                                                                             | ✅       | -                              |
-| `averlon-api-secret` | API secret for Averlon authentication (GitActions-scoped)                                                                                                                                                                                                                                                          | ✅       | -                              |
-| `anthropic-api-key`  | API key for Anthropic. Not needed when `use-bedrock` is `true`                                                                                                                                                                                                                                                     | ❌       | -                              |
-| `mcp-api-key`        | API key for Averlon MCP server (MCPClient-scoped)                                                                                                                                                                                                                                                                  | ✅       | -                              |
-| `mcp-api-secret`     | API secret for Averlon MCP server (MCPClient-scoped)                                                                                                                                                                                                                                                               | ✅       | -                              |
-| `github-token`       | GitHub token with `contents: write` and `pull-requests: write` permissions                                                                                                                                                                                                                                         | ✅       | -                              |
-| `dockerfile`         | Path to the Dockerfile to remediate (e.g. `Dockerfile` or `api/Dockerfile`)                                                                                                                                                                                                                                        | ✅       | -                              |
-| `image-repository`   | Image repository for the Dockerfile (e.g. `registry.io/org/app`)                                                                                                                                                                                                                                                   | ❌       | `''`                           |
-| `base-url`           | Base URL for the Averlon API and MCP server                                                                                                                                                                                                                                                                        | ❌       | `https://wfe.prod.averlon.io/` |
-| `filters`            | Comma-separated recommendation filters. Options: `Recommended`, `Exploited`, `Critical`, `High`, `HighRCE`, `Medium`, `MediumApplication`, `Low`, `LowApplication`                                                                                                                                                 | ❌       | `Recommended,Critical,HighRCE` |
-| `disable-websearch`  | Disable the WebSearch tool                                                                                                                                                                                                                                                                                         | ❌       | `false`                        |
-| `model`              | Claude model for remediation. Supported: `claude-opus-5` (recommended), `claude-opus-4-6`, `claude-sonnet-5`, `claude-haiku-4-5-20251001`. Empty means `claude-opus-5`, or `us.anthropic.claude-opus-5` with `use-bedrock`. See [Claude models](https://platform.claude.com/docs/en/about-claude/models/overview). | ❌       | `''`                           |
-| `use-bedrock`        | Run the Coding Agent against Claude on Amazon Bedrock instead of the Anthropic API. AWS credentials and `AWS_REGION` must be in the workflow environment.                                                                                                                                                          | ❌       | `false`                        |
-| `container-engine`   | Command used to run the Averlon MCP server container, for runners that keep it outside `PATH` or under another name. A name on `PATH` (`docker`, `podman`) or an absolute path such as `/opt/podman/bin/podman`. Empty means docker if present, podman otherwise.                                                  | ❌       | `''`                           |
+| Input                | Description                                                                                                                                                                                                                                                                                                                               | Required | Default                        |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------------------------------ |
+| `averlon-api-key`    | API key for Averlon authentication (GitActions-scoped)                                                                                                                                                                                                                                                                                    | ✅       | -                              |
+| `averlon-api-secret` | API secret for Averlon authentication (GitActions-scoped)                                                                                                                                                                                                                                                                                 | ✅       | -                              |
+| `anthropic-api-key`  | API key for Anthropic. Not needed when `use-bedrock` is `true`                                                                                                                                                                                                                                                                            | ❌       | -                              |
+| `mcp-api-key`        | API key for Averlon MCP server (MCPClient-scoped)                                                                                                                                                                                                                                                                                         | ✅       | -                              |
+| `mcp-api-secret`     | API secret for Averlon MCP server (MCPClient-scoped)                                                                                                                                                                                                                                                                                      | ✅       | -                              |
+| `github-token`       | GitHub token with `contents: write`, `pull-requests: write` and `issues: read` permissions                                                                                                                                                                                                                                                | ✅       | -                              |
+| `dockerfile`         | Path to the Dockerfile to remediate (e.g. `Dockerfile` or `api/Dockerfile`)                                                                                                                                                                                                                                                               | ✅       | -                              |
+| `image-repository`   | Image repository for the Dockerfile (e.g. `registry.io/org/app`)                                                                                                                                                                                                                                                                          | ❌       | `''`                           |
+| `base-url`           | Base URL for the Averlon API and MCP server                                                                                                                                                                                                                                                                                               | ❌       | `https://wfe.prod.averlon.io/` |
+| `filters`            | Comma-separated recommendation filters. Options: `Recommended`, `Exploited`, `Critical`, `High`, `HighRCE`, `Medium`, `MediumApplication`, `Low`, `LowApplication`                                                                                                                                                                        | ❌       | `Recommended,Critical,HighRCE` |
+| `disable-websearch`  | Disable the WebSearch tool                                                                                                                                                                                                                                                                                                                | ❌       | `false`                        |
+| `model`              | Claude model for remediation. Supported: `claude-opus-5-5` (recommended), `claude-opus-5`, `claude-opus-4-6`, `claude-sonnet-5`, `claude-haiku-4-5-20251001`. Empty means `claude-opus-5-5`, or `us.anthropic.claude-opus-5-5` with `use-bedrock`. See [Claude models](https://platform.claude.com/docs/en/about-claude/models/overview). | ❌       | `''`                           |
+| `use-bedrock`        | Run the Coding Agent against Claude on Amazon Bedrock instead of the Anthropic API. AWS credentials and `AWS_REGION` must be in the workflow environment.                                                                                                                                                                                 | ❌       | `false`                        |
+| `container-engine`   | Command used to run the Averlon MCP server container, for runners that keep it outside `PATH` or under another name. A name on `PATH` (`docker`, `podman`) or an absolute path such as `/opt/podman/bin/podman`. Empty means docker if present, podman otherwise.                                                                         | ❌       | `''`                           |
 
 ## 🚨 Troubleshooting
 
@@ -157,7 +161,11 @@ The action validates `anthropic-api-key` against the Anthropic API before doing 
 - `credit balance is too low` — the Anthropic account is out of credit. Top it up.
 - No key provided — confirm the `ANTHROPIC_API_KEY` secret exists and is exposed to the workflow (secrets are not available to workflows triggered by forked PRs).
 
-If Anthropic is unreachable or rate-limits the check, the action logs a warning and continues rather than failing. The key is also re-checked when the Coding Agent step fails, so a key that expires mid-run fails the action instead of passing silently.
+If Anthropic is unreachable or rate-limits the check, the action logs a warning and continues rather than failing. The key is also re-checked when the Coding Agent step fails, so the logs show if the key expired mid-run.
+
+**Issue: "This workflow was triggered by 'push', which is not supported"**
+
+Supported triggers are `workflow_dispatch`, `schedule`, and `workflow_run`. Remove other triggers, such as `push` or `pull_request`, from the `on:` section of the workflow.
 
 **Issue: "No recommendations found"**
 
@@ -172,9 +180,13 @@ Averlon did not find any vulnerabilities matching your filters for the specified
 The agent may fail if the remediation is complex or the repository context is insufficient.
 
 - Check the `prompt` output for what was sent to the agent
-- Ensure the GitHub token has `contents: write` and `pull-requests: write` permissions
+- Ensure the GitHub token has `contents: write`, `pull-requests: write` and `issues: read` permissions
 - Try a more capable model (e.g., `claude-opus-5`)
-- The step uses `continue-on-error: true`, so the workflow won't fail — check step logs for details. The one exception is an unusable Anthropic API key: the key is re-validated after a failed agent run and the action fails if it has become invalid.
+- A failed agent run fails the action. Agent feedback and cleanup still run. Check the `Run Coding Agent` step logs for details.
+
+**Issue: `Labeled container PR bulk sync failed: Resource not accessible by integration`**
+
+The GitHub token cannot read issues. The action needs `issues: read` to get the state (open, closed or merged) of its earlier remediation PRs. GitHub lists PRs by label only through the issues API, and this API needs the issues permission, also for PRs. Add `issues: read` to the workflow `permissions`. The remediation itself is not affected; only the status sync of earlier PRs to Averlon stops.
 
 **Issue: MCP connection issues**
 
@@ -191,7 +203,7 @@ Set `use-bedrock: true` to run the Coding Agent against Claude on Bedrock, and l
 
 The credentials have to be **in the environment** as `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` (plus `AWS_SESSION_TOKEN` for temporary credentials), or as `AWS_BEARER_TOKEN_BEDROCK`, and `AWS_REGION` must be set. An instance or pod IAM role on its own is **not** enough: `claude-code-action` checks those variables before it starts, so assume the role in a step such as `aws-actions/configure-aws-credentials` first. This action does not acquire credentials itself.
 
-Leaving `model` unset gives `us.anthropic.claude-opus-5`. Setting it explicitly requires a Bedrock model or inference profile id, not an Anthropic model name:
+Leaving `model` unset gives `us.anthropic.claude-opus-5-5`. Setting it explicitly requires a Bedrock model or inference profile id, not an Anthropic model name:
 
 ```yaml
 jobs:
@@ -200,7 +212,7 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
-      issues: write
+      issues: read
       id-token: write
     env:
       AWS_REGION: us-west-2
@@ -210,7 +222,7 @@ jobs:
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
           aws-region: us-west-2
-      - uses: averlon-ai/actions/container-analysis@v2.0.7
+      - uses: averlon-ai/actions/container-analysis@v2.0.8
         with:
           use-bedrock: true
           model: us.anthropic.claude-opus-4-5-20251101-v1:0

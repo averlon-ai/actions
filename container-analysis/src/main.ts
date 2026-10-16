@@ -71,7 +71,9 @@ The package data includes CodeDefects with IDs. Your structured output must incl
 
 There are ${codeDefects.length} CodeDefect IDs to report on. Every one MUST appear in the output.
 
-If you created a PR, also include "pr_number" (integer) and "pr_url" (string) in the structured output.
+If you created any PRs, list EVERY one of them in "pull_requests", an array of
+{"pr_number": <integer>, "pr_url": <string>} objects (for example both the base image or
+runtime upgrade PR and the dependency upgrade PR).
 
 IMPORTANT: The structured JSON output MUST be the very last thing you produce.
 Do NOT output any additional text, summary, or commentary after emitting the structured JSON.
@@ -82,6 +84,45 @@ Here is the container recommendations data:
 \`\`\`json
 ${json}
 \`\`\``;
+}
+
+/**
+ * Describes how Averlon mapped the one requested Dockerfile to an image, and
+ * whether that image has package upgrades. The action sends a single
+ * Dockerfile, so the response has at most one entry: none means no image was
+ * mapped, one means an image was mapped (it may still have nothing to fix).
+ */
+function describeMapping(
+  dockerfilePath: string,
+  imageRepository: string,
+  dockerfileRecs: GitDockerfile[]
+): string[] {
+  const mapped = dockerfileRecs[0];
+  if (!mapped) {
+    const repo = imageRepository ? ` (image repository: ${imageRepository})` : '';
+    return [
+      `Averlon could not map ${dockerfilePath}${repo} to an image.`,
+      'Check that the image is pushed and scanned by Averlon in a cloud of your organization.',
+    ];
+  }
+
+  const repo = imageRepository || mapped.ImageRepository?.RepositoryName || 'an image';
+  const details = [
+    mapped.ImageID && `image ID ${mapped.ImageID}`,
+    mapped.CloudID && `cloud ${mapped.CloudID}`,
+  ].filter(Boolean);
+  const lines = [
+    `Averlon mapped ${dockerfilePath} to ${repo}${details.length ? ` (${details.join(', ')})` : ''}.`,
+  ];
+
+  const layers = mapped.Layers ?? [];
+  const packages = layers.reduce((sum, layer) => sum + (layer.Packages?.length ?? 0), 0);
+  lines.push(
+    packages > 0
+      ? `Found ${packages} package(s) to upgrade in ${layers.length} layer(s).`
+      : 'No package upgrades are recommended for this image.'
+  );
+  return lines;
 }
 
 async function main(): Promise<void> {
@@ -127,7 +168,9 @@ async function main(): Promise<void> {
   core.info('Calling Averlon API for container recommendations...');
   const response = await apiClient.getContainerRecommendations(payload);
   const dockerfileRecs = response?.Dockerfiles || [];
-  core.info(`Received ${dockerfileRecs.length} Dockerfile recommendation(s) from Averlon`);
+  for (const line of describeMapping(dockerfilePath, imageRepository, dockerfileRecs)) {
+    core.info(line);
+  }
 
   // Find the Dockerfile with actionable packages
   const actionable = dockerfileRecs.find(df => {
@@ -136,7 +179,7 @@ async function main(): Promise<void> {
   });
 
   if (!actionable) {
-    core.info('No actionable container recommendations found.');
+    core.info('Nothing to remediate.');
     core.setOutput('has-recommendations', 'false');
     core.setOutput('prompt', '');
     core.setOutput('allowed-tools', '');
@@ -184,7 +227,7 @@ async function run(): Promise<void> {
   }
 }
 
-export { run, buildDockerfilePrompt, collectCodeDefects, FEEDBACK_JSON_SCHEMA };
+export { run, buildDockerfilePrompt, collectCodeDefects, describeMapping, FEEDBACK_JSON_SCHEMA };
 
 // Run the action if this file is executed directly
 if (require.main === module) {

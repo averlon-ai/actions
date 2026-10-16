@@ -7,15 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [2.0.6] - 20206-09-10
+## [2.0.8] - 2026-10-16
+- bugfixes in container-analysis action
+-   label every container remediation PR, not only the first
+-   retry rate-limited Averlon API calls
+-   reject unsupported workflow triggers in container-analysis
+-   pull the MCP image first and keep skills out of PRs
+
+## [2.0.7] - 2026-09-11
 - support podman for container-analysis action
 - support claude-via-bedrock for container-analysis action
 
-## [2.0.6] - 20206-09-10
+## [2.0.6] - 2026-09-10
 - support podman for container-analysis action
 - support claude-via-bedrock for container-analysis action
 
-## [2.0.5] - 20206-08-12
+## [2.0.5] - 2026-08-12
 - handle expired anthropic key in container analysis
 - handle merged PR's properly
 

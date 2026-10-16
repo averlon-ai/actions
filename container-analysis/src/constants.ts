@@ -6,7 +6,7 @@ export const DEFAULT_BASE_URL = 'https://wfe.prod.averlon.io/';
 export const DEFAULT_FILTERS = 'Recommended,Critical,HighRCE';
 export const DEFAULT_MCP_IMAGE = 'ghcr.io/averlon-security/averlon-mcp:sha-a8e5b91';
 export const DEFAULT_MAX_TURNS = '250';
-export const DEFAULT_CLAUDE_MODEL = 'claude-opus-5';
+export const DEFAULT_CLAUDE_MODEL = 'claude-opus-5-5';
 
 export const AVERLON_CONTAINER_LABEL = 'averlon-container-analysis';
 
@@ -40,8 +40,18 @@ export const FEEDBACK_JSON_SCHEMA = JSON.stringify({
         required: ['CodeDefectID', 'Status', 'Feedback'],
       },
     },
-    pr_number: { type: 'integer' },
-    pr_url: { type: 'string' },
+    // Every PR the agent opened (e.g. a runtime upgrade and a dependency upgrade).
+    pull_requests: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          pr_number: { type: 'integer' },
+          pr_url: { type: 'string' },
+        },
+        required: ['pr_number', 'pr_url'],
+      },
+    },
   },
   required: ['feedback'],
 });

@@ -14,7 +14,7 @@ inputs:
     required: false
     default: ''
   github-token:
-    description: 'GitHub token for claude-code-action (contents: write, pull-requests: write)'
+    description: 'GitHub token for claude-code-action (contents: write, pull-requests: write, issues: read)'
     required: true
   mcp-api-key:
     description: 'API key for Averlon MCP server (MCPClient-scoped)'
@@ -46,7 +46,7 @@ inputs:
     required: false
     default: 'false'
   model:
-    description: 'Claude model to use for remediation. Defaults to claude-opus-5, or us.anthropic.claude-opus-5 with use-bedrock. See supported models in README.'
+    description: 'Claude model to use for remediation. Defaults to claude-opus-5-5, or us.anthropic.claude-opus-5-5 with use-bedrock. See supported models in README.'
     required: false
     default: ''
   use-bedrock:
@@ -116,7 +116,6 @@ runs:
     - name: 'Run Coding Agent'
       id: codingagent
       if: steps.averlon.outputs.has-recommendations == 'true'
-      continue-on-error: true
       uses: anthropics/claude-code-action@v1
       with:
         use_bedrock: ${{ inputs.use-bedrock }}

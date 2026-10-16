@@ -193,6 +193,43 @@ describe('create-mcp-config.sh', () => {
     expect(configPath).toBeNull();
   });
 
+  it('pulls the server image with the chosen engine before the agent starts', async () => {
+    const dir = path.join(tmpRoot, 'recording-engine');
+    fs.mkdirSync(dir, { recursive: true });
+    const log = path.join(dir, 'calls.log');
+    const binary = path.join(dir, 'podman');
+    fs.writeFileSync(binary, `#!/bin/sh\necho "$@" >> '${log}'\nexit 0\n`, { mode: 0o755 });
+
+    const { exitCode, stdout, configDir } = await runScript('none', { CONTAINER_ENGINE: binary });
+    expect(exitCode).toBe(0);
+    expect(fs.readFileSync(log, 'utf8').trim()).toBe(`pull -q ${IMAGE_REF}`);
+    expect(stdout).toContain(`Pulled Averlon MCP server image ${IMAGE_REF}`);
+    fs.rmSync(configDir!, { recursive: true, force: true });
+  });
+
+  it('still writes the config, with a warning, when the pull fails', async () => {
+    const dir = path.join(tmpRoot, 'failing-engine');
+    fs.mkdirSync(dir, { recursive: true });
+    const binary = path.join(dir, 'docker');
+    fs.writeFileSync(binary, '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+
+    const { exitCode, stdout, config, configDir } = await runScript('none', {
+      CONTAINER_ENGINE: binary,
+    });
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain('::warning::Could not pull the Averlon MCP server image');
+    expect(serverOf(config).command).toBe(binary);
+    fs.rmSync(configDir!, { recursive: true, force: true });
+  });
+
+  it('skips the pull when no image is set', async () => {
+    const { exitCode, stdout, configDir } = await runScript('both', { MCP_IMAGE_REF: '' });
+    expect(exitCode).toBe(0);
+    expect(stdout).not.toContain('Pulled Averlon MCP server image');
+    expect(stdout).not.toContain('::warning::');
+    fs.rmSync(configDir!, { recursive: true, force: true });
+  });
+
   it('writes the config with owner-only permissions', async () => {
     const { configPath, configDir } = await runScript('both');
     expect(fs.statSync(configPath!).mode & 0o777).toBe(0o600);

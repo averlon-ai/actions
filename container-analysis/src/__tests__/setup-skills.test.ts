@@ -1,9 +1,10 @@
+import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as zlib from 'node:zlib';
 import { describe, it, expect, afterEach } from 'bun:test';
-import { parseTar, extractSkillsArchive } from '../setup-skills';
+import { parseTar, extractSkillsArchive, excludeSkillsFromGit } from '../setup-skills';
 
 const TAR_BLOCK_SIZE = 512;
 
@@ -136,5 +137,85 @@ describe('extractSkillsArchive', () => {
     expect(() => extractSkillsArchive(gz.toString('base64'), tmpDir)).toThrow(
       'Path traversal detected'
     );
+  });
+});
+
+describe('excludeSkillsFromGit', () => {
+  let repo: string;
+
+  afterEach(() => {
+    if (repo) {
+      fs.rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  function git(...args: string[]): string {
+    return execFileSync('git', args, { cwd: repo, encoding: 'utf8' });
+  }
+
+  function installSkills(names: string[]): string {
+    repo = fs.mkdtempSync(path.join(os.tmpdir(), 'setup-skills-git-'));
+    git('init', '-q');
+    const skillsDir = path.join(repo, '.claude/skills');
+    for (const name of names) {
+      fs.mkdirSync(path.join(skillsDir, name), { recursive: true });
+      fs.writeFileSync(path.join(skillsDir, name, 'SKILL.md'), name);
+    }
+    return skillsDir;
+  }
+
+  const excludeFile = () => fs.readFileSync(path.join(repo, '.git/info/exclude'), 'utf8');
+
+  it('keeps the installed skills out of git add -A', () => {
+    const skillsDir = installSkills(['fix-go-vulns', 'remediate-container']);
+    fs.writeFileSync(path.join(repo, 'Dockerfile'), 'FROM scratch\n');
+
+    excludeSkillsFromGit(skillsDir, ['fix-go-vulns', 'remediate-container']);
+    git('add', '-A');
+
+    expect(excludeFile()).toContain('/.claude/skills/fix-go-vulns/\n');
+    expect(excludeFile()).toContain('/.claude/skills/remediate-container/\n');
+    expect(git('diff', '--cached', '--name-only').trim()).toBe('Dockerfile');
+  });
+
+  it('does not exclude skills of the repository that are not installed by the action', () => {
+    const skillsDir = installSkills(['fix-go-vulns', 'team-skill']);
+
+    excludeSkillsFromGit(skillsDir, ['fix-go-vulns']);
+    git('add', '-A');
+
+    expect(git('diff', '--cached', '--name-only').trim()).toBe(
+      '.claude/skills/team-skill/SKILL.md'
+    );
+  });
+
+  it('adds each line once when it runs again', () => {
+    const skillsDir = installSkills(['fix-go-vulns']);
+
+    excludeSkillsFromGit(skillsDir, ['fix-go-vulns']);
+    excludeSkillsFromGit(skillsDir, ['fix-go-vulns']);
+
+    const matches = excludeFile()
+      .split('\n')
+      .filter(line => line === '/.claude/skills/fix-go-vulns/');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('keeps the existing exclude rules, also without a final newline', () => {
+    const skillsDir = installSkills(['fix-go-vulns']);
+    fs.writeFileSync(path.join(repo, '.git/info/exclude'), '*.local');
+
+    excludeSkillsFromGit(skillsDir, ['fix-go-vulns']);
+
+    expect(excludeFile()).toBe('*.local\n/.claude/skills/fix-go-vulns/\n');
+  });
+
+  it('does not fail outside a git repository', () => {
+    repo = fs.mkdtempSync(path.join(os.tmpdir(), 'setup-skills-nogit-'));
+    const skillsDir = path.join(repo, '.claude/skills');
+    fs.mkdirSync(path.join(skillsDir, 'fix-go-vulns'), { recursive: true });
+
+    expect(() => excludeSkillsFromGit(skillsDir, ['fix-go-vulns'])).not.toThrow();
+    expect(fs.existsSync(path.join(repo, '.git'))).toBe(false);
   });
 });
