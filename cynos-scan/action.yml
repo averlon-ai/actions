@@ -1,0 +1,146 @@
+name: 'cynos-scan'
+description: 'Scan code with upstream codex-security through cynos, enforce findings policy, and produce JSON, coverage, and SARIF reports.'
+author: 'Averlon'
+
+# The interface is upstream's GitHub Action (openai/codex-security action.yml): every input and
+# output below up to the "This action's" markers has upstream's name and meaning. Differences
+# are documented in README.md: cynos as the endpoint, full repository scans and diffs (paths is
+# refused), max-cost refused (the cynos key's budget is the cost limit), the model and
+# artifact-name defaults, partial coverage failing the step, and the inputs and outputs after the
+# markers.
+
+inputs:
+  repository:
+    description: Checkout root. Use paths to select folders within the checkout.
+    default: ${{ github.workspace }}
+  scope:
+    description: 'repository scans the full checkout; diff scans the changes since diff-base (README: Diff scans).'
+    default: repository
+  paths:
+    description: 'Not supported yet: a scan with paths is refused.'
+  diff-base:
+    description: 'For scope: diff: a revision, or last-scan for the changes since the last scanned commit; empty on a pull request (its merge base).'
+  mode:
+    description: 'standard or deep.'
+    default: standard
+  model:
+    description: Cynos model id. Empty uses the engine's default model.
+  cyber-access-program:
+    description: 'Optional Cyber access program: standard, daybreak_blue, or daybreak_red. Unset preserves CLI defaults.'
+  effort:
+    description: 'Reasoning effort: minimal, low, medium, high, xhigh, or max (subject to model support).'
+    default: xhigh
+  max-cost:
+    description: "Not supported: setting it fails the step. Cynos may serve a turn with another model than the one requested, so no estimate is a reliable stop threshold; the cynos key's budget is the cost limit."
+  max-time-hours:
+    description: Positive Deep discovery duration in hours, up to 96. Unset uses the CLI default. Finalization and job timeout are separate.
+  fail-on-severity:
+    description: 'none, low, medium, high, or critical. Applies to complete scans. Unlike upstream, partial results fail the step, as do scanner and required reporting errors.'
+    default: none
+  verbose:
+    description: Stream CLI diagnostics to the job log. Set false for lifecycle and elapsed-time messages only.
+    default: 'true'
+  dry-run:
+    description: Validate local configuration without a scan or API key. Does not verify authentication or model access. Use a separate non-required job.
+    default: 'false'
+  summary:
+    description: Write a human-readable job summary.
+    default: 'true'
+  annotations:
+    description: Emit up to 50 source finding annotations; complete findings remain in reports. None when pr-comments posted the findings on the pull request.
+    default: 'true'
+  upload-artifacts:
+    description: Upload an allowlist of validated reports, when they are published, and the action's run records. Reports may contain source and vulnerability details.
+    default: 'false'
+  artifact-name:
+    description: Report artifact name; choose distinct names for matrix jobs and multiple invocations.
+    default: cynos-scan
+  retention-days:
+    description: Artifact retention, 1–90 days (subject to repository limits).
+    default: '7'
+  # ---- This action's inputs.
+  operation:
+    description: 'scan, or update-threat-model (in its own job with contents: write and pull-requests: write, after a full scan).'
+    default: scan
+  cynos-api-key:
+    description: "The cynos virtual key: the only key, for the scan and its knowledge base (Jev's labels go through cynos too). Required unless dry-run or mock. Without the input, the key is read from CYNOS_API_KEY in the step env, then from CODEX_API_KEY or OPENAI_API_KEY, as upstream reads them."
+  mock:
+    description: "Run codex-security's synthetic scan: no key, no network in the scanner, no issues or threat model."
+    default: 'false'
+  file-issues:
+    description: 'File one GitHub issue per new finding of a completed scan, deduplicated by fingerprint (needs issues: write).'
+    default: 'false'
+  threat-model-path:
+    description: "Where the repository keeps the threat model: authoritative for a full scan's architecture review (a diff updates the stored one instead), written by update-threat-model."
+    default: docs/threatmodel.md
+  github-token:
+    description: 'Token for the run-history lookup, issues, artifacts and the threat-model PR.'
+    default: ${{ github.token }}
+  cynos-judge:
+    description: "on (default) or off: cynos's quality judge for every turn of the scan. off saves the judge's cost, about two thirds of a scan's spend, at the risk of an unjudged answer."
+    default: 'on'
+  cynos-task-routing:
+    description: "on (default) or off: cynos's task routing for every turn of the scan. off keeps every turn on the requested model."
+    default: 'on'
+  upload-evidence:
+    description: "auto (default), true or false: upload the run's evidence as the artifact <artifact-name>-evidence (knowledge-base index and threat model, every helper's brief and checklist, each helper's saved result, the architecture review's log), kept for retention-days. It holds source excerpts and unfixed findings, so auto uploads it only for a private repository. A local run keeps it under RUNNER_TEMP either way."
+    default: 'auto'
+  runtime:
+    description: "docker (default) or native: where upstream runs. docker runs it in upstream's hardened scanner container. native, upstream on the runner itself under Codex's own sandbox, is not yet supported in the action: setting it fails the step before any scan starts."
+    default: docker
+  pr-comments:
+    description: "On a pull request's diff scan (its pull_request event, or a comment request: an issue_comment on it) with findings, post a summary comment listing them and a review comment on each finding's changed line, updating an earlier scan's review comment still on that line (needs pull-requests: write; without it, a warning). Ignored on other events."
+    default: 'true'
+  severity-rubric:
+    description: "A repository-relative Markdown file: the severity rubric the scan grades its findings by, instead of upstream's default (https://github.com/openai/codex-security/blob/main/plugins/codex-security/references/default-severity-rubric.md). Empty uses upstream's default."
+  false-positives:
+    description: 'A repository-relative JSON file: the findings your reviewers dismissed, an array of {reason, title, locations: [{path, startLine?, endLine?}], fingerprint?}. The scan reads them as reviewer feedback and decides whether each new finding is the same one; a finding whose fingerprint is listed gets no issue and no review comment. Empty for none.'
+
+outputs:
+  sarif-path:
+    description: Absolute validated SARIF file path, or empty when unavailable or withheld.
+  json-path:
+    description: Absolute canonical findings JSON path, or empty when unavailable or withheld.
+  coverage-path:
+    description: Absolute coverage JSON path, or empty when unavailable or withheld.
+  results-directory:
+    description: Runner-local reports directory; do not upload it recursively.
+  scan-status:
+    description: 'completed, failed, or skipped. Completed means analysis produced a valid result. Skipped is reserved for empty diffs or dry-run.'
+  skip-reason:
+    description: empty-diff or dry-run when no scan ran; otherwise empty.
+  policy-status:
+    description: 'passed, failed, or not-evaluated. Failed or skipped scans are not-evaluated.'
+  report-status:
+    description: 'ready, partial, or failed. Missing optional SARIF yields partial without failing the scan; required reporting failures yield failed.'
+  exit-code:
+    description: CLI exit code, or empty if the CLI was not started.
+  scanned-sha:
+    description: Verified checkout commit SHA.
+  analysis-ref:
+    description: GitHub ref matching the scanned revision.
+  sarif-upload-ready:
+    description: 'true only for complete, validated reports with a publishable immutable revision. Remains true after severity-policy failure.'
+  critical-count:
+    description: Available critical findings, or empty before results are available.
+  high-count:
+    description: Available high findings, or empty before results are available.
+  medium-count:
+    description: Available medium findings, or empty before results are available.
+  low-count:
+    description: Available low findings, or empty before results are available.
+  informational-count:
+    description: Available informational findings, or empty before results are available.
+  estimated-cost:
+    description: Estimated USD cost from the CLI, which prices no cynos model id. Empty means unavailable, not zero.
+  # ---- This action's outputs.
+  kind:
+    description: 'What the run covered: repository, diff, or skip.'
+  threat-model:
+    description: "'true' when this full scan of the default branch saved a threat model for update-threat-model."
+
+runs:
+  using: node24
+  main: dist/main.js
+  post: dist/post.js
+  post-if: always()

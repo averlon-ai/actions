@@ -96,23 +96,66 @@ export interface UpdateGitIssueStatusRequest {
 }
 
 /**
- * GitPullRequest represents a pull request associated with a Git issue
+ * GitPullRequest represents a pull request. A PR has one GitPullRequest for
+ * each repository URL and number. GitIssueID is the Git issue that the PR was
+ * registered for last; it is empty for a PR with no Git issue.
  */
 export interface GitPullRequest {
   ID?: string;
   GitIssueID?: string;
+  OrgName?: string;
+  OrgURL?: string;
+  RepoName?: string;
+  RepoURL?: string;
+  Title?: string;
+  Type?: GitIssueType;
   Number?: number;
   URL?: string;
   Status?: GitPullRequestStatus;
   Author?: string;
+  Labels?: string[];
+  IssueIDs?: string[];
+  RiskStatus?: GitIssueRiskStatus;
+  RiskSummary?: string;
   CreatedAt?: string;
   UpdatedAt?: string;
   OrgID?: string;
   CloudID?: string;
+  /** Key of the Jira or Linear ticket Averlon created, for example SEC-123; empty until created. */
+  Ticket?: string;
+  /** URL of the ticket; empty until created. */
+  TicketURL?: string;
+  /** Why Averlon could not create the requested ticket; empty once it is created. */
+  TicketError?: string;
 }
 
 /**
- * RegisterGitPullRequestRequest registers a PR created to fix an issue
+ * TicketRequest asks Averlon to create a Jira or Linear ticket for a registered PR.
+ * Every field is optional; an unset field takes the integration default. Averlon
+ * creates the ticket after the call returns.
+ */
+export interface TicketRequest {
+  Labels?: string[];
+  /** Jira only. */
+  Components?: string[];
+  Priority?: string;
+  /** Key of the parent ticket, for example an epic. */
+  Parent?: string;
+  /** Jira issue type, for example Task or Bug. */
+  IssueType?: string;
+  AssigneeEmail?: string;
+  /** Jira only. */
+  ReporterEmail?: string;
+  /** Ticket summary after the type prefix; empty uses the PR title. */
+  Summary?: string;
+  /** Added in brackets before the ticket summary. */
+  Prefix?: string;
+}
+
+/**
+ * RegisterGitPullRequestRequest registers a PR. A PR that fixes a Git issue
+ * names it with GitIssueID or IssueNumber; a PR with no Git issue (opened by a
+ * coding agent) sends RepoURL and its own repo, title and type.
  */
 export interface RegisterGitPullRequestRequest {
   CloudID?: string;
@@ -123,53 +166,15 @@ export interface RegisterGitPullRequestRequest {
   URL: string;
   Status: GitPullRequestStatus;
   Author?: string;
+  OrgName?: string;
+  OrgURL?: string;
+  RepoName?: string;
+  Title?: string;
+  Type?: GitIssueType;
+  Labels?: string[];
+  IssueIDs?: string[];
+  RiskStatus?: GitIssueRiskStatus;
+  RiskSummary?: string;
+  /** Creates a ticket for the PR; leave unset for no ticket. */
+  Ticket?: TicketRequest;
 }
-
-/**
- * GetGitPullRequestRequest gets a PR by issue ID and PR number
- */
-export interface GetGitPullRequestRequest {
-  Number: number;
-  GitIssueID?: string;
-  RepoURL?: string;
-  IssueNumber?: number;
-}
-
-/**
- * GetGitPullRequestResponse returns the PR directly
- */
-export type GetGitPullRequestResponse = GitPullRequest & {
-  NotFound?: boolean;
-};
-
-/**
- * UpdateGitPullRequestStatusRequest updates the status of a PR
- */
-export interface UpdateGitPullRequestStatusRequest {
-  GitIssueID?: string;
-  IssueNumber?: number;
-  RepoURL: string;
-  Number: number;
-  Status: GitPullRequestStatus;
-}
-
-/**
- * GetGitIssueRequest gets a Git issue by external identifiers
- */
-export interface GetGitIssueRequest {
-  CloudID?: string;
-  RepoURL: string;
-  Number: number;
-}
-
-/**
- * GetGitIssueResponse returns the issue directly
- */
-export type GetGitIssueResponse = GitIssue & {
-  NotFound?: boolean;
-};
-
-/**
- * FindGitIssueRequest finds a Git issue by external identifiers
- */
-export type FindGitIssueRequest = GetGitIssueRequest;

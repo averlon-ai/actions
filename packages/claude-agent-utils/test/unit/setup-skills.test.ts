@@ -4,7 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import * as zlib from 'node:zlib';
 import { describe, it, expect, afterEach } from 'bun:test';
-import { parseTar, extractSkillsArchive, excludeSkillsFromGit } from '../setup-skills';
+import { parseTar, extractSkillsArchive, excludeSkillsFromGit } from '../../src/setup-skills';
 
 const TAR_BLOCK_SIZE = 512;
 
@@ -50,6 +50,23 @@ describe('parseTar', () => {
     expect(files[0]?.name).toBe('remediation-agent-skills/fix-go-vulns/SKILL.md');
     expect(files[0]?.data.toString('utf8')).toBe('go skill content');
     expect(files[1]?.name).toBe('remediation-agent-skills/fix-js-vulns/SKILL.md');
+  });
+
+  it.each(['000000000003', '3\0\0\0\0\0\0\0\0\0\0\0', '3\0\n777777777', '          3 '])(
+    'reads the bounded octal size field up to its first NUL: %j',
+    sizeField => {
+      const entry = tarEntry('skill/SKILL.md', 'abc');
+      entry.write(sizeField, 124, 'utf8');
+      const entries = parseTar(buildTar([entry]));
+      expect(entries).toHaveLength(1);
+      expect(entries[0]?.data.toString('utf8')).toBe('abc');
+    }
+  );
+
+  it('rejects an empty NUL-filled size field', () => {
+    const header = tarHeader('skill/SKILL.md', 0);
+    header.fill(0, 124, 136);
+    expect(() => parseTar(buildTar([header]))).toThrow('Invalid tar header');
   });
 
   it('throws on an incomplete archive', () => {

@@ -1,7 +1,7 @@
 import * as core from '@actions/core';
 import type { ApiClient, AnalyzeTerraformResult } from '@averlon/shared';
-import { GitIssueRiskStatus, GitIssueType } from '@averlon/shared';
-import { createOrUpdateIssue } from '@averlon/github-actions-utils';
+import { GitIssueRiskStatus, GitIssueType, GitPullRequestStatus } from '@averlon/shared';
+import { getRepoAndOrgUrls } from '@averlon/github-actions-utils';
 import { hasAccessRisksInParsed, getReachabilityExposureTypes } from './pr-comment';
 
 const AVERLON_IAC_RISK_LABEL = 'averlon-iac-risk-analysis';
@@ -51,10 +51,12 @@ export interface RegisterPrParams {
   scanResult?: string;
   riskSummary?: string;
   cloudId?: string;
+  /** State of the PR; defaults to Open. */
+  status?: GitPullRequestStatus;
 }
 
 /**
- * Register a PR with source control ( a dummy issue created)
+ * Register the scanned PR with Averlon as a PR with no Git issue.
  * Does not create/update an issue when scan was skipped (e.g. identical base/head plans).
  */
 export async function registerPrWithSourceControl(params: RegisterPrParams): Promise<boolean> {
@@ -68,7 +70,13 @@ export async function registerPrWithSourceControl(params: RegisterPrParams): Pro
     scanResult,
     riskSummary: riskSummaryOverride,
     cloudId,
+    status,
   } = params;
+
+  if (!apiClient) {
+    core.debug('No API client; skipping source control registration for this PR.');
+    return false;
+  }
 
   if (scanResult !== undefined && scanResult !== '') {
     try {
@@ -111,21 +119,32 @@ export async function registerPrWithSourceControl(params: RegisterPrParams): Pro
     riskStatus = GitIssueRiskStatus.Detected;
   }
 
-  const issueTitle = prTitle ?? `Infrastructure Risk Analysis - PR #${prNumber}`;
-
-  const registered = await createOrUpdateIssue({
-    apiClient,
-    orgName: owner,
-    repo,
-    issueNumber: prNumber,
-    issueTitle,
-    issueUrl: prUrl,
-    riskSummary,
-    riskStatus,
-    type: GitIssueType.InfrastructureRisk,
-    labels: [AVERLON_IAC_RISK_LABEL],
-    cloudId: cloudId || '',
-  });
+  const { repoUrl, orgUrl } = getRepoAndOrgUrls(owner, repo);
+  let registered = false;
+  try {
+    const pr = await apiClient.registerGitPullRequest({
+      CloudID: cloudId || '',
+      OrgName: owner,
+      OrgURL: orgUrl,
+      RepoName: repo,
+      RepoURL: repoUrl,
+      Number: prNumber,
+      URL: prUrl,
+      Title: prTitle || `Infrastructure Risk Analysis - PR #${prNumber}`,
+      Type: GitIssueType.InfrastructureRisk,
+      Labels: [AVERLON_IAC_RISK_LABEL],
+      RiskStatus: riskStatus,
+      RiskSummary: riskSummary,
+      Status: status ?? GitPullRequestStatus.Open,
+    });
+    registered = Boolean(pr?.ID);
+    if (!registered) {
+      core.warning(`Registered PR #${prNumber}, but the response has no PR ID`);
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    core.warning(`Failed to register PR #${prNumber}: ${message}`);
+  }
 
   if (registered) {
     core.info(`✓ Registered PR #${prNumber} with source control (dashboard link: PR)`);

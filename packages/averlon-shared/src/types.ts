@@ -124,24 +124,65 @@ export interface CodeDefectRef {
   PublicID: string;
 }
 
+export enum CodeDefectType {
+  Unknown = 0,
+  Container = 1,
+  IaC = 2,
+  Helm = 3,
+}
+
+export interface Remediation {
+  ID?: string;
+  Type?: number;
+  RenderType?: number;
+  Data?: string;
+  Description?: string;
+}
+
 export interface CodeDefect {
   ID?: string;
   OrgID?: string;
   LayerCommand?: string;
   PackageName?: string;
   PublicID?: string;
-  ResourceID?: string;
-  Hash?: string;
   Status?: CodeDefectStatus;
   Feedback?: string;
   CreatedAt?: string;
   UpdatedAt?: string;
+  Type?: CodeDefectType;
+  Title?: string;
+  Severity?: IssueSeverityEnum;
+  IssueIDs?: string[];
+  Remediations?: Remediation[];
+  Asset?: AssetV2;
+  /** ID of the GitPullRequest that fixed the code defect (set only when Fixed). */
+  GitPullRequestID?: string;
+}
+
+export interface GetCodeDefectRecommendationsRequest {
+  Type: CodeDefectType;
+  AccountID?: string;
+  /** At most 10000 per request. */
+  ResourceIDs?: string[];
+  Severities?: IssueSeverityEnum[];
+  /**
+   * Create new code defects as Pending instead of InProgress, and do not move
+   * the existing ones to InProgress. For callers that report no feedback, or
+   * that move only the code defects they work on.
+   */
+  CreateAsPending?: boolean;
+}
+
+export interface GetCodeDefectRecommendationsResponse {
+  CodeDefects?: CodeDefect[];
 }
 
 export interface UpdateCodeDefectFeedbackRequest {
   CodeDefectID: string;
   Status: CodeDefectStatus;
   Feedback?: string;
+  /** ID of the registered PR that fixed the code defect; used only with Status Fixed. */
+  GitPullRequestID?: string;
 }
 
 export interface GitPackageCVE {
@@ -171,6 +212,36 @@ export interface GitImageLayer {
   Packages: GitLayerPackage[];
 }
 
+// GitImageUpdateKind tells what the base image update does to the FROM line of
+// the Dockerfile. The API sends the number.
+export enum GitImageUpdateKind {
+  Unknown = 0,
+  // the FROM changes: its tag to NewTag, and its digest to NewDigest when it
+  // pins one
+  ChangeFrom = 1,
+  // the FROM stays: its tag was pushed again, and building the image again
+  // pulls NewDigest
+  Rebuild = 2,
+  // the base image is the latest image of its tag line: nothing to change
+  UpToDate = 3,
+}
+
+// GitImageUpdate is the update of the base image of the final stage of a
+// Dockerfile, or none when it is up to date
+export interface GitImageUpdate {
+  // the base image as the Dockerfile declares it, e.g. docker.io/library/python:3.11-slim
+  CurrentImage: string;
+  Kind?: GitImageUpdateKind;
+  // the tag of the new image, in the repository of CurrentImage. Empty when UpToDate
+  NewTag?: string;
+  // the digest of the new image. Empty when UpToDate
+  NewDigest?: string;
+  // the CVEs that the new image fixes, none when UpToDate
+  FixedCVEs?: string[];
+  // explains the new image, or why the base image is up to date
+  Reasoning?: string;
+}
+
 export interface GitDockerfile {
   CloudID?: string;
   AccountID?: string;
@@ -178,6 +249,7 @@ export interface GitDockerfile {
   Path: string;
   ImageRepository?: ImageRepository;
   Layers: GitImageLayer[];
+  BaseImageUpdate?: GitImageUpdate;
 }
 
 export interface GetContainerRecommendationsResponse {

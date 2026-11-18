@@ -1,6 +1,11 @@
 import * as core from '@actions/core';
 import { buildListForRepoParams, issueIncludesLabel } from '@averlon/github-actions-utils';
-import type { ExistingState, ExistingIssueState, SyncBatchedIssuesOptions } from './types';
+import type {
+  ExistingState,
+  ExistingIssueState,
+  ListForRepoIssue,
+  SyncBatchedIssuesOptions,
+} from './types';
 import {
   parseBatchStateFromBody,
   embedBatchStateInBody,
@@ -42,8 +47,14 @@ export async function getExistingState(
   const byKey = new Map<string, { fingerprint: string; issueNumber: number }>();
   const issues: ExistingIssueState[] = [];
 
+  // Read every page: PRs with the label (agent PRs) also fill the pages.
   const listParams = buildListForRepoParams({ owner, repo, label, state: OPEN_STATE });
-  const { data: list } = await octokit.rest.issues.listForRepo(listParams);
+  const list: ListForRepoIssue[] = [];
+  for (let page = 1; ; page++) {
+    const { data } = await octokit.rest.issues.listForRepo({ ...listParams, page });
+    list.push(...data);
+    if (data.length < listParams.per_page) break;
+  }
 
   for (const issue of list) {
     if (issue.pull_request) {

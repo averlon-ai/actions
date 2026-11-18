@@ -23,10 +23,10 @@ export function getInputSafe(name: string, required: boolean = true): string {
     logDebug('GitHub Actions core not available, falling back to env vars');
   }
 
-  // Fallback to environment variables (for local testing)
-  // Converts 'api-key' to 'INPUT_API_KEY' format
+  // Fallback to environment variables (local testing, and composite action steps)
+  // Converts 'api-key' to 'INPUT_API_KEY' format, and trims like core.getInput
   const envName = `INPUT_${name.toUpperCase().replace(/-/g, '_')}`;
-  const value = process.env[envName];
+  const value = process.env[envName]?.trim();
 
   if (!value && required) {
     // Required input missing from both sources

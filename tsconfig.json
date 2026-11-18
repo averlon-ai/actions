@@ -35,7 +35,8 @@
     "iac-risk-analysis/**/*.ts",
     "iac-risk-analysis/**/*.test.ts",
     "k8s-analysis/**/*.ts",
-    "k8s-analysis/**/*.test.ts"
+    "k8s-analysis/**/*.test.ts",
+    "cynos-scan/**/*.ts"
   ],
   "exclude": ["node_modules", "dist"]
 }

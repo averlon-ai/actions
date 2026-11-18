@@ -28,7 +28,12 @@ inputs:
     description: 'Path to JSON output from `pulumi stack export` (required for pulumi)'
     required: false
   cloud-id:
-    description: 'Averlon cloud ID used for existing issue correlation'
+    description: 'Averlon cloud ID used for existing issue correlation. Set cloud-id or account-id, not both.'
+    required: false
+  account-id:
+    description: |
+      Cloud account that the plan deploys to (AWS account ID, Azure subscription ID or GCP project ID).
+      The action finds its Averlon cloud. Set cloud-id or account-id, not both.
     required: false
   base-url:
     description: 'Averlon API base URL'
@@ -39,11 +44,12 @@ inputs:
       GitHub token for creating issues and syncing linked pull requests.
       Workflow must grant pull-requests: read (in addition to issues: write) so linked Copilot PRs can be registered.
       Provide a PAT with Copilot access when auto-assign-copilot is true.
+      Required when agent-mode is "claude" (contents: write, pull-requests: write).
     required: false
   auto-assign-copilot:
-    description: "Auto-assign issues to GitHub Copilot agent for automatic fixes (requires github-token to be a PAT with GitHub Copilot access, not GITHUB_TOKEN)"
+    description: 'Auto-assign issues to GitHub Copilot agent for automatic fixes (requires github-token to be a PAT with GitHub Copilot access, not GITHUB_TOKEN)'
     required: false
-    default: "false"
+    default: 'false'
   resource-type-filter:
     description: |
       Filter by specific resource types (comma-separated).
@@ -56,10 +62,166 @@ inputs:
       Severity filters (comma-separated). Supported values: Critical, High, Medium, Low.
       Example: "Critical,High"
     required: false
-    default: "Critical,High"
+    default: 'Critical,High'
+  agent-mode:
+    description: |
+      How to remediate the misconfigurations: "copilot" creates GitHub issues for the Copilot agent,
+      "claude" runs Claude Code in this workflow to open pull requests.
+      Claude mode supports iac-type "terraform" only and requires github-token, and cloud-id or account-id.
+    required: false
+    default: 'copilot'
+  anthropic-api-key:
+    description: 'API key for Anthropic Claude (claude mode). Not needed when use-bedrock is true.'
+    required: false
+    default: ''
+  mcp-api-key:
+    description: 'API key for Averlon MCP server (MCPClient-scoped). Required when agent-mode is "claude".'
+    required: false
+    default: ''
+  mcp-api-secret:
+    description: 'API secret for Averlon MCP server (MCPClient-scoped). Required when agent-mode is "claude".'
+    required: false
+    default: ''
+  disable-websearch:
+    description: 'Disable the WebSearch tool for Coding Agent (claude mode)'
+    required: false
+    default: 'false'
+  model:
+    description: 'Claude model to use for remediation (claude mode). Defaults to claude-opus-5-5, or us.anthropic.claude-opus-5-5 with use-bedrock.'
+    required: false
+    default: ''
+  use-bedrock:
+    description: 'Run the Coding Agent against Claude on Amazon Bedrock instead of the Anthropic API (claude mode). AWS credentials and AWS_REGION must be in the workflow environment.'
+    required: false
+    default: 'false'
+  container-engine:
+    description: |
+      Command used to run the Averlon MCP server container (claude mode), when the runner keeps
+      it outside PATH or under another name. Either a name on PATH ('docker', 'podman') or an
+      absolute path. Left empty, the action uses docker if present and podman otherwise.
+    required: false
+    default: ''
+
+outputs:
+  scan-result:
+    description: 'Correlated IaC resources with their existing Averlon misconfigurations (JSON array)'
+    value: ${{ steps.correlate.outputs.scan-result }}
+
 runs:
-  using: 'node20'
-  main: 'dist/main.js'
+  using: 'composite'
+  steps:
+    - name: 'Prepare Coding Agent'
+      id: model
+      if: inputs.agent-mode == 'claude'
+      shell: bash
+      run: bash "${{ github.action_path }}/dist/assets/prepare-agent.sh"
+      env:
+        MODEL: ${{ inputs.model }}
+        USE_BEDROCK: ${{ inputs.use-bedrock }}
+
+    - name: 'Validate Anthropic API key'
+      if: inputs.agent-mode == 'claude' && inputs.use-bedrock != 'true'
+      shell: bash
+      run: node "${{ github.action_path }}/dist/validate-anthropic-key.js"
+      env:
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
+
+    - name: 'Download Averlon skills'
+      id: setup-skill
+      if: inputs.agent-mode == 'claude'
+      shell: bash
+      run: node "${{ github.action_path }}/dist/setup-skills.js"
+      env:
+        AVERLON_API_KEY: ${{ inputs.averlon-api-key || inputs.api-key }}
+        AVERLON_API_SECRET: ${{ inputs.averlon-api-secret || inputs.api-secret }}
+        AVERLON_BASE_URL: ${{ inputs.base-url }}
+
+    - name: 'Create MCP Config'
+      id: mcp-config
+      if: inputs.agent-mode == 'claude'
+      shell: bash
+      run: bash "${{ github.action_path }}/dist/assets/create-mcp-config.sh"
+      env:
+        MCP_API_KEY: ${{ inputs.mcp-api-key }}
+        MCP_API_SECRET: ${{ inputs.mcp-api-secret }}
+        SECDI_SERVER: ${{ inputs.base-url }}
+        MCP_IMAGE_REF: ${{ steps.setup-skill.outputs.mcp-image-ref }}
+        CONTAINER_ENGINE: ${{ inputs.container-engine }}
+
+    - name: 'Correlate IaC resources with Averlon misconfigurations'
+      id: correlate
+      shell: bash
+      run: node "${{ github.action_path }}/dist/main.js"
+      env:
+        INPUT_AVERLON_API_KEY: ${{ inputs.averlon-api-key }}
+        INPUT_AVERLON_API_SECRET: ${{ inputs.averlon-api-secret }}
+        INPUT_API_KEY: ${{ inputs.api-key }}
+        INPUT_API_SECRET: ${{ inputs.api-secret }}
+        INPUT_COMMIT: ${{ inputs.commit }}
+        INPUT_IAC_TYPE: ${{ inputs.iac-type }}
+        INPUT_PLAN_PATH: ${{ inputs.plan-path }}
+        INPUT_PULUMI_STACK_PATH: ${{ inputs.pulumi-stack-path }}
+        INPUT_CLOUD_ID: ${{ inputs.cloud-id }}
+        INPUT_ACCOUNT_ID: ${{ inputs.account-id }}
+        INPUT_BASE_URL: ${{ inputs.base-url }}
+        INPUT_GITHUB_TOKEN: ${{ inputs.github-token }}
+        INPUT_AUTO_ASSIGN_COPILOT: ${{ inputs.auto-assign-copilot }}
+        INPUT_RESOURCE_TYPE_FILTER: ${{ inputs.resource-type-filter }}
+        INPUT_FILTERS: ${{ inputs.filters }}
+        INPUT_AGENT_MODE: ${{ inputs.agent-mode }}
+        INPUT_DISABLE_WEBSEARCH: ${{ inputs.disable-websearch }}
+
+    - name: 'Run Coding Agent'
+      id: codingagent
+      if: inputs.agent-mode == 'claude' && steps.correlate.outputs.has-findings == 'true'
+      uses: anthropics/claude-code-action@v1
+      with:
+        use_bedrock: ${{ inputs.use-bedrock }}
+        anthropic_api_key: ${{ inputs.anthropic-api-key }}
+        github_token: ${{ inputs.github-token }}
+        prompt: ${{ steps.correlate.outputs.prompt }}
+        claude_args: |
+          --model ${{ steps.model.outputs.model }}
+          --mcp-config ${{ steps.mcp-config.outputs.config-path }}
+          --allowedTools "${{ steps.correlate.outputs.allowed-tools }}"
+          --json-schema '${{ steps.correlate.outputs.json-schema }}'
+          --max-turns ${{ steps.setup-skill.outputs.agent-max-turns }}
+
+    - name: 'Submit Agent Feedback'
+      if: always() && inputs.agent-mode == 'claude'
+      shell: bash
+      run: node "${{ github.action_path }}/dist/submit-feedback.js"
+      env:
+        AVERLON_API_KEY: ${{ inputs.averlon-api-key || inputs.api-key }}
+        AVERLON_API_SECRET: ${{ inputs.averlon-api-secret || inputs.api-secret }}
+        AVERLON_BASE_URL: ${{ inputs.base-url }}
+        AVERLON_CLOUD_ID: ${{ steps.correlate.outputs.cloud-id }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        CODING_AGENT_OUTPUT: ${{ steps.codingagent.outputs.structured_output }}
+        ALL_CODE_DEFECT_IDS_FILE: ${{ steps.correlate.outputs.code-defect-ids-file }}
+
+    - name: 'Verify Anthropic API key after agent failure'
+      if: always() && steps.codingagent.outcome == 'failure' && inputs.use-bedrock != 'true'
+      shell: bash
+      run: node "${{ github.action_path }}/dist/validate-anthropic-key.js"
+      env:
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
+        ANTHROPIC_KEY_CHECK_STAGE: 'post-agent'
+
+    - name: 'Cleanup MCP Config'
+      if: always() && inputs.agent-mode == 'claude'
+      shell: bash
+      run: rm -rf "${{ steps.mcp-config.outputs.config-dir }}"
+
+    - name: 'Cleanup Averlon skill'
+      if: always() && inputs.agent-mode == 'claude'
+      shell: bash
+      run: node "${{ github.action_path }}/dist/cleanup-skills.js"
+      env:
+        SKILL_NAMES: ${{ steps.setup-skill.outputs.skill-names }}
+        CREATED_CLAUDE_DIR: ${{ steps.setup-skill.outputs.created-claude-dir }}
+        CREATED_SKILLS_DIR: ${{ steps.setup-skill.outputs.created-skills-dir }}
+
 branding:
   icon: 'git-branch'
   color: 'blue'

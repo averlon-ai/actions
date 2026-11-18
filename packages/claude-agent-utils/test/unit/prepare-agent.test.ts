@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
-const SCRIPT = path.resolve(import.meta.dir, '../../scripts/prepare-agent.sh');
+const SCRIPT = path.resolve(import.meta.dir, '../../assets/prepare-agent.sh');
 const bash = Bun.which('bash') ?? '/bin/bash';
 
 // Each run gets its own step output file; the real one is append-only.

@@ -1,0 +1,88 @@
+# Copy to .github/workflows/cynos-scan.yml in the repository to scan, and replace
+# ACTION_REF with the full commit SHA of a release tag of averlon-ai/actions, with the
+# tag in a comment. Only release tags carry the built dist/; a branch commit does not run.
+#
+# Keep the run-name as it is: the action fails a run whose title does not match the scan it runs.
+#
+# Once a day, a diff of the changes since the last scanned commit (diff-base: last-scan). The first
+# run, with no earlier scan, is a full scan, and stores the threat model the diffs reuse; run a full
+# scan by hand (scope: repository) to refresh it. This workflow does not scan pull requests:
+# examples/cynos-scan-pr.yml does.
+# A diff needs the whole history (fetch-depth: 0). Its SARIF, when you upload it, goes under its
+# own category (for example cynos-scan-diff), never the full scan's: code scanning closes the
+# alerts of a category that a newer upload on the same ref no longer reports.
+name: cynos-scan
+
+run-name: >-
+  cynos-scan: ${{ inputs.mock && 'mock' || ((github.event_name == 'schedule' || inputs.scope == 'diff') && 'diff' || 'full') }}
+
+on:
+  schedule:
+    - cron: '0 3 * * *' # daily: the changes since the last scan
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: 'diff: the changes since diff-base; repository: the whole repository (refreshes the threat model)'
+        required: false
+        default: 'diff'
+        type: choice
+        options:
+          - repository
+          - diff
+      diff-base:
+        description: 'For a diff: a revision, or last-scan for the changes since the last scanned commit'
+        required: false
+        default: 'last-scan'
+        type: string
+      model:
+        description: "Cynos model id requested for every turn, for example z-ai/glm-5.3-flash (cynos routing may serve a turn with another model); empty: the engine's default"
+        required: false
+        default: ''
+        type: string
+      mock:
+        description: 'Synthetic scan: no cynos key, no network, no issues. Tests the pipeline only.'
+        required: false
+        default: false
+        type: boolean
+
+permissions: {}
+
+# One run at a time across all refs: at most one bill in flight.
+concurrency:
+  group: cynos-scan
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    name: Scan
+    runs-on: ubuntu-24.04
+    # The scan's time limit, here the hosted maximum; the cynos key's budget is the cost limit.
+    timeout-minutes: 360
+    # The cynos key is an environment secret; restrict the environment to the default branch.
+    # A mock run needs no key and uses an empty environment.
+    environment: ${{ inputs.mock && 'cynos-scan-mock' || 'cynos-scan' }}
+    permissions:
+      contents: read
+      actions: read # the run-title check, last-scan, and the knowledge-base cache's entries
+      issues: write # file-issues
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          # A diff compares commits: the whole history.
+          fetch-depth: 0
+
+      - name: cynos-scan
+        id: cynos-scan
+        uses: averlon-ai/actions/cynos-scan@ACTION_REF
+        with:
+          scope: ${{ (github.event_name == 'schedule' || inputs.scope == 'diff') && 'diff' || 'repository' }}
+          # last-scan on the schedule, the dispatch input for a manual diff.
+          diff-base: ${{ github.event_name == 'schedule' && 'last-scan' || (inputs.scope == 'diff' && inputs.diff-base || '') }}
+          model: ${{ inputs.model }}
+          mock: ${{ inputs.mock && 'true' || 'false' }}
+          cynos-api-key: ${{ !inputs.mock && secrets.CYNOS_API_KEY || '' }}
+          upload-artifacts: 'true'
+          retention-days: '14'
+          file-issues: ${{ vars.CYNOS_SCAN_FILE_ISSUES == 'true' && 'true' || 'false' }}

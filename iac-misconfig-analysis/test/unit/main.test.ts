@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it, expect, spyOn, beforeEach, afterEach, mock } from 'bun:test';
@@ -30,7 +30,7 @@ import { run, gitLikeHash } from '../../src/main';
 import { parsePulumiStackJson } from '../../src/pulumi';
 import { parseTerraformPlanJson } from '../../src/terraform-local';
 import { GithubIssuesService } from '../../src/github-issues';
-import type { ApiClient } from '@averlon/shared';
+import { CodeDefectStatus, type ApiClient } from '@averlon/shared';
 
 const mockOrgOpenSearchQuery = mock(() =>
   Promise.resolve({
@@ -38,10 +38,21 @@ const mockOrgOpenSearchQuery = mock(() =>
   })
 );
 const mockGetCallerInfo = mock(() => Promise.resolve({ userId: 'test-user' }));
+const mockGetCloud = mock(() => Promise.resolve({ id: 'cloud-123', accountId: '123456789012' }));
+const mockGetCodeDefectRecommendations = mock(() =>
+  Promise.resolve({
+    CodeDefects: [{ ID: 'cd-1', Asset: { ResourceID: 'arn:aws:s3:::iac-bucket' } }],
+  })
+);
+
+const mockUpdateCodeDefectFeedback = mock(() => Promise.resolve({}));
 
 const mockApiClient = {
   getCallerInfo: mockGetCallerInfo,
   orgOpenSearchQuery: mockOrgOpenSearchQuery,
+  getCloud: mockGetCloud,
+  getCodeDefectRecommendations: mockGetCodeDefectRecommendations,
+  updateCodeDefectFeedback: mockUpdateCodeDefectFeedback,
 } as unknown as ApiClient;
 
 const apiClientModule = await import('@averlon/shared');
@@ -145,6 +156,7 @@ describe('iac-misconfig-analysis correlation flow', () => {
     originalEnv = { ...process.env };
     scanResultDir = mkdtempSync(join(tmpdir(), 'iac-misconfig-test-'));
     process.env.SCAN_RESULT_JSON_PATH = join(scanResultDir, 'scan-result.json');
+    process.env.RUNNER_TEMP = scanResultDir;
     process.env.GITHUB_REPOSITORY = 'test-owner/test-repo';
     process.env.GITHUB_SHA = 'abc123';
     process.env.INPUT_AVERLON_API_KEY = 'test-api-key';
@@ -321,5 +333,110 @@ describe('iac-misconfig-analysis correlation flow', () => {
         apiSecret: 'deprecated-api-secret',
       })
     );
+  });
+
+  it('gets code defects instead of creating issues in claude mode', async () => {
+    process.env.INPUT_AGENT_MODE = 'Claude';
+    mockGetCloud.mockClear();
+    mockGetCodeDefectRecommendations.mockClear();
+    mockUpdateCodeDefectFeedback.mockClear();
+
+    await run();
+
+    expect(setFailedSpy).not.toHaveBeenCalled();
+    expect(mockGetCloud).toHaveBeenCalledWith({ CloudID: 'cloud-123' });
+    expect(setOutputSpy).toHaveBeenCalledWith('cloud-id', 'cloud-123');
+    expect(existsSync(process.env.SCAN_RESULT_JSON_PATH!)).toBe(false);
+    expect(createBatchedIssuesSpy).not.toHaveBeenCalled();
+    expect(mockGetCodeDefectRecommendations).toHaveBeenCalledWith(
+      expect.objectContaining({
+        AccountID: '123456789012',
+        ResourceIDs: ['arn:aws:s3:::iac-bucket'],
+        CreateAsPending: true,
+      })
+    );
+    expect(mockUpdateCodeDefectFeedback).toHaveBeenCalledWith({
+      CodeDefectID: 'cd-1',
+      Status: CodeDefectStatus.InProgress,
+      Feedback: '',
+    });
+    expect(setOutputSpy).toHaveBeenCalledWith('scan-result', expect.stringContaining('issue-1'));
+    expect(setOutputSpy).toHaveBeenCalledWith('has-findings', 'true');
+    const idsFile = setOutputSpy.mock.calls.find(
+      (call: unknown[]) => call[0] === 'code-defect-ids-file'
+    )?.[1] as string;
+    expect(idsFile.startsWith(scanResultDir)).toBe(true);
+    expect(readFileSync(idsFile, 'utf8')).toBe('cd-1');
+  });
+
+  it.each(['claude', 'copilot'])('finds the cloud of account-id in %s mode', async mode => {
+    process.env.INPUT_AGENT_MODE = mode;
+    process.env.INPUT_ACCOUNT_ID = '123456789012';
+    delete process.env.INPUT_CLOUD_ID;
+    mockGetCloud.mockClear();
+    mockOrgOpenSearchQuery.mockClear();
+
+    await run();
+
+    expect(setFailedSpy).not.toHaveBeenCalled();
+    expect(mockGetCloud).toHaveBeenCalledWith({ AccountID: '123456789012' });
+    expect(mockOrgOpenSearchQuery).toHaveBeenCalledWith(
+      expect.objectContaining({ FilterQuery: expect.stringContaining('cloud-123') })
+    );
+  });
+
+  it('fails when cloud-id has no Averlon cloud', async () => {
+    process.env.INPUT_AGENT_MODE = 'claude';
+    mockGetCloud.mockImplementationOnce(() => Promise.resolve(undefined as never));
+    mockReadFile.mockClear();
+
+    await run();
+
+    expect(setFailedSpy).toHaveBeenCalledWith(
+      expect.stringContaining('No Averlon cloud found for cloud-id cloud-123')
+    );
+    expect(mockReadFile).not.toHaveBeenCalled();
+  });
+
+  it('calls no cloud API in copilot mode with cloud-id', async () => {
+    mockGetCloud.mockClear();
+
+    await run();
+
+    expect(setFailedSpy).not.toHaveBeenCalled();
+    expect(mockGetCloud).not.toHaveBeenCalled();
+    expect(existsSync(process.env.SCAN_RESULT_JSON_PATH!)).toBe(true);
+  });
+
+  it.each([
+    [{ INPUT_AGENT_MODE: 'codex' }, 'Invalid agent-mode: "codex"'],
+    // action.yml would skip the Claude steps, and the code defects would stay InProgress.
+    [{ INPUT_AGENT_MODE: 'claude\n' }, 'Invalid agent-mode: "claude\\n"'],
+    [
+      {
+        INPUT_AGENT_MODE: 'claude',
+        INPUT_IAC_TYPE: 'pulumi',
+        INPUT_PULUMI_STACK_PATH: './pulumi-stack.json',
+      },
+      'agent-mode claude supports iac-type terraform only',
+    ],
+    [{ INPUT_AGENT_MODE: 'claude', INPUT_CLOUD_ID: '' }, 'cloud-id or account-id is required'],
+    [{ INPUT_ACCOUNT_ID: '123456789012' }, 'Set cloud-id or account-id, not both'],
+    [
+      { INPUT_AGENT_MODE: 'claude', INPUT_ACCOUNT_ID: '123456789012' },
+      'Set cloud-id or account-id, not both',
+    ],
+    [
+      { INPUT_AGENT_MODE: 'claude', INPUT_GITHUB_TOKEN: '', GITHUB_TOKEN: 'env-token' },
+      'github-token is required',
+    ],
+  ])('fails clearly for an invalid agent-mode setup %#', async (env, message) => {
+    Object.assign(process.env, env);
+    mockReadFile.mockClear();
+
+    await run();
+
+    expect(setFailedSpy).toHaveBeenCalledWith(expect.stringContaining(message));
+    expect(mockReadFile).not.toHaveBeenCalled();
   });
 });

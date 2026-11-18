@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "Averlon Container Analysis GitHub Action",
   "main": "src/main.ts",
+  "assets-from": "../packages/claude-agent-utils/assets",
   "scripts": {
     "test": "bun test",
     "build": "bun run --bun tsc --noEmit",
@@ -12,9 +13,7 @@
   },
   "dependencies": {
     "@actions/core": "^3.0.0",
-    "@actions/github": "^9.1.1",
-    "@anthropic-ai/sdk": "^0.116.0",
-    "@averlon/github-actions-utils": "workspace:*",
+    "@averlon/claude-agent-utils": "workspace:*",
     "@averlon/shared": "workspace:*",
     "fast-glob": "^3.3.2"
   },

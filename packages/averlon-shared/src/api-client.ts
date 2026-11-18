@@ -7,6 +7,8 @@ import {
   CallerInfo,
   GetContainerRecommendationsRequest,
   GetContainerRecommendationsResponse,
+  GetCodeDefectRecommendationsRequest,
+  GetCodeDefectRecommendationsResponse,
   AnalyzeTerraformResult,
   AnalyzeTerraformRequest,
   ListIssuesRequest,
@@ -26,13 +28,9 @@ import {
   IssueV2,
   RegisterGitIssueRequest,
   RegisterGitIssueResponse,
-  GetGitIssueRequest,
-  GetGitIssueResponse,
   UpdateGitIssueStatusRequest,
   RegisterGitPullRequestRequest,
-  GetGitPullRequestRequest,
-  GetGitPullRequestResponse,
-  UpdateGitPullRequestStatusRequest,
+  GitPullRequest,
   UpdateCodeDefectFeedbackRequest,
   CodeDefect,
   DownloadRemediationAgentSkillsResponse,
@@ -454,6 +452,20 @@ export class ApiClient {
   }
 
   /**
+   * Get the code defects to remediate. Unless CreateAsPending is set, the
+   * server creates new code defects as InProgress.
+   */
+  async getCodeDefectRecommendations(
+    request: GetCodeDefectRecommendationsRequest
+  ): Promise<GetCodeDefectRecommendationsResponse> {
+    return this.makeAuthenticatedRequest<GetCodeDefectRecommendationsResponse>(
+      '/pb.Reports/GetCodeDefectRecommendations',
+      'POST',
+      request
+    );
+  }
+
+  /**
    * List issues for a cloud/resource
    */
   async listIssues(request: ListIssuesRequest): Promise<ListIssuesResponse> {
@@ -515,17 +527,6 @@ export class ApiClient {
   }
 
   /**
-   * Get or find a Git issue by external identifiers
-   */
-  async getGitIssue(request: GetGitIssueRequest): Promise<GetGitIssueResponse> {
-    return this.makeAuthenticatedRequest<GetGitIssueResponse>(
-      '/pb.GitActions/GetGitIssue',
-      'POST',
-      request
-    );
-  }
-
-  /**
    * Update the status of a Git issue
    */
   async updateGitIssueStatus(request: UpdateGitIssueStatusRequest): Promise<void> {
@@ -537,33 +538,11 @@ export class ApiClient {
   }
 
   /**
-   * Register a pull request associated with a Git issue
+   * Register a pull request, with or without a Git issue. Returns the PR row.
    */
-  async registerGitPullRequest(request: RegisterGitPullRequestRequest): Promise<void> {
-    await this.makeAuthenticatedRequest<void>(
+  async registerGitPullRequest(request: RegisterGitPullRequestRequest): Promise<GitPullRequest> {
+    return this.makeAuthenticatedRequest<GitPullRequest>(
       '/pb.GitActions/RegisterGitPullRequest',
-      'POST',
-      request
-    );
-  }
-
-  /**
-   * Get a Git pull request by external identifiers
-   */
-  async getGitPullRequest(request: GetGitPullRequestRequest): Promise<GetGitPullRequestResponse> {
-    return this.makeAuthenticatedRequest<GetGitPullRequestResponse>(
-      '/pb.GitActions/GetGitPullRequest',
-      'POST',
-      request
-    );
-  }
-
-  /**
-   * Update the status of a Git pull request
-   */
-  async updateGitPullRequestStatus(request: UpdateGitPullRequestStatusRequest): Promise<void> {
-    await this.makeAuthenticatedRequest<void>(
-      '/pb.GitActions/UpdateGitPullRequestStatus',
       'POST',
       request
     );
