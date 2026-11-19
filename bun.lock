@@ -39,7 +39,7 @@
         "@actions/cache": "6.3.0",
         "@actions/core": "^3.0.0",
         "@actions/github": "^9.1.1",
-        "@averlon-ai/cynos-scan-engine": "0.2.0",
+        "@averlon-ai/cynos-scan-engine": "0.3.0",
       },
       "devDependencies": {
         "@types/bun": "1.2.17",
@@ -179,7 +179,7 @@
 
     "@anthropic-ai/sdk": ["@anthropic-ai/sdk@0.116.0", "", { "dependencies": { "json-schema-to-ts": "^3.1.1", "standardwebhooks": "^1.0.0" }, "peerDependencies": { "zod": "^3.25.0 || ^4.0.0" }, "optionalPeers": ["zod"], "bin": { "anthropic-ai-sdk": "bin/cli" } }, "sha512-4UEapYQ+epLEMsAuLZDvW8ExVSOtHD8a7zTyLzhw0H9RXJ1eilPgmqhjwgcdg22diwx13spw6fJ4rONZ+bS7Ww=="],
 
-    "@averlon-ai/cynos-scan-engine": ["@averlon-ai/cynos-scan-engine@0.2.0", "", { "dependencies": { "@openai/codex-security": "0.9.1" } }, "sha512-kxbBrOOmcXJk0eU+1hQKNBGmP36uLznVt31qu0iF5cnbxaRSeHlTqYWLSqeQse5upYmBbDrsZQfIBjGBAYh4lw=="],
+    "@averlon-ai/cynos-scan-engine": ["@averlon-ai/cynos-scan-engine@0.3.0", "", { "dependencies": { "@openai/codex-security": "0.9.1" } }, "sha512-S8eJWRZeYSD73wRILtHUMVAKCJMtps00PHdtSbwteEWT+j4sL4LapSDeDEQMgVVgnlKIK1R0ei/6di0ArjvaaA=="],
 
     "@averlon/claude-agent-utils": ["@averlon/claude-agent-utils@workspace:packages/claude-agent-utils"],
 

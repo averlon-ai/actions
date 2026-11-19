@@ -50,7 +50,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Run Averlon Container Analysis
-        uses: averlon-ai/actions/container-analysis@v2.1.0
+        uses: averlon-ai/actions/container-analysis@v2.1.1
         with:
           averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
           averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -82,7 +82,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Run Averlon Container Analysis
-        uses: averlon-ai/actions/container-analysis@v2.1.0
+        uses: averlon-ai/actions/container-analysis@v2.1.1
         with:
           averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
           averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -119,7 +119,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Run Averlon Container Analysis
-        uses: averlon-ai/actions/container-analysis@v2.1.0
+        uses: averlon-ai/actions/container-analysis@v2.1.1
         with:
           averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
           averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -157,7 +157,7 @@ jobs:
 | `ticket-assignee`    | Ticket assignee, by email. The user must be in the Jira or Linear workspace of the integration                                                                                                                                                                                                                                            | ❌       | `''`                           |
 | `ticket-reporter`    | Ticket reporter, by email. Jira only: the user must be in the Jira site of the integration and the project must let the integration set the reporter. Linear always uses the integration user                                                                                                                                             | ❌       | `''`                           |
 
-The ticket summary is the GitHub PR title after the Averlon analysis type, for example `container-image-analysis-risk: Bump zlib in api image`. Averlon creates a ticket only for the PRs of the current run, in the background after the action registers each PR, so the action does not wait for the ticket or output its link. Find the ticket key and link, or why it could not be created, on the PR in Averlon, or find the ticket in Jira or Linear. If Averlon rejects the ticket options, or the organization has no Jira or Linear integration or has both, the action logs a warning and registers the PR without a ticket.
+The ticket summary is the GitHub PR title after the Averlon analysis type, for example `container-image-analysis-risk: Bump zlib in api image`. Averlon creates a ticket only for the PRs of the current run, in the background, so the action does not wait for the ticket or output its link. The action asks for the tickets after it saves the agent's feedback, so each ticket lists the code defects its PR fixes. Find the ticket key and link, or why it could not be created, on the PR in Averlon, or find the ticket in Jira or Linear. If Averlon rejects the ticket options, or the organization has no Jira or Linear integration or has both, the action logs a warning and registers the PR without a ticket.
 
 ## 📤 Outputs
 
@@ -239,7 +239,7 @@ jobs:
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
           aws-region: us-west-2
-      - uses: averlon-ai/actions/container-analysis@v2.1.0
+      - uses: averlon-ai/actions/container-analysis@v2.1.1
         with:
           use-bedrock: true
           model: us.anthropic.claude-opus-4-5-20251101-v1:0

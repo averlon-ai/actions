@@ -87,7 +87,7 @@ jobs:
           terraform show -json tfplan > plan.json
 
       - name: Run Averlon Remediation Agent for IaC Misconfigurations
-        uses: averlon-ai/actions/iac-misconfig-analysis@v2.1.0
+        uses: averlon-ai/actions/iac-misconfig-analysis@v2.1.1
         with:
           averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
           averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -117,7 +117,7 @@ Leave out `github-token` to get only the `scan-result` output, with no issues:
 ```yaml
 - name: Run Averlon Remediation Agent for IaC Misconfigurations
   id: scan
-  uses: averlon-ai/actions/iac-misconfig-analysis@v2.1.0
+  uses: averlon-ai/actions/iac-misconfig-analysis@v2.1.1
   with:
     averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
     averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -184,7 +184,7 @@ jobs:
           terraform show -json "${{ runner.temp }}/tfplan" > "${{ runner.temp }}/plan.json"
 
       - name: Run Averlon Remediation Agent for IaC Misconfigurations
-        uses: averlon-ai/actions/iac-misconfig-analysis@v2.1.0
+        uses: averlon-ai/actions/iac-misconfig-analysis@v2.1.1
         with:
           agent-mode: claude
           averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
@@ -232,7 +232,7 @@ Set `use-bedrock: true` and leave out `anthropic-api-key`. Claude Code needs the
     aws-region: us-west-2
 
 - name: Run Averlon Remediation Agent for IaC Misconfigurations
-  uses: averlon-ai/actions/iac-misconfig-analysis@v2.1.0
+  uses: averlon-ai/actions/iac-misconfig-analysis@v2.1.1
   with:
     agent-mode: claude
     use-bedrock: true

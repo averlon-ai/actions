@@ -20,6 +20,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Changed
 
+- Update the public `@averlon-ai/cynos-scan-engine` dependency from 0.2.0 to 0.3.0, including helper result saving and finding identity fixes. The action inputs are unchanged.
+
 - The action now installs its engine from npm as `@averlon-ai/cynos-scan-engine`, published publicly, instead of `@averlon-security/cynos-scan-engine` from GitHub Packages: building it needs no token, and the repository's workflows no longer grant `packages: read` for it. Callers see no change (engine 0.2.0).
 - `examples/cynos-scan.yml` no longer opens the threat-model PR: its `threat-model` job (`operation: update-threat-model`) is gone, and the scan job no longer exports the `threat-model` output. The operation is unchanged; README: The threat model says how to add the job back.
 - **BREAKING:** the action moves from `internal/cynos-scan` to `cynos-scan`, a public action of `averlon-ai/actions`: the public export no longer removes it. A calling workflow changes its `uses:` to `averlon-ai/actions/cynos-scan@<sha>` (or `averlon-security/actions/cynos-scan@<sha>`), pinned to a release tag's commit as before. Nothing else about the interface changes.
