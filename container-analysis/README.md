@@ -50,7 +50,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Run Averlon Container Analysis
-        uses: averlon-ai/actions/container-analysis@v2.0.8
+        uses: averlon-ai/actions/container-analysis@v2.1.0
         with:
           averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
           averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -82,7 +82,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Run Averlon Container Analysis
-        uses: averlon-ai/actions/container-analysis@v2.0.8
+        uses: averlon-ai/actions/container-analysis@v2.1.0
         with:
           averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
           averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -119,7 +119,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Run Averlon Container Analysis
-        uses: averlon-ai/actions/container-analysis@v2.0.8
+        uses: averlon-ai/actions/container-analysis@v2.1.0
         with:
           averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
           averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -147,6 +147,23 @@ jobs:
 | `model`              | Claude model for remediation. Supported: `claude-opus-5-5` (recommended), `claude-opus-5`, `claude-opus-4-6`, `claude-sonnet-5`, `claude-haiku-4-5-20251001`. Empty means `claude-opus-5-5`, or `us.anthropic.claude-opus-5-5` with `use-bedrock`. See [Claude models](https://platform.claude.com/docs/en/about-claude/models/overview). | ❌       | `''`                           |
 | `use-bedrock`        | Run the Coding Agent against Claude on Amazon Bedrock instead of the Anthropic API. AWS credentials and `AWS_REGION` must be in the workflow environment.                                                                                                                                                                                 | ❌       | `false`                        |
 | `container-engine`   | Command used to run the Averlon MCP server container, for runners that keep it outside `PATH` or under another name. A name on `PATH` (`docker`, `podman`) or an absolute path such as `/opt/podman/bin/podman`. Empty means docker if present, podman otherwise.                                                                         | ❌       | `''`                           |
+| `create-ticket`      | Create a Jira or Linear ticket for each PR the agent opens. Needs a Jira or Linear integration in Averlon                                                                                                                                                                                                                                 | ❌       | `false`                        |
+| `ticket-labels`      | Ticket labels (comma-separated)                                                                                                                                                                                                                                                                                                           | ❌       | ``                             |
+| `ticket-components`  | Ticket components (comma-separated). Jira only; each component must exist in the Jira project of the integration                                                                                                                                                                                                                          | ❌       | `''`                           |
+| `ticket-priority`    | Ticket priority. Empty means the integration default                                                                                                                                                                                                                                                                                      | ❌       | ``                             |
+| `ticket-parent`      | Key of the parent ticket, for example an epic (`PROJ-12`) in Jira or a parent issue (`ENG-34`) in Linear. It must exist and the issue type must allow it as a parent                                                                                                                                                                      | ❌       | `''`                           |
+| `ticket-prefix`      | Text added in brackets before the ticket summary, for example `team-a` gives `[team-a] <summary>`. At most 64 characters                                                                                                                                                                                                                  | ❌       | `''`                           |
+| `ticket-issue-type`  | Ticket issue type, for example `Task` or `Bug`. Empty means the integration default                                                                                                                                                                                                                                                       | ❌       | ``                             |
+| `ticket-assignee`    | Ticket assignee, by email. The user must be in the Jira or Linear workspace of the integration                                                                                                                                                                                                                                            | ❌       | `''`                           |
+| `ticket-reporter`    | Ticket reporter, by email. Jira only: the user must be in the Jira site of the integration and the project must let the integration set the reporter. Linear always uses the integration user                                                                                                                                             | ❌       | `''`                           |
+
+The ticket summary is the GitHub PR title after the Averlon analysis type, for example `container-image-analysis-risk: Bump zlib in api image`. Averlon creates a ticket only for the PRs of the current run, in the background after the action registers each PR, so the action does not wait for the ticket or output its link. Find the ticket key and link, or why it could not be created, on the PR in Averlon, or find the ticket in Jira or Linear. If Averlon rejects the ticket options, or the organization has no Jira or Linear integration or has both, the action logs a warning and registers the PR without a ticket.
+
+## 📤 Outputs
+
+| Output              | Description                                                                                                                                                                                                                                                             |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `base-image-status` | Base image update of the Dockerfile: `change-from` (a new tag or digest in the `FROM`), `rebuild` (the latest push of the same tag), `up-to-date` (no newer base image, also reported as a notice and in the job summary, with no PR), or `none` (no base image update) |
 
 ## 🚨 Troubleshooting
 
@@ -222,7 +239,7 @@ jobs:
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
           aws-region: us-west-2
-      - uses: averlon-ai/actions/container-analysis@v2.0.8
+      - uses: averlon-ai/actions/container-analysis@v2.1.0
         with:
           use-bedrock: true
           model: us.anthropic.claude-opus-4-5-20251101-v1:0

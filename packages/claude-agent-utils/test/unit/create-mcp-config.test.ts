@@ -9,7 +9,7 @@ import * as path from 'node:path';
  * engines a given runner would have.
  */
 
-const SCRIPT = path.resolve(import.meta.dir, '../../scripts/create-mcp-config.sh');
+const SCRIPT = path.resolve(import.meta.dir, '../../assets/create-mcp-config.sh');
 
 const IMAGE_REF = 'ghcr.io/averlon-security/averlon-mcp:sha-test';
 
@@ -117,6 +117,13 @@ describe('create-mcp-config.sh', () => {
     const { exitCode, stdout, configPath } = await runScript('none');
     expect(exitCode).not.toBe(0);
     expect(stdout).toContain('::error::No container engine found');
+    expect(configPath).toBeNull();
+  });
+
+  it.each(['MCP_API_KEY', 'MCP_API_SECRET'])('fails when %s is empty', async name => {
+    const { exitCode, stdout, configPath } = await runScript('both', { [name]: '' });
+    expect(exitCode).not.toBe(0);
+    expect(stdout).toContain('::error::mcp-api-key and mcp-api-secret are required');
     expect(configPath).toBeNull();
   });
 

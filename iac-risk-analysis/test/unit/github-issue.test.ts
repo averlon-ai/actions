@@ -1,7 +1,6 @@
-import { describe, it, expect, spyOn, beforeEach, afterEach } from 'bun:test';
+import { describe, it, expect, spyOn, mock, beforeEach, afterEach } from 'bun:test';
 import * as core from '@actions/core';
-import { GitIssueRiskStatus } from '@averlon/shared';
-import * as githubActionsUtils from '@averlon/github-actions-utils';
+import { GitIssueRiskStatus, GitPullRequestStatus } from '@averlon/shared';
 import { deriveRiskStatusAndSummary, registerPrWithSourceControl } from '../../src/github-issue';
 
 describe('deriveRiskStatusAndSummary', () => {
@@ -100,18 +99,16 @@ describe('deriveRiskStatusAndSummary', () => {
 
 describe('registerPrWithSourceControl', () => {
   let infoSpy: ReturnType<typeof spyOn>;
-  let createOrUpdateIssueSpy: ReturnType<typeof spyOn>;
+  const registerGitPullRequest = mock(() => Promise.resolve({ ID: 'pr-id' }));
+  const apiClient = { registerGitPullRequest } as any;
 
   beforeEach(() => {
-    createOrUpdateIssueSpy = spyOn(githubActionsUtils, 'createOrUpdateIssue').mockResolvedValue(
-      true
-    );
+    registerGitPullRequest.mockClear();
     infoSpy = spyOn(core, 'info').mockImplementation(() => {});
   });
 
   afterEach(() => {
     infoSpy.mockRestore();
-    createOrUpdateIssueSpy.mockRestore();
   });
 
   it('should pass GitIssueRiskStatus.Detected when both exposures are present', async () => {
@@ -123,7 +120,7 @@ describe('registerPrWithSourceControl', () => {
         },
       },
     });
-    const mockApiClient = {} as any;
+    const mockApiClient = apiClient;
 
     await registerPrWithSourceControl({
       apiClient: mockApiClient,
@@ -135,9 +132,9 @@ describe('registerPrWithSourceControl', () => {
       cloudId: 'cloud-1',
     });
 
-    expect(createOrUpdateIssueSpy).toHaveBeenCalledWith(
+    expect(registerGitPullRequest).toHaveBeenCalledWith(
       expect.objectContaining({
-        riskStatus: GitIssueRiskStatus.Detected,
+        RiskStatus: GitIssueRiskStatus.Detected,
       })
     );
   });
@@ -151,7 +148,7 @@ describe('registerPrWithSourceControl', () => {
         },
       },
     });
-    const mockApiClient = {} as any;
+    const mockApiClient = apiClient;
 
     const result = await registerPrWithSourceControl({
       apiClient: mockApiClient,
@@ -164,12 +161,12 @@ describe('registerPrWithSourceControl', () => {
     });
 
     expect(result).toBe(false);
-    expect(createOrUpdateIssueSpy).not.toHaveBeenCalled();
+    expect(registerGitPullRequest).not.toHaveBeenCalled();
   });
 
   it('should not register when no scan result and no risk summary override', async () => {
     const result = await registerPrWithSourceControl({
-      apiClient: {} as any,
+      apiClient,
       owner: 'org',
       repo: 'repo',
       prNumber: 1,
@@ -178,14 +175,14 @@ describe('registerPrWithSourceControl', () => {
     });
 
     expect(result).toBe(false);
-    expect(createOrUpdateIssueSpy).not.toHaveBeenCalled();
+    expect(registerGitPullRequest).not.toHaveBeenCalled();
   });
 
-  it('should return false and not call createOrUpdateIssue when scan was skipped', async () => {
+  it('should return false and not register when scan was skipped', async () => {
     const scanResult = JSON.stringify({ skipped: true });
 
     const result = await registerPrWithSourceControl({
-      apiClient: {} as any,
+      apiClient,
       owner: 'org',
       repo: 'repo',
       prNumber: 1,
@@ -195,7 +192,7 @@ describe('registerPrWithSourceControl', () => {
     });
 
     expect(result).toBe(false);
-    expect(createOrUpdateIssueSpy).not.toHaveBeenCalled();
+    expect(registerGitPullRequest).not.toHaveBeenCalled();
   });
 
   it('should use prTitle when provided', async () => {
@@ -205,7 +202,7 @@ describe('registerPrWithSourceControl', () => {
       },
     });
     await registerPrWithSourceControl({
-      apiClient: {} as any,
+      apiClient,
       owner: 'org',
       repo: 'repo',
       prNumber: 5,
@@ -215,8 +212,8 @@ describe('registerPrWithSourceControl', () => {
       cloudId: 'cloud-1',
     });
 
-    expect(createOrUpdateIssueSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ issueTitle: 'Fix: reduce egress exposure' })
+    expect(registerGitPullRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ Title: 'Fix: reduce egress exposure' })
     );
   });
 
@@ -227,7 +224,7 @@ describe('registerPrWithSourceControl', () => {
       },
     });
     await registerPrWithSourceControl({
-      apiClient: {} as any,
+      apiClient,
       owner: 'org',
       repo: 'repo',
       prNumber: 7,
@@ -236,8 +233,8 @@ describe('registerPrWithSourceControl', () => {
       cloudId: 'cloud-1',
     });
 
-    expect(createOrUpdateIssueSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ issueTitle: 'Infrastructure Risk Analysis - PR #7' })
+    expect(registerGitPullRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ Title: 'Infrastructure Risk Analysis - PR #7' })
     );
   });
 
@@ -249,7 +246,7 @@ describe('registerPrWithSourceControl', () => {
     });
 
     await registerPrWithSourceControl({
-      apiClient: {} as any,
+      apiClient,
       owner: 'org',
       repo: 'repo',
       prNumber: 2,
@@ -259,12 +256,12 @@ describe('registerPrWithSourceControl', () => {
       cloudId: 'cloud-1',
     });
 
-    expect(createOrUpdateIssueSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ riskSummary: 'Custom summary' })
+    expect(registerGitPullRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ RiskSummary: 'Custom summary' })
     );
   });
 
-  it('should register as InfrastructureRisk type with PR URL as issueUrl', async () => {
+  it('should register as InfrastructureRisk type as a PR with no Git issue', async () => {
     const { GitIssueType } = await import('@averlon/shared');
     const scanResult = JSON.stringify({
       ReachabilityAnalysis: {
@@ -273,7 +270,7 @@ describe('registerPrWithSourceControl', () => {
     });
 
     await registerPrWithSourceControl({
-      apiClient: {} as any,
+      apiClient,
       owner: 'org',
       repo: 'repo',
       prNumber: 3,
@@ -282,11 +279,12 @@ describe('registerPrWithSourceControl', () => {
       cloudId: 'cloud-1',
     });
 
-    expect(createOrUpdateIssueSpy).toHaveBeenCalledWith(
+    expect(registerGitPullRequest).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: GitIssueType.InfrastructureRisk,
-        issueUrl: 'https://github.com/org/repo/pull/3',
-        issueNumber: 3,
+        Type: GitIssueType.InfrastructureRisk,
+        URL: 'https://github.com/org/repo/pull/3',
+        Number: 3,
+        Status: GitPullRequestStatus.Open,
       })
     );
   });

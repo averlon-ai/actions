@@ -63,6 +63,12 @@ pull_image() {
 }
 
 main() {
+  # The MCP server accepts only an MCPClient-scoped key pair.
+  if [ -z "${MCP_API_KEY:-}" ] || [ -z "${MCP_API_SECRET:-}" ]; then
+    echo "::error::mcp-api-key and mcp-api-secret are required: an Averlon API key pair with the MCPClient scope."
+    return 1
+  fi
+
   resolve_engine
   echo "Averlon MCP server container engine: $ENGINE"
   pull_image

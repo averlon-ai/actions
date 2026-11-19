@@ -1,39 +1,60 @@
-# Averlon Misconfiguration Remediation Agent for IaC Action
+# Averlon Misconfiguration Remediation Agent for IaC
 
-Security correlation for Terraform and Pulumi infrastructure changes with existing Averlon misconfigurations
+Finds the resources in your Terraform plan (or Pulumi stack) that have misconfigurations Averlon already found in your live cloud, and gets them fixed in your IaC code.
 
 ## 🚀 What It Does
 
-The Averlon Misconfiguration Remediation Agent for IaC Action helps you identify security issues in your Terraform or Pulumi changes by:
+The action reads the plan, finds the cloud resource ID of each resource, and correlates the resources with the misconfiguration issues that Averlon found in the cloud. Then it remediates them in one of two modes:
 
-- **🔍 Existing Misconfiguration Correlation**: Parses local Terraform plan or Pulumi stack export JSON and finds resources in the change
-- **⚠️ Issue Identification**: Correlates those resources with existing Averlon misconfiguration issues already discovered in the live cloud
-- **📊 Issue Reporting**: Provides detailed issue IDs and resource information
-- **📝 GitHub Issues**: Automatically creates GitHub issues for resources with misconfigurations (batched 10 resources per issue)
-- **🤖 Copilot Integration**: Optionally assigns GitHub Copilot to issues for automated remediation
-- **🔄 Continuous Monitoring**: Integrates seamlessly into your CI/CD pipeline
+|                   | Copilot mode (default)                                                                 | Claude mode                                                                                                            |
+| ----------------- | -------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Select with       | `agent-mode: copilot`                                                                  | `agent-mode: claude`                                                                                                   |
+| What happens      | The action creates GitHub issues, 10 resources per issue, for the GitHub Copilot agent | Claude Code runs in your workflow, fixes the Terraform code and opens pull requests                                    |
+| Result            | Issues labeled `averlon-iac-misconfiguration-analysis`, optionally assigned to Copilot | Pull requests labeled `averlon-iac-misconfiguration-analysis`, and a Fixed or NoFix result for each finding in Averlon |
+| IaC               | Terraform or Pulumi                                                                    | Terraform                                                                                                              |
+| Workflow triggers | Any                                                                                    | `workflow_dispatch`, `schedule`, `workflow_run`                                                                        |
 
-## 📋 Prerequisites
+The action does not upload the plan. It sends the cloud resource IDs from the plan to Averlon. In Claude mode, Claude Code gets the plan address of each resource (for example `module.storage.aws_s3_bucket.logs`), not the plan.
 
-Before using this action, ensure you have:
+## 📋 Requirements
 
-1. **Averlon Account**: Sign up at [Averlon](https://averlon.io) to get your API credentials
-2. **API Credentials**: Obtain your `api_key` and `api_secret` from the Averlon dashboard (requires Averlon admin access; ask an Averlon org admin to create them if you don't have admin access). Store them as secrets (for example, `AVERLON_API_KEY` and `AVERLON_API_SECRET`) and pass them as `averlon-api-key` / `averlon-api-secret`.
-3. **Terraform Setup**: Terraform installed and configured in your workflow
-4. **Terraform Plan File**: A JSON-formatted Terraform plan file to scan
-5. **GitHub Token**: A GitHub token with permissions to create and manage issues
-   - For basic usage: Use `${{ secrets.GITHUB_TOKEN }}` with workflow `permissions` including `issues: write` and `pull-requests: read` (required to register linked Copilot PRs in the backend; see [permissions docs](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#permissions))
-   - For Copilot auto-assignment: **Optional** - Use a Personal Access Token (PAT) with Copilot access (the default `GITHUB_TOKEN` does not support Copilot assignment)
+| Requirement                                                                      | Copilot mode                                                                                                                                                            | Claude mode                                                                                                                   |
+| -------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Averlon **GitActions**-scoped key pair (`averlon-api-key`, `averlon-api-secret`) | Required                                                                                                                                                                | Required                                                                                                                      |
+| Averlon **MCPClient**-scoped key pair                                            | Optional. Set it in the Copilot settings of the repository, so that Copilot can use the Averlon tools ([MCP setup](../docs/mcp-setup.md)). Not an input of this action. | Required, as `mcp-api-key` and `mcp-api-secret` (see [MCP keys](#mcp-keys))                                                   |
+| Claude access                                                                    | Not used                                                                                                                                                                | `anthropic-api-key`, or Claude on Amazon Bedrock with `use-bedrock: true`                                                     |
+| `github-token`                                                                   | Optional. Without it, the action creates no issues and only sets the `scan-result` output. `auto-assign-copilot` needs a PAT with Copilot access.                       | Required                                                                                                                      |
+| Workflow `permissions`                                                           | `contents: read`, `issues: write`, `pull-requests: read`                                                                                                                | `contents: write`, `pull-requests: write`, `issues: read`                                                                     |
+| Averlon cloud                                                                    | `cloud-id` or `account-id`. Without one, the action finds no misconfigurations.                                                                                         | `cloud-id` or `account-id`. Without one, the action fails.                                                                    |
+| Plan                                                                             | Terraform plan JSON (`plan-path`), or Pulumi stack export (`pulumi-stack-path`)                                                                                         | Terraform plan JSON (`plan-path`)                                                                                             |
+| Runner                                                                           | Node.js 20 or later on `PATH`, and bash                                                                                                                                 | Node.js 20 or later on `PATH`, bash, and docker or podman. Terraform on `PATH`, so that Claude Code can validate its changes. |
 
-## 🔐 Create Averlon API Keys and MCP Setup
+GitHub-hosted `ubuntu-latest` runners have Node.js, bash and docker.
 
-For detailed instructions on creating API keys, please refer to our [API Key Setup Documentation](../docs/actions-api-setup.md).
+### Workflow permissions
 
-For setting up the MCP server, please refer to our [MCP Setup Documentation](../docs/mcp-setup.md).
+| Permission      | Copilot mode | Claude mode | Why                                                                                                                                                              |
+| --------------- | ------------ | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `contents`      | `read`       | `write`     | Copilot mode: `actions/checkout` only. Claude mode: Claude Code pushes its fix branches.                                                                         |
+| `issues`        | `write`      | `read`      | Copilot mode: the action creates, updates and closes its issues. Claude mode: the action finds its labeled pull requests through the issues API.                 |
+| `pull-requests` | `read`       | `write`     | Copilot mode: the action finds the pull requests that Copilot links to its issues. Claude mode: Claude Code opens the pull requests, and the action labels them. |
 
-## 🛠️ Usage
+### Averlon API keys
 
-### Basic Workflow
+Create the key pairs in the Averlon Console (API Keys → Create New Key). You need Averlon admin access. If you do not have it, ask an Averlon org admin.
+
+- **GitActions** scope, for the action itself: see [API key setup](../docs/actions-api-setup.md). Store it as the secrets `AVERLON_API_KEY` and `AVERLON_API_SECRET`.
+- **MCPClient** scope, for the Averlon MCP server:
+  - Copilot mode: store it in the `copilot` environment of the repository, as in [MCP setup](../docs/mcp-setup.md).
+  - Claude mode: store it as the secrets `AVERLON_MCP_API_KEY` and `AVERLON_MCP_API_SECRET`, and pass them as `mcp-api-key` and `mcp-api-secret`.
+
+#### MCP keys
+
+In Claude mode the action starts the Averlon MCP server for Claude Code. The server accepts only a key with the MCPClient scope, so `mcp-api-key` and `mcp-api-secret` are required: without them the action fails before it gets any misconfigurations. The action does not use the GitActions key pair for the MCP server.
+
+## 🤖 Copilot Mode
+
+### Workflow
 
 ```yaml
 name: Averlon IaC Misconfiguration Remediation
@@ -46,145 +67,237 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      issues: write # Required for creating GitHub issues
+      issues: write
+      pull-requests: read
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
 
       - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+        uses: hashicorp/setup-terraform@v4
         with:
-          terraform_version: 1.5.0 # Set to the version your repo uses (or omit if not needed)
+          terraform_version: 1.5.0 # the version that your repository uses
+          terraform_wrapper: false # the wrapper adds text to the output of `terraform show -json`
 
       - name: Generate Terraform plan
-        working-directory: ./infrastructure # Update to the directory containing your Terraform code
+        working-directory: ./infrastructure # the directory of your Terraform code
         run: |
           terraform init
           terraform plan -out=tfplan
           terraform show -json tfplan > plan.json
 
       - name: Run Averlon Remediation Agent for IaC Misconfigurations
-        uses: averlon-ai/actions/iac-misconfig-analysis@v2.0.8
+        uses: averlon-ai/actions/iac-misconfig-analysis@v2.1.0
         with:
           averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
           averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
-          commit: ${{ github.event.pull_request.head.sha }}
-          plan-path: './infrastructure/plan.json' # Update if you change working-directory
+          account-id: '123456789012' # the account that the plan deploys to, or set cloud-id
+          plan-path: ./infrastructure/plan.json
           github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-The action will automatically create GitHub issues for resources with misconfigurations, batching 10 resources per issue.
-If your Terraform files live at the repository root, drop the `working-directory` line above and use `./plan.json` for `plan-path`.
+If your Terraform code is at the root of the repository, remove `working-directory` and use `./plan.json` for `plan-path`.
 
-### With Issue Creation Disabled
+To assign the issues to Copilot, set `auto-assign-copilot: 'true'` and give a PAT with Copilot access as `github-token`. The workflow `GITHUB_TOKEN` cannot assign Copilot.
 
-Skip GitHub issue creation if you only need the output:
+For Pulumi, set `iac-type: pulumi` and give the output of `pulumi stack export` as `pulumi-stack-path`, instead of `plan-path`.
+
+### GitHub issues
+
+- **Batches:** each issue has up to 10 resources.
+- **Label:** `averlon-iac-misconfiguration-analysis`.
+- **Content:** the repository and commit, a summary, each resource with its asset details and Averlon issue IDs, reachability when known, and next steps.
+- **Updates:** a later run updates an issue when its batch changes, and closes the issues of batches that no longer exist.
+- **Averlon:** the action registers each issue, and the pull requests that Copilot links to it, with Averlon.
+
+### Output only
+
+Leave out `github-token` to get only the `scan-result` output, with no issues:
 
 ```yaml
 - name: Run Averlon Remediation Agent for IaC Misconfigurations
   id: scan
-  uses: averlon-ai/actions/iac-misconfig-analysis@v2.0.8
+  uses: averlon-ai/actions/iac-misconfig-analysis@v2.1.0
   with:
     averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
     averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
-    commit: ${{ github.event.pull_request.head.sha }}
-    plan-path: './plan.json'
-    # Omit github-token to skip issue creation
+    account-id: '123456789012'
+    plan-path: ./plan.json
 
 - name: Process scan results
-  run: |
-    echo "Resources: ${{ steps.scan.outputs.scan-result }}"
-    # Process the results as needed
+  env:
+    SCAN_RESULT: ${{ steps.scan.outputs.scan-result }}
+  run: echo "$SCAN_RESULT" | jq 'length'
 ```
 
-### With Advanced Configuration
+## 🧠 Claude Mode
+
+### Workflow
 
 ```yaml
-- name: Run Averlon Remediation Agent for IaC Misconfigurations
-  uses: averlon-ai/actions/iac-misconfig-analysis@v2.0.8
-  with:
-    # Required inputs
-    averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
-    averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
-    commit: ${{ github.sha }}
-    plan-path: './plan.json'
+name: Averlon IaC Remediation
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: '0 2 * * *'
 
-    # Optional: GitHub issues creation
-    github-token: ${{ secrets.GITHUB_TOKEN }} # Creates issues when provided
+# One run at a time, so that two runs do not open pull requests for the same misconfigurations.
+concurrency: averlon-iac-remediation
 
-    # Optional: Correlation configuration
-    base-url: 'https://wfe.prod.averlon.io/' # Custom API endpoint
-    cloud-id: 'your-averlon-cloud-id' # Optional: correlate with existing issues in this cloud
-    auto-assign-copilot: 'true' #auto assign created issue to copilot
-    resource-type-filter: 'aws_s3_bucket,aws_lambda_function' # filter by Terraform resource types
-    filters: 'Critical,High' # Filter by severity levels (comma-separated). Supported: Critical, High, Medium, Low.
+jobs:
+  remediate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: read
+      id-token: write # only for the AWS role below
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_wrapper: false # the wrapper adds text to the output of `terraform show -json`
+
+      # Credentials only for the plan step: Claude Code runs shell commands in this job.
+      - name: Configure AWS credentials
+        id: aws
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_PLAN_ROLE }} # a read-only role is enough for a plan
+          aws-region: us-east-1
+          output-credentials: true
+          output-env-credentials: false
+
+      # Keep the plan out of the checkout: it can contain secrets.
+      - name: Generate Terraform plan
+        env:
+          AWS_ACCESS_KEY_ID: ${{ steps.aws.outputs.aws-access-key-id }}
+          AWS_SECRET_ACCESS_KEY: ${{ steps.aws.outputs.aws-secret-access-key }}
+          AWS_SESSION_TOKEN: ${{ steps.aws.outputs.aws-session-token }}
+          AWS_REGION: us-east-1
+        run: |
+          terraform init
+          terraform plan -out="${{ runner.temp }}/tfplan"
+          terraform show -json "${{ runner.temp }}/tfplan" > "${{ runner.temp }}/plan.json"
+
+      - name: Run Averlon Remediation Agent for IaC Misconfigurations
+        uses: averlon-ai/actions/iac-misconfig-analysis@v2.1.0
+        with:
+          agent-mode: claude
+          averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
+          averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
+          mcp-api-key: ${{ secrets.AVERLON_MCP_API_KEY }}
+          mcp-api-secret: ${{ secrets.AVERLON_MCP_API_SECRET }}
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          account-id: '123456789012' # the account that the plan deploys to, or set cloud-id
+          plan-path: ${{ runner.temp }}/plan.json
 ```
 
-**GitHub Issues:**
+For Azure or GCP, get the credentials for the plan step in the same way, and set `account-id` to the subscription ID or the project ID.
 
-- Issues are automatically created for resources with misconfigurations
-- Resources are batched into groups of 10 per issue
-- Issues are labeled with `averlon-iac-misconfiguration-analysis` for easy filtering
-- If a GitHub token with Copilot access is provided, issues can be automatically assigned to Copilot for remediation
+### How Claude mode works
+
+1. The action correlates the plan with the Averlon misconfigurations, as in Copilot mode.
+2. It gets the misconfigurations of the correlated resources from Averlon. One run sends Claude Code as many as fit in one prompt. The next run gets the others.
+3. It marks the misconfigurations that it sends as in progress in Averlon.
+4. Claude Code fixes them with the `remediate-iac` skill:
+   - It uses the plan address to find the Terraform code of each cloud resource. It changes only the code that it can map to the resource with confidence. Otherwise it changes nothing and reports NoFix with the reason.
+   - It groups the fixes by type (for example public access, encryption, logging) into at most 6 pull requests, on branches named `averlon-iac-<run ID>/<group>`, based on the default branch.
+   - It runs `terraform fmt`, `terraform init -backend=false` and `terraform validate` on its changes. It never runs `terraform plan`, `apply` or `state`, and never reads state files.
+5. The action labels each pull request, and reports Fixed or NoFix for each misconfiguration to Averlon.
+
+Averlon does not send a misconfiguration again while a run works on it (by default for 2 hours), or for some time after a NoFix (by default 2 days). A misconfiguration that Claude Code does not report on goes back to pending for the next run.
+
+### Security
+
+Claude Code can run shell commands in the job, so it can read what is in the job environment:
+
+- Give the cloud credentials only to the plan step, as in the example, and use a read-only role.
+- Write the plan to `${{ runner.temp }}`, not into the checkout. Claude Code does not need the plan.
+- Do not put secrets that Claude Code does not need in the `env` of the job.
+
+### Claude on Amazon Bedrock
+
+Set `use-bedrock: true` and leave out `anthropic-api-key`. Claude Code needs the AWS credentials in the environment: `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` (and `AWS_SESSION_TOKEN` for temporary credentials), or `AWS_BEARER_TOKEN_BEDROCK`, and `AWS_REGION`. An instance or pod role alone is not enough. Use a role that can only call Bedrock, because Claude Code can read these credentials.
+
+```yaml
+- name: Configure AWS credentials for Bedrock
+  uses: aws-actions/configure-aws-credentials@v6
+  with:
+    role-to-assume: ${{ secrets.AWS_BEDROCK_ROLE }}
+    aws-region: us-west-2
+
+- name: Run Averlon Remediation Agent for IaC Misconfigurations
+  uses: averlon-ai/actions/iac-misconfig-analysis@v2.1.0
+  with:
+    agent-mode: claude
+    use-bedrock: true
+    # the other inputs as in the workflow above, without anthropic-api-key
+```
+
+Without `model`, the action uses `us.anthropic.claude-opus-5-5`. If you set `model`, give a Bedrock model or inference profile ID, not an Anthropic model name. The role needs `bedrock:InvokeModelWithResponseStream` on that model (and on the inference profile, for a `us.` or `global.` ID).
 
 ## 📥 Inputs
 
-### Required Inputs
+### All modes
 
-| Input                | Description                                    |
-| -------------------- | ---------------------------------------------- |
-| `averlon-api-key`    | Averlon API key ID for authentication          |
-| `averlon-api-secret` | Averlon API secret for HMAC signatures         |
-| `commit`             | Commit SHA to scan                             |
-| `plan-path`          | Path to the JSON-formatted Terraform plan file |
+| Input                  | Required                                  | Default                        | Description                                                                                                                                                                                              |
+| ---------------------- | ----------------------------------------- | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `averlon-api-key`      | Yes                                       |                                | Averlon API key ID, GitActions scope                                                                                                                                                                     |
+| `averlon-api-secret`   | Yes                                       |                                | Averlon API key secret, GitActions scope                                                                                                                                                                 |
+| `cloud-id`             | Yes: `cloud-id` or `account-id`, not both |                                | Averlon cloud ID                                                                                                                                                                                         |
+| `account-id`           | Yes: `cloud-id` or `account-id`, not both |                                | AWS account ID, Azure subscription ID or GCP project ID that the plan deploys to. The action finds its Averlon cloud.                                                                                    |
+| `agent-mode`           | No                                        | `copilot`                      | `copilot` or `claude`                                                                                                                                                                                    |
+| `iac-type`             | No                                        | `terraform`                    | `terraform` or `pulumi`. Claude mode supports `terraform` only.                                                                                                                                          |
+| `plan-path`            | For Terraform                             |                                | Path to the Terraform plan JSON (`terraform show -json`)                                                                                                                                                 |
+| `github-token`         | In Claude mode                            |                                | GitHub token. Copilot mode: the action creates the issues with it, or with `GITHUB_TOKEN` from the job `env`; without a token it creates none. Claude mode: Claude Code opens the pull requests with it. |
+| `filters`              | No                                        | `Critical,High`                | Severities to include, comma-separated: `Critical`, `High`, `Medium`, `Low`                                                                                                                              |
+| `resource-type-filter` | No                                        | all types                      | Resource types to include, comma-separated. Terraform: `aws_s3_bucket,aws_lambda_function`. Pulumi: `aws:s3/bucket:Bucket`.                                                                              |
+| `base-url`             | No                                        | `https://wfe.prod.averlon.io/` | Averlon API URL                                                                                                                                                                                          |
 
-### Optional Inputs
+### Copilot mode only
 
-| Input                  | Description                                                                                                                       | Default                        |
-| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
-| `base-url`             | Base URL for Averlon API                                                                                                          | `https://wfe.prod.averlon.io/` |
-| `cloud-id`             | Averlon cloud ID used for existing issue correlation                                                                              | (optional)                     |
-| `iac-type`             | IaC type to analyze: `terraform` or `pulumi`                                                                                      | `terraform`                    |
-| `pulumi-stack-path`    | Path to JSON output from `pulumi stack export` when `iac-type` is `pulumi`                                                        | (optional)                     |
-| `github-token`         | GitHub token for creating issues. Provide a PAT with Copilot access to enable automated assignment; otherwise uses workflow token | `''` (optional)                |
-| `resource-type-filter` | Comma-separated resource types to include. Terraform example: `aws_s3_bucket`. Pulumi example: `aws:s3/bucket:Bucket`.            | (all types)                    |
-| `filters`              | Comma-separated severity levels to include. Supported: `Critical`, `High`, `Medium`, `Low`. Example: `Critical,High`.             | `Critical,High`                |
+| Input                 | Required   | Default               | Description                                                                                |
+| --------------------- | ---------- | --------------------- | ------------------------------------------------------------------------------------------ |
+| `pulumi-stack-path`   | For Pulumi |                       | Path to the output of `pulumi stack export`                                                |
+| `auto-assign-copilot` | No         | `false`               | Assign the issues to the Copilot agent. Needs a PAT with Copilot access as `github-token`. |
+| `commit`              | No         | the commit of the run | Commit SHA for the issue text                                                              |
+
+### Claude mode only
+
+| Input               | Required                  | Default                                                           | Description                                                                              |
+| ------------------- | ------------------------- | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `anthropic-api-key` | Yes, unless `use-bedrock` |                                                                   | Anthropic API key                                                                        |
+| `mcp-api-key`       | Yes                       |                                                                   | Averlon API key ID, MCPClient scope, for the Averlon MCP server ([MCP keys](#mcp-keys))  |
+| `mcp-api-secret`    | Yes                       |                                                                   | Averlon API key secret, MCPClient scope                                                  |
+| `use-bedrock`       | No                        | `false`                                                           | Run Claude on Amazon Bedrock. See [Claude on Amazon Bedrock](#claude-on-amazon-bedrock). |
+| `model`             | No                        | `claude-opus-5-5`, or `us.anthropic.claude-opus-5-5` with Bedrock | Claude model                                                                             |
+| `container-engine`  | No                        | docker if present, else podman                                    | Command that runs the MCP server container: a name on `PATH` or an absolute path         |
+| `disable-websearch` | No                        | `false`                                                           | Do not give Claude Code the WebSearch tool                                               |
+
+`api-key` and `api-secret` are deprecated names of `averlon-api-key` and `averlon-api-secret`.
 
 ## 📤 Outputs
 
-| Output        | Description                                                                 |
-| ------------- | --------------------------------------------------------------------------- |
-| `scan-result` | JSON stringified array of `TerraformResource` objects found during the scan |
+| Output        | Description                                                       |
+| ------------- | ----------------------------------------------------------------- |
+| `scan-result` | JSON array of the correlated resources, with their Averlon issues |
 
-**Example**:
-
-```yaml
-- name: Run Averlon Remediation Agent for IaC Misconfigurations
-  id: scan
-  uses: averlon-ai/actions/iac-misconfig-analysis@v2.0.8
-  # ... inputs
-
-- name: Use output
-  run: |
-    RESOURCES='${{ steps.scan.outputs.scan-result }}'
-    echo "Found resources: $RESOURCES"
-    RESOURCE_COUNT=$(echo "$RESOURCES" | jq 'length')
-    if [ "$RESOURCE_COUNT" -gt 0 ]; then
-      echo "Security issues detected in $RESOURCE_COUNT resources!"
-    fi
-```
-
-The `scan-result` output is a JSON stringified array of `TerraformResource` objects, for example:
+Copilot mode also writes the array to `scan-result.json` in the working directory.
 
 ```json
 [
   {
-    "ID": "resource-1",
+    "ID": "aws_s3_bucket.logs",
     "Type": "aws_s3_bucket",
-    "Name": "my-bucket",
+    "Name": "logs",
     "Asset": {
       "ID": "asset-123",
-      "ResourceID": "arn:aws:s3:::my-bucket"
+      "ResourceID": "arn:aws:s3:::my-logs-bucket"
     },
     "Issues": [
       {
@@ -197,145 +310,21 @@ The `scan-result` output is a JSON stringified array of `TerraformResource` obje
 ]
 ```
 
-## 🔄 How It Works
-
-The action follows this workflow:
-
-1. **Parse Local IaC Output**: Reads Terraform plan JSON or Pulumi stack export JSON from the workflow
-2. **Extract Cloud Resource IDs**: Identifies Terraform resources with stable cloud resource ID candidates from plan state, including unchanged applied resources
-3. **Correlate Existing Issues**: Queries Averlon for existing misconfiguration issues already discovered in the live cloud
-4. **Filter Results**: Returns only resources with matched existing misconfigurations
-5. **Output**: Sets the JSON stringified array of resources to the `scan-result` output
-6. **GitHub Issues Creation** (optional): If `github-token` is provided, creates GitHub issues for correlated resources
-
-This action does not upload plans or run a backend Terraform scan job. It correlates identifiable Terraform plan resources with issues Averlon already knows about from cloud scanning.
-
-### GitHub Issues Format
-
-When `github-token` is provided, the action automatically creates GitHub issues:
-
-- **📝 Batching**: Resources are grouped into batches of 10 per issue
-- **🏷️ Labeling**: All issues are labeled with `averlon-terraform` for easy filtering
-- **📊 Issue Content**: Each issue includes:
-  - Repository and commit information
-  - Summary statistics (total resources, resources with issues, unique issue IDs)
-  - Detailed resource information (ID, type, name, asset details)
-  - Issue IDs for each resource
-  - Reachability information (when available)
-  - Next steps for remediation
-- **🔄 Updates**: Existing issues are updated if the batch content changes
-- **🧹 Cleanup**: Orphaned issues (from removed batches) are automatically closed
-- **🤖 Copilot**: Issues can be automatically assigned to GitHub Copilot if a PAT with Copilot access is provided
+With no correlated resources, the output is `[]`.
 
 ## 🚨 Troubleshooting
 
-### Common Issues
+| Message                                                        | Cause and fix                                                                                                                                          |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `Resource not accessible by integration`                       | A workflow permission is missing. See [Workflow permissions](#workflow-permissions).                                                                   |
+| `cloud-id not provided; ... issue correlation skipped`         | Set `cloud-id` or `account-id`.                                                                                                                        |
+| `This workflow was triggered by '...', which is not supported` | Claude mode runs only on `workflow_dispatch`, `schedule` and `workflow_run`. Change the `on:` section.                                                 |
+| `No Averlon cloud found for ...`, or an error from `GetCloud`  | The account is not onboarded to Averlon, or the GitActions key belongs to another Averlon organization.                                                |
+| `Set cloud-id or account-id, not both`                         | Remove one of them.                                                                                                                                    |
+| `cloud-id or account-id is required when agent-mode is claude` | Set one of them.                                                                                                                                       |
+| `mcp-api-key and mcp-api-secret are required`                  | Set the MCPClient key pair. See [MCP keys](#mcp-keys).                                                                                                 |
+| `API key is not authorized for MCP` (in the run log)           | The MCP key does not have the MCPClient scope. See [MCP keys](#mcp-keys).                                                                              |
+| `No container engine found on the runner`                      | Install docker or podman, or give its path as `container-engine`.                                                                                      |
+| `ENOENT`, or a JSON error for the plan                         | `plan-path` is wrong, or the file is not JSON. Make it with `terraform show -json`, and set `terraform_wrapper: false` in `hashicorp/setup-terraform`. |
 
-**Authentication Errors**
-
-```yaml
-# Ensure your secrets are properly configured
-averlon-api-key: ${{ secrets.AVERLON_API_KEY }} # Must be set in repository secrets
-averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }} # Must be set in repository secrets
-```
-
-**GitHub Issues Permission Errors**
-
-If you see "Resource not accessible by integration" errors:
-
-```yaml
-jobs:
-  iac-misconfiguration-remediation:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      issues: write # This is required for creating issues!
-    steps:
-      # ... your steps
-```
-
-Or omit the `github-token` input if you don't need issue creation:
-
-```yaml
-with:
-  # ... other inputs
-  # Omit github-token to skip issue creation
-```
-
-**File Not Found Errors**
-
-```yaml
-# Ensure Terraform plan file exists before running the action
-- name: Check plan file exists
-  run: |
-    ls -la ./plan.json
-    # Verify the file is valid JSON
-    cat ./plan.json | jq .
-```
-
-### Debug Mode
-
-Enable debug logging for troubleshooting:
-
-```yaml
-- name: Run Averlon Remediation Agent for IaC Misconfigurations
-  uses: averlon-ai/actions/iac-misconfig-analysis@v2.0.8
-  env:
-    ACTIONS_STEP_DEBUG: true
-  with:
-    # ... your inputs
-```
-
-## 📊 Output Examples
-
-The action returns a JSON stringified array of `TerraformResource` objects:
-
-**Resources with issues:**
-
-```json
-[
-  {
-    "ID": "resource-1",
-    "Type": "aws_s3_bucket",
-    "Name": "my-bucket",
-    "Asset": {
-      "ID": "asset-123",
-      "ResourceID": "arn:aws:s3:::my-bucket"
-    },
-    "Issues": [
-      {
-        "ID": "issue-abc123",
-        "OrgID": "org-123",
-        "CloudID": "cloud-456"
-      },
-      {
-        "ID": "issue-def456",
-        "OrgID": "org-123",
-        "CloudID": "cloud-456"
-      }
-    ]
-  },
-  {
-    "ID": "resource-2",
-    "Type": "aws_ec2_instance",
-    "Name": "my-instance",
-    "Asset": {
-      "ID": "asset-456",
-      "ResourceID": "arn:aws:ec2:us-east-1:123456789012:instance/i-123456"
-    },
-    "Issues": [
-      {
-        "ID": "issue-ghi789",
-        "OrgID": "org-123",
-        "CloudID": "cloud-456"
-      }
-    ]
-  }
-]
-```
-
-**No issues found:**
-
-```json
-[]
-```
+To get debug logs, re-run the job with **Enable debug logging**, or set the repository variable `ACTIONS_STEP_DEBUG` to `true`.

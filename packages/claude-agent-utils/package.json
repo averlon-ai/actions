@@ -1,0 +1,32 @@
+{
+  "name": "@averlon/claude-agent-utils",
+  "version": "1.0.0",
+  "description": "Shared steps for actions that run the Claude Code remediation agent",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./constants": "./src/constants.ts",
+    "./code-defect-ids": "./src/code-defect-ids.ts",
+    "./setup-skills": "./src/setup-skills.ts",
+    "./cleanup-skills": "./src/cleanup-skills.ts",
+    "./validate-anthropic-key": "./src/validate-anthropic-key.ts"
+  },
+  "scripts": {
+    "test": "bun test",
+    "build": "bun run --bun tsc --noEmit",
+    "lint": "eslint . --ext .ts",
+    "lint:fix": "eslint . --ext .ts --fix",
+    "format": "prettier --write \"**/*.ts\""
+  },
+  "dependencies": {
+    "@actions/core": "^3.0.0",
+    "@actions/github": "^9.1.1",
+    "@anthropic-ai/sdk": "^0.116.0",
+    "@averlon/github-actions-utils": "workspace:*",
+    "@averlon/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}

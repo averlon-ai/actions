@@ -10,6 +10,7 @@ import {
   TerraformResource,
   getCallerInfo,
   IssueSeverityEnum,
+  type ApiClient,
 } from '@averlon/shared';
 import {
   getInputSafe,
@@ -17,17 +18,23 @@ import {
   parseGitHubRepository,
   parseIssueSeverityFilters,
 } from '@averlon/github-actions-utils';
+import { runClaudeMode } from './claude-mode';
 import { GithubIssuesService } from './github-issues';
 import { correlatePulumiStack } from './pulumi';
 import { correlateTerraformPlan } from './terraform-local';
 
 type IacType = 'terraform' | 'pulumi';
 
+/** copilot: GitHub issues for the Copilot agent. claude: Claude Code opens PRs in this workflow. */
+type AgentMode = 'copilot' | 'claude';
+
 export function gitLikeHash(input: string): string {
   return createHash('sha1').update(input, 'utf8').digest('hex');
 }
 
 export interface ActionInputs {
+  agentMode: AgentMode;
+  disableWebSearch: boolean;
   apiKey: string;
   apiSecret: string;
   baseUrl: string;
@@ -36,6 +43,7 @@ export interface ActionInputs {
   iacType: IacType;
   pulumiStackPath?: string;
   cloudId?: string;
+  accountId?: string;
   githubToken: string;
   githubOwner: string;
   githubRepo: string;
@@ -80,6 +88,30 @@ async function _getInputs(): Promise<ActionInputs> {
     throw new Error('pulumi-stack-path is required when iac-type is pulumi');
   }
 
+  // Not trimmed: the steps in action.yml compare agent-mode as it is.
+  const agentModeInput = process.env['INPUT_AGENT_MODE'] ?? getInputSafe('agent-mode', false);
+  const agentModeRaw = (agentModeInput || 'copilot').toLowerCase();
+  if (agentModeRaw !== 'copilot' && agentModeRaw !== 'claude') {
+    throw new Error(
+      `Invalid agent-mode: ${JSON.stringify(agentModeRaw)}. Supported values: copilot, claude.`
+    );
+  }
+  const agentMode = agentModeRaw as AgentMode;
+  const cloudId = getInputSafe('cloud-id', false) || undefined;
+  const accountId = getInputSafe('account-id', false) || undefined;
+  if (agentMode === 'claude' && iacType !== 'terraform') {
+    throw new Error('agent-mode claude supports iac-type terraform only');
+  }
+  if (cloudId && accountId) {
+    throw new Error('Set cloud-id or account-id, not both');
+  }
+  if (agentMode === 'claude' && !cloudId && !accountId) {
+    throw new Error('cloud-id or account-id is required when agent-mode is claude');
+  }
+  if (agentMode === 'claude' && !explicitGithubToken) {
+    throw new Error('github-token is required when agent-mode is claude');
+  }
+
   const commitHashInput =
     iacType === 'pulumi'
       ? `commit:${commitInput}githubRepo:${githubRepo}githubOwner:${githubOwner}pulumiStackPath:${pulumiStackPath}`
@@ -105,13 +137,16 @@ async function _getInputs(): Promise<ActionInputs> {
   }
 
   return {
+    agentMode,
+    disableWebSearch: parseBoolean(getInputSafe('disable-websearch', false) || 'false'),
     apiKey,
     apiSecret,
     baseUrl: getInputSafe('base-url', false) || 'https://wfe.prod.averlon.io/',
     commit,
     iacType,
     pulumiStackPath,
-    cloudId: getInputSafe('cloud-id', false) || undefined,
+    cloudId,
+    accountId,
     planPath,
     githubToken,
     githubOwner,
@@ -132,6 +167,23 @@ function extractCloudIdFromResources(resources: TerraformResource[]): string | u
   return undefined;
 }
 
+/** The Averlon cloud of cloud-id or account-id. Correlation needs the cloud ID, claude mode the account ID. */
+async function resolveCloud(
+  apiClient: ApiClient,
+  inputs: Pick<ActionInputs, 'cloudId' | 'accountId'>
+): Promise<{ cloudId: string; accountId: string }> {
+  const cloud = await apiClient.getCloud(
+    inputs.cloudId ? { CloudID: inputs.cloudId } : { AccountID: inputs.accountId }
+  );
+  if (!cloud?.accountId) {
+    throw new Error(
+      `No Averlon cloud found for ${inputs.cloudId ? `cloud-id ${inputs.cloudId}` : `account-id ${inputs.accountId}`}`
+    );
+  }
+  core.info(`Averlon cloud ${cloud.id}, account ${cloud.accountId}`);
+  return { cloudId: cloud.id, accountId: cloud.accountId };
+}
+
 async function run(): Promise<void> {
   try {
     core.info('Starting Averlon IaC correlation with existing misconfigurations...');
@@ -146,6 +198,13 @@ async function run(): Promise<void> {
     if (core.isDebug()) {
       const callerInfo = await getCallerInfo(apiClient);
       core.debug(`Caller info: ${JSON.stringify(callerInfo, null, 2)}`);
+    }
+
+    if (inputs.agentMode === 'claude' || inputs.accountId) {
+      const cloud = await resolveCloud(apiClient, inputs);
+      inputs.cloudId = cloud.cloudId;
+      inputs.accountId = cloud.accountId;
+      core.setOutput('cloud-id', cloud.cloudId);
     }
 
     let scanResult: TerraformResource[];
@@ -183,17 +242,28 @@ async function run(): Promise<void> {
     core.setOutput('scan-result', JSON.stringify(sortedScanResult));
     core.info(`Correlation results set as action output (${sortedScanResult.length} resources)`);
 
-    try {
-      const outputPath =
-        process.env['SCAN_RESULT_JSON_PATH'] || join(process.cwd(), 'scan-result.json');
-      writeFileSync(outputPath, JSON.stringify(sortedScanResult, null, 2), 'utf8');
-      core.info(`Scan result JSON written to ${outputPath}`);
-    } catch (writeError) {
-      const message = writeError instanceof Error ? writeError.message : String(writeError);
-      core.warning(`Failed to write scan result JSON: ${message}`);
+    // Not in claude mode: the Coding Agent works in this checkout and does not need the file.
+    if (inputs.agentMode !== 'claude') {
+      try {
+        const outputPath =
+          process.env['SCAN_RESULT_JSON_PATH'] || join(process.cwd(), 'scan-result.json');
+        writeFileSync(outputPath, JSON.stringify(sortedScanResult, null, 2), 'utf8');
+        core.info(`Scan result JSON written to ${outputPath}`);
+      } catch (writeError) {
+        const message = writeError instanceof Error ? writeError.message : String(writeError);
+        core.warning(`Failed to write scan result JSON: ${message}`);
+      }
     }
 
-    if (inputs.githubToken && sortedScanResult.length > 0) {
+    if (inputs.agentMode === 'claude') {
+      await runClaudeMode({
+        apiClient,
+        resources: sortedScanResult,
+        accountId: inputs.accountId ?? '',
+        severityFilters: inputs.severityFilters,
+        disableWebSearch: inputs.disableWebSearch,
+      });
+    } else if (inputs.githubToken && sortedScanResult.length > 0) {
       core.info('Creating GitHub issues for correlated resources...');
       const cloudId = extractCloudIdFromResources(sortedScanResult);
       const octokit = github.getOctokit(inputs.githubToken);

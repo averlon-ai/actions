@@ -5,6 +5,7 @@ import {
   GitDockerfile,
   CodeDefectRef,
   CodeDefectStatus,
+  GitImageUpdateKind,
 } from '@averlon/shared';
 import {
   buildDockerfileRequests,
@@ -13,12 +14,11 @@ import {
   toRelativePath,
 } from './recommendations';
 import {
-  DEFAULT_BASE_URL,
-  DEFAULT_FILTERS,
   ALLOWED_BASE_TOOLS,
-  MCP_TOOLS,
+  DEFAULT_BASE_URL,
   FEEDBACK_JSON_SCHEMA,
-} from './constants';
+} from '@averlon/claude-agent-utils/constants';
+import { DEFAULT_FILTERS, MCP_TOOLS } from './constants';
 
 /**
  * Collects all CodeDefectRef entries from every package in the Dockerfile.
@@ -55,6 +55,84 @@ function stripToCodeDefectRefs(dockerfile: GitDockerfile): GitDockerfile {
 }
 
 /**
+ * Whether the Dockerfile has something to remediate: packages, or a base image
+ * update that fixes CVEs. A private base image that Averlon registered from the
+ * Dockerfile of an image built on it has no packages, only the update. An up
+ * to date base image has nothing to remediate.
+ */
+function isActionable(dockerfile: GitDockerfile): boolean {
+  const totalPackages =
+    dockerfile.Layers?.reduce((sum, layer) => sum + (layer.Packages?.length || 0), 0) ?? 0;
+  if (totalPackages > 0) {
+    return true;
+  }
+  const status = baseImageStatus(dockerfile);
+  return (
+    (status === 'change-from' || status === 'rebuild') &&
+    (dockerfile.BaseImageUpdate?.FixedCVEs?.length ?? 0) > 0
+  );
+}
+
+/** The base-image-status output of the action */
+type BaseImageStatus = 'change-from' | 'rebuild' | 'up-to-date' | 'none';
+
+/**
+ * The kind of the base image update of the Dockerfile, none when there is no
+ * update or its kind is unknown.
+ */
+function baseImageStatus(dockerfile: GitDockerfile | undefined): BaseImageStatus {
+  switch (dockerfile?.BaseImageUpdate?.Kind) {
+    case GitImageUpdateKind.ChangeFrom:
+      return 'change-from';
+    case GitImageUpdateKind.Rebuild:
+      return 'rebuild';
+    case GitImageUpdateKind.UpToDate:
+      return 'up-to-date';
+    default:
+      return 'none';
+  }
+}
+
+/** Describes the base image update of the Dockerfile, empty when there is none */
+function describeBaseImageUpdate(dockerfile: GitDockerfile): string {
+  const update = dockerfile.BaseImageUpdate;
+  const fixed = update?.FixedCVEs?.length ?? 0;
+  switch (baseImageStatus(dockerfile)) {
+    case 'change-from':
+      return `Base image update: ${update?.CurrentImage} to tag ${update?.NewTag}, fixes ${fixed} CVE(s).`;
+    case 'rebuild':
+      return `Base image update: rebuild on the latest push of ${update?.CurrentImage}, fixes ${fixed} CVE(s).`;
+    case 'up-to-date':
+      return `Base image ${update?.CurrentImage} is up to date.`;
+    default:
+      return '';
+  }
+}
+
+/** The message that the base image of the Dockerfile is up to date */
+function upToDateMessage(dockerfile: GitDockerfile): string {
+  const update = dockerfile.BaseImageUpdate;
+  const reasoning = update?.Reasoning ? ` ${update.Reasoning}` : '';
+  return `${dockerfile.Path}: base image ${update?.CurrentImage} is up to date, no newer base image was found.${reasoning}`;
+}
+
+/**
+ * Reports the base image status of the Dockerfile: the base-image-status output,
+ * and for an up to date base image a notice and the job summary, since there is
+ * no PR to tell it.
+ */
+async function reportBaseImageStatus(dockerfile: GitDockerfile | undefined): Promise<void> {
+  const status = baseImageStatus(dockerfile);
+  core.setOutput('base-image-status', status);
+  if (status !== 'up-to-date' || !dockerfile) {
+    return;
+  }
+  const message = upToDateMessage(dockerfile);
+  core.notice(message);
+  await core.summary.addHeading('Base image is up to date', 3).addRaw(message, true).write();
+}
+
+/**
  * Builds a prompt string for a single Dockerfile to be consumed by the /remediate-container skill.
  */
 function buildDockerfilePrompt(dockerfile: GitDockerfile): string {
@@ -74,6 +152,10 @@ There are ${codeDefects.length} CodeDefect IDs to report on. Every one MUST appe
 If you created any PRs, list EVERY one of them in "pull_requests", an array of
 {"pr_number": <integer>, "pr_url": <string>} objects (for example both the base image or
 runtime upgrade PR and the dependency upgrade PR).
+
+For each Fixed entry that a PR fixed, set "pr_url" to the URL of that PR, exactly as
+listed in "pull_requests". Leave "pr_url" out for NoFix entries and for entries fixed
+by a base image rebuild with no Dockerfile change.
 
 IMPORTANT: The structured JSON output MUST be the very last thing you produce.
 Do NOT output any additional text, summary, or commentary after emitting the structured JSON.
@@ -122,6 +204,10 @@ function describeMapping(
       ? `Found ${packages} package(s) to upgrade in ${layers.length} layer(s).`
       : 'No package upgrades are recommended for this image.'
   );
+  const baseImageUpdate = describeBaseImageUpdate(mapped);
+  if (baseImageUpdate) {
+    lines.push(baseImageUpdate);
+  }
   return lines;
 }
 
@@ -172,11 +258,10 @@ async function main(): Promise<void> {
     core.info(line);
   }
 
-  // Find the Dockerfile with actionable packages
-  const actionable = dockerfileRecs.find(df => {
-    const totalPackages = df.Layers?.reduce((sum, layer) => sum + (layer.Packages?.length || 0), 0);
-    return totalPackages > 0;
-  });
+  // the Dockerfile of the request, with its base image update
+  await reportBaseImageStatus(dockerfileRecs.find(df => df.BaseImageUpdate) ?? dockerfileRecs[0]);
+
+  const actionable = dockerfileRecs.find(isActionable);
 
   if (!actionable) {
     core.info('Nothing to remediate.');
@@ -227,7 +312,16 @@ async function run(): Promise<void> {
   }
 }
 
-export { run, buildDockerfilePrompt, collectCodeDefects, describeMapping, FEEDBACK_JSON_SCHEMA };
+export {
+  run,
+  buildDockerfilePrompt,
+  collectCodeDefects,
+  describeMapping,
+  isActionable,
+  baseImageStatus,
+  upToDateMessage,
+  FEEDBACK_JSON_SCHEMA,
+};
 
 // Run the action if this file is executed directly
 if (require.main === module) {

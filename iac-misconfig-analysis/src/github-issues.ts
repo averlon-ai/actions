@@ -16,10 +16,10 @@ import {
   syncBatchedIssues,
   type OctokitLike,
 } from '@averlon/copilot-issue-batching';
+import { AVERLON_MISCONFIG_ANALYSIS_LABEL } from './constants';
 import { generateIssueBody, generateIssueTitle } from './issue-template';
 
 // Action-specific constants
-export const AVERLON_MISCONFIG_ANALYSIS_LABEL = 'averlon-iac-misconfiguration-analysis';
 export const ISSUE_LABELS = [AVERLON_CREATED_LABEL, AVERLON_MISCONFIG_ANALYSIS_LABEL];
 const RESOURCES_PER_ISSUE = 10;
 const MAX_WEIGHT_PER_BATCH = 200;

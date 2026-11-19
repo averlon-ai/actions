@@ -1,0 +1,28 @@
+{
+  "name": "@averlon/cynos-scan-action",
+  "version": "1.0.0",
+  "description": "Upstream @openai/codex-security through cynos",
+  "private": true,
+  "main": "src/main.ts",
+  "scripts": {
+    "test": "bun test",
+    "build": "bun run --bun tsc --noEmit",
+    "lint": "eslint . --ext .ts",
+    "lint:fix": "eslint . --ext .ts --fix",
+    "format": "prettier --write \"**/*.ts\""
+  },
+  "dependencies": {
+    "@actions/artifact": "6.2.1",
+    "@actions/cache": "6.3.0",
+    "@actions/core": "^3.0.0",
+    "@actions/github": "^9.1.1",
+    "@averlon-ai/cynos-scan-engine": "0.2.0"
+  },
+  "devDependencies": {
+    "@types/bun": "1.2.17"
+  },
+  "assets-from": "node_modules/@averlon-ai/cynos-scan-engine/assets",
+  "assets-exclude": [
+    "image.json"
+  ]
+}

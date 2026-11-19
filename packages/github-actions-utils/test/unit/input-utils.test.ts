@@ -44,6 +44,13 @@ describe('input-utils', () => {
       );
     });
 
+    it('should trim environment variable values like core.getInput', () => {
+      getInputSpy.mockReturnValue('');
+      process.env['INPUT_AVERLON_API_KEY'] = ' env-value\n';
+
+      expect(getInputSafe('averlon-api-key', true)).toBe('env-value');
+    });
+
     it('should convert kebab-case to UPPER_SNAKE_CASE for env vars', () => {
       getInputSpy.mockReturnValue('');
       process.env['INPUT_TEST_VALUE'] = 'env-test-value';

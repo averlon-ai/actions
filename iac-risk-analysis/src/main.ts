@@ -10,6 +10,7 @@ import {
   JobStatusNotification,
   AnalyzeTerraformResult,
   getCallerInfo,
+  GitPullRequestStatus,
 } from '@averlon/shared';
 import { getInputSafe, parseBoolean } from '@averlon/github-actions-utils';
 import { postOrUpdateComment, type CommentMode } from './pr-comment';
@@ -793,6 +794,13 @@ async function run(): Promise<void> {
           prTitle: pr.title,
           scanResult,
           cloudId,
+          status: pr.merged
+            ? GitPullRequestStatus.Merged
+            : pr.state === 'closed'
+              ? GitPullRequestStatus.Closed
+              : pr.draft
+                ? GitPullRequestStatus.Draft
+                : GitPullRequestStatus.Open,
         });
       } catch (sourceControlError) {
         const msg =

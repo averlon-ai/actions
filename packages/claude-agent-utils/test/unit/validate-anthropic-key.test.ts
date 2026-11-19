@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'bun:test';
 import Anthropic from '@anthropic-ai/sdk';
-import { checkAnthropicApiKey, classifyKeyCheckError } from '../validate-anthropic-key';
+import { checkAnthropicApiKey, classifyKeyCheckError } from '../../src/validate-anthropic-key';
 
 function apiError(status: number, type: string, message: string): unknown {
   return Anthropic.APIError.generate(

@@ -9,7 +9,6 @@ import {
   GitIssueType,
   GitIssueRiskStatus,
   type RegisterGitIssueRequest,
-  type GetGitIssueResponse,
 } from '@averlon/shared';
 import { IssueState } from '@averlon/github-copilot-utils';
 import { logDebug, logVerbose, logInfo, logWarn } from './log-utils';
@@ -21,52 +20,6 @@ export interface LinkedPR {
   number: number;
   author: string;
   state: string;
-}
-
-/**
- * Parameters for finding a Git issue
- */
-export interface FindGitIssueParams {
-  apiClient: ApiClient;
-  orgName: string;
-  repo: string;
-  issueNumber: number;
-  cloudId?: string | undefined;
-}
-
-/**
- * Find a Git issue in the backend.
- * Returns the issue response (with NotFound flag) or null if there's an error.
- */
-export async function findGitIssue(
-  params: FindGitIssueParams
-): Promise<GetGitIssueResponse | null> {
-  const { apiClient, orgName, repo, issueNumber, cloudId } = params;
-  const { repoUrl } = getRepoAndOrgUrls(orgName, repo);
-
-  try {
-    const request = {
-      RepoURL: repoUrl,
-      Number: issueNumber,
-      CloudID: cloudId,
-    };
-
-    const findResponse = await apiClient.getGitIssue(request);
-
-    return findResponse;
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    const isNotFound =
-      errorMessage.includes('404') ||
-      errorMessage.includes('not_found') ||
-      errorMessage.includes('Not Found');
-
-    if (isNotFound) {
-      return { NotFound: true };
-    }
-    logDebug(`Error finding issue #${issueNumber}: ${errorMessage}`);
-    return null;
-  }
 }
 
 /**
@@ -279,54 +232,6 @@ export async function updateIssueStatus(params: UpdateIssueStatusParams): Promis
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     logWarn(`✗ Failed to update issue #${issueNumber} status in backend: ${errorMessage}`);
-    return false;
-  }
-}
-
-/**
- * Parameters for updating a PR status
- */
-export interface UpdatePRStatusParams {
-  apiClient?: ApiClient;
-  orgName: string;
-  repo: string;
-  issueNumber: number;
-  pullRequestNumber: number;
-  status: GitPullRequestStatus;
-  cloudId?: string | undefined;
-}
-
-/**
- * Update the status of a Git pull request in backend.
- * Uses IssueNumber + RepoURL + Number — no prior Get lookup required.
- */
-export async function updatePRStatus(params: UpdatePRStatusParams): Promise<boolean> {
-  const { apiClient, orgName, repo, issueNumber, pullRequestNumber, status } = params;
-
-  if (!apiClient) {
-    return false;
-  }
-
-  const { repoUrl } = getRepoAndOrgUrls(orgName, repo);
-
-  try {
-    const statusName = GitPullRequestStatus[status] || 'Unknown';
-    logVerbose(
-      `Updating PR #${pullRequestNumber} status to ${statusName} in backend (for issue #${issueNumber})...`
-    );
-
-    await apiClient.updateGitPullRequestStatus({
-      IssueNumber: issueNumber,
-      RepoURL: repoUrl,
-      Number: pullRequestNumber,
-      Status: status,
-    });
-
-    logVerbose(`✓ Updated PR #${pullRequestNumber} status to ${statusName} in backend`);
-    return true;
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    logWarn(`✗ Failed to update PR #${pullRequestNumber} status in backend: ${errorMessage}`);
     return false;
   }
 }

@@ -5,6 +5,7 @@
     "iac-risk-analysis",
     "container-analysis",
     "k8s-analysis",
-    "iac-misconfig-analysis"
+    "iac-misconfig-analysis",
+    "cynos-scan"
   ]
 }

@@ -1,4 +1,4 @@
-import type { GitDockerfile } from '@averlon/shared';
+import { GitImageUpdateKind, type GitDockerfile } from '@averlon/shared';
 
 const baseLayer = {
   ID: 'layer-0',
@@ -124,29 +124,33 @@ export const noCodeDefectsDockerfile: GitDockerfile = {
   ],
 };
 
-export const mockClaudeOutputValid = JSON.stringify({
-  feedback: [
-    { CodeDefectID: 'cd-001', Status: 3, Feedback: '' },
-    { CodeDefectID: 'cd-002', Status: 4, Feedback: 'No patch available upstream' },
-  ],
-});
+/**
+ * A private base image Dockerfile: no packages, only the base image update
+ * found from the scan diff of its public parent.
+ */
+export const baseImageUpdateOnlyDockerfile: GitDockerfile = {
+  Path: 'base_images/python-base/Dockerfile',
+  Layers: [],
+  BaseImageUpdate: {
+    CurrentImage: 'docker.io/library/python:3.11-slim',
+    Kind: GitImageUpdateKind.ChangeFrom,
+    NewTag: '3.11.18-slim',
+    NewDigest: 'sha256:new',
+    FixedCVEs: ['CVE-2026-0001'],
+    Reasoning: '3.11.18-slim is the latest image of the 3.11 slim line.',
+  },
+};
 
-export const mockClaudeOutputMidText =
-  'Some explanation text here\n\n' +
-  JSON.stringify({
-    feedback: [{ CodeDefectID: 'cd-001', Status: 3, Feedback: '' }],
-  }) +
-  '\n\nMore text after';
-
-export const mockClaudeOutputNoJson =
-  'I attempted to fix the vulnerability but could not find a patch.';
-
-export const mockClaudeOutputMalformedJson = 'Here is my output: { feedback: [broken json';
-
-export const mockClaudeOutputMissingFields = JSON.stringify({
-  feedback: [
-    { CodeDefectID: 'cd-001', Status: 3, Feedback: '' },
-    { Status: 4, Feedback: 'missing CodeDefectID' },
-    { CodeDefectID: 'cd-003' }, // missing Status
-  ],
-});
+/**
+ * A base image that is up to date, as the API sends it: the UpToDate kind,
+ * with no new tag, no new digest and no CVE.
+ */
+export const upToDateBaseImageDockerfile: GitDockerfile = {
+  Path: 'base_image_updates/orders/Dockerfile',
+  Layers: [],
+  BaseImageUpdate: {
+    CurrentImage: '945236499471.dkr.ecr.us-west-2.amazonaws.com/platform/python-base:1.1.0',
+    Kind: GitImageUpdateKind.UpToDate,
+    Reasoning: '1.1.0 is the latest version.',
+  },
+};

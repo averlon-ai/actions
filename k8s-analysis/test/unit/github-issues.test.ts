@@ -264,6 +264,7 @@ describe('GithubIssuesService', () => {
         labels: 'averlon-k8s-analysis',
         state: 'open',
         per_page: 100,
+        page: 1,
       });
 
       expect(mockCreateIssue).toHaveBeenCalledTimes(2);

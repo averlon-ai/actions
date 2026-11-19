@@ -15,6 +15,7 @@ export interface OctokitLike {
         state: string;
         labels?: string;
         per_page: number;
+        page?: number;
       }) => Promise<{ data: ListForRepoIssue[] }>;
       create: (opts: {
         owner: string;

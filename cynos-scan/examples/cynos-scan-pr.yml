@@ -1,0 +1,113 @@
+# Copy to .github/workflows/cynos-scan-pr.yml in the repository to scan, beside cynos-scan.yml,
+# and replace ACTION_REF with the full commit SHA of a release tag of averlon-ai/actions,
+# with the tag in a comment. Only release tags carry the built dist/; a branch commit does not run.
+#
+# A pull request from this repository is scanned once, when it opens (or, opened as a draft, when
+# it is marked ready for review), and again on a comment request: a comment on it reading exactly
+# `cynos scan`, from the repository's owner, a member of its organization or a collaborator. A draft
+# is never scanned, even on a comment request, and a push starts no scan. Each scan is the pull
+# request's changes, the diff from its merge base, and the findings go on the pull request as a
+# summary comment and a review comment on each finding's changed line (README: Pull request
+# comments). A diff starts from the threat model a full scan
+# stored; without one in its history it builds one first, so a full scan of the default branch
+# (cynos-scan.yml) keeps pull requests fast.
+#
+# Do not make this check required: a push starts no scan, so a required check would wait forever
+# on every commit pushed after the first scan. A comment request's run is not a check on the pull
+# request at all (GitHub runs issue_comment workflows on the default branch); the comment gets an
+# eyes reaction when its scan starts, and the scan's summary comment links the run.
+#
+# Fork pull requests are refused by the action: their pull_request runs get no secrets, and a
+# comment request's run, which holds them, must not scan a fork's code. Do not switch to
+# pull_request_target to give them the key.
+#
+# To test the workflow without a key, set the repository variable CYNOS_SCAN_PR_MOCK=true: the
+# action runs codex-security's synthetic scan, and its comments say the findings are synthetic.
+name: cynos-scan-pr
+
+# Not 'cynos-scan: diff' or 'cynos-scan: full': those titles mark a run's commit as scanned for
+# later last-scan diffs, so the action requires them to name exactly the scan it runs, and a mock
+# run titled diff fails. A pull request's scan is never such a starting point, so its title is
+# one the action checks against no scan.
+run-name: 'cynos-scan: pr'
+
+on:
+  pull_request:
+    types: [opened, ready_for_review]
+  # Comment requests. Every comment on every issue and pull request starts a run; the scan job's
+  # condition skips all but a comment request.
+  issue_comment:
+    types: [created]
+
+permissions: {}
+
+# One scan per pull request: a comment request cancels a scan still running, whose comments would
+# describe an older head. Only a scan joins the pull request's group: any other comment's run gets
+# a group of its own, so it never cancels one.
+concurrency:
+  group: >-
+    ${{ (github.event_name == 'pull_request' || github.event.comment.body == 'cynos scan')
+    && format('cynos-scan-pr-{0}', github.event.pull_request.number || github.event.issue.number)
+    || format('cynos-scan-pr-not-a-scan-{0}', github.run_id) }}
+  cancel-in-progress: true
+
+jobs:
+  scan:
+    name: Scan
+    # A pull request that opens ready for review, or becomes so: not a draft, a fork's, or
+    # Dependabot's (Dependabot runs get only Dependabot secrets). Or a comment request on an open
+    # pull request that is not a draft (expressions compare strings ignoring case: `Cynos Scan`
+    # asks too); the action checks the commenter and the pull request again, and refuses a fork's.
+    # A draft is never scanned.
+    if: >-
+      (github.event_name == 'pull_request'
+      && !github.event.pull_request.draft
+      && github.event.pull_request.head.repo.full_name == github.repository
+      && github.actor != 'dependabot[bot]')
+      || (github.event_name == 'issue_comment'
+      && github.event.issue.pull_request
+      && github.event.issue.state == 'open'
+      && !github.event.issue.draft
+      && github.event.comment.body == 'cynos scan'
+      && contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    # The cynos key is an environment secret. This environment, unlike cynos-scan, must allow the
+    # pull requests' branches (and the default branch, where comment requests run); give it a key
+    # with its own budget.
+    environment: ${{ vars.CYNOS_SCAN_PR_MOCK == 'true' && 'cynos-scan-mock' || 'cynos-scan-pr' }}
+    permissions:
+      contents: read
+      actions: read # the run-title check and the knowledge-base cache's entries
+      pull-requests: write # pr-comments, and the comment request's reaction
+    steps:
+      # The commenter's sign that the scan started: a comment request's run is not on the pull
+      # request's checks.
+      - name: Acknowledge the comment request
+        if: github.event_name == 'issue_comment'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+        run: gh api --method POST "repos/$GITHUB_REPOSITORY/issues/comments/$COMMENT_ID/reactions" -f content=eyes
+
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # The pull request's head, not the merge commit: the action scans the head. A comment's
+          # payload has no head, so a comment request checks out the pull request's head ref; the
+          # action refuses the checkout if a push moved the pull request's head after it.
+          ref: ${{ github.event.pull_request.head.sha || format('refs/pull/{0}/head', github.event.issue.number) }}
+          persist-credentials: false
+          # A diff compares commits: the whole history.
+          fetch-depth: 0
+
+      - name: cynos-scan
+        uses: averlon-ai/actions/cynos-scan@ACTION_REF
+        with:
+          # Empty diff-base on a pull request: its merge base.
+          scope: diff
+          mock: ${{ vars.CYNOS_SCAN_PR_MOCK == 'true' && 'true' || 'false' }}
+          cynos-api-key: ${{ vars.CYNOS_SCAN_PR_MOCK != 'true' && secrets.CYNOS_API_KEY || '' }}
+          upload-artifacts: 'true'
+          retention-days: '14'

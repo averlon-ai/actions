@@ -53,11 +53,9 @@ mock.module('@actions/github', () => ({
 import * as core from '@actions/core';
 import * as github from '@actions/github';
 import {
-  findGitIssue,
   createOrUpdateIssue,
   createPRForIssue,
   updateIssueStatus,
-  updatePRStatus,
   closeIssue,
   getRepoAndOrgUrls,
   type LinkedPR,
@@ -68,18 +66,15 @@ import {
   GitIssueType,
   GitIssueRiskStatus,
   configureActionLogging,
-  type GetGitIssueResponse,
   type GitIssue,
 } from '@averlon/shared';
 import { IssueState } from '@averlon/github-copilot-utils';
 
 describe('git-actions-utils', () => {
   let mockApiClient: ApiClient;
-  let mockGetGitIssue: ReturnType<typeof mock>;
   let mockRegisterGitIssue: ReturnType<typeof mock>;
   let mockUpdateGitIssueStatus: ReturnType<typeof mock>;
   let mockRegisterGitPullRequest: ReturnType<typeof mock>;
-  let mockUpdateGitPullRequestStatus: ReturnType<typeof mock>;
   let infoSpy: ReturnType<typeof spyOn>;
   let warningSpy: ReturnType<typeof spyOn>;
   let debugSpy: ReturnType<typeof spyOn>;
@@ -97,15 +92,6 @@ describe('git-actions-utils', () => {
     debugSpy = spyOn(core, 'debug').mockImplementation(() => {});
 
     // Setup ApiClient mocks
-    mockGetGitIssue = mock(() =>
-      Promise.resolve({
-        ID: 'test-issue-id-123',
-        IssueNumber: 123,
-        RepoURL: 'https://github.com/test-org/test-repo',
-        Status: GitPullRequestStatus.Open,
-      } as GetGitIssueResponse)
-    );
-
     mockRegisterGitIssue = mock(() =>
       Promise.resolve({
         ID: 'test-issue-id-123',
@@ -115,25 +101,20 @@ describe('git-actions-utils', () => {
 
     mockUpdateGitIssueStatus = mock(() => Promise.resolve());
     mockRegisterGitPullRequest = mock(() => Promise.resolve());
-    mockUpdateGitPullRequestStatus = mock(() => Promise.resolve());
 
     mockApiClient = {
-      getGitIssue: mockGetGitIssue,
       registerGitIssue: mockRegisterGitIssue,
       updateGitIssueStatus: mockUpdateGitIssueStatus,
       registerGitPullRequest: mockRegisterGitPullRequest,
-      updateGitPullRequestStatus: mockUpdateGitPullRequestStatus,
     } as unknown as ApiClient;
   });
 
   afterEach(() => {
     configureActionLogging({ verbose: false });
     // Clean up
-    mockGetGitIssue.mockClear();
     mockRegisterGitIssue.mockClear();
     mockUpdateGitIssueStatus.mockClear();
     mockRegisterGitPullRequest.mockClear();
-    mockUpdateGitPullRequestStatus.mockClear();
   });
 
   describe('getRepoAndOrgUrls', () => {
@@ -142,84 +123,6 @@ describe('git-actions-utils', () => {
 
       expect(result.repoUrl).toBe('https://github.com/test-org/test-repo');
       expect(result.orgUrl).toBe('https://github.com/test-org');
-    });
-  });
-
-  describe('findGitIssue', () => {
-    it('should find and return issue when it exists', async () => {
-      const result = await findGitIssue({
-        apiClient: mockApiClient,
-        orgName: 'test-org',
-        repo: 'test-repo',
-        issueNumber: 123,
-        cloudId: 'test-cloud-id',
-      });
-
-      expect(result).not.toBeNull();
-      expect(result?.ID).toBe('test-issue-id-123');
-      expect(mockGetGitIssue).toHaveBeenCalledWith({
-        RepoURL: 'https://github.com/test-org/test-repo',
-        Number: 123,
-        CloudID: 'test-cloud-id',
-      });
-    });
-
-    it('should return NotFound when issue does not exist (404)', async () => {
-      const error = new Error('404 Not Found');
-      error.message = '404 Not Found';
-      mockGetGitIssue.mockRejectedValue(error);
-
-      const result = await findGitIssue({
-        apiClient: mockApiClient,
-        orgName: 'test-org',
-        repo: 'test-repo',
-        issueNumber: 999,
-        cloudId: 'test-cloud-id',
-      });
-
-      expect(result).toEqual({ NotFound: true });
-    });
-
-    it('should return null for other errors', async () => {
-      mockGetGitIssue.mockRejectedValue(new Error('Network error'));
-
-      const result = await findGitIssue({
-        apiClient: mockApiClient,
-        orgName: 'test-org',
-        repo: 'test-repo',
-        issueNumber: 123,
-        cloudId: 'test-cloud-id',
-      });
-
-      expect(result).toBeNull();
-    });
-
-    it('should return null when apiClient is not provided', async () => {
-      // @ts-expect-error - Testing behavior when apiClient is missing
-      const result = await findGitIssue({
-        orgName: 'test-org',
-        repo: 'test-repo',
-        issueNumber: 123,
-      });
-
-      expect(result).toBeNull();
-    });
-
-    it('should find issue when cloudId is not provided', async () => {
-      const result = await findGitIssue({
-        apiClient: mockApiClient,
-        orgName: 'test-org',
-        repo: 'test-repo',
-        issueNumber: 123,
-      });
-
-      expect(result).not.toBeNull();
-      expect(result?.ID).toBe('test-issue-id-123');
-      expect(mockGetGitIssue).toHaveBeenCalledWith({
-        RepoURL: 'https://github.com/test-org/test-repo',
-        Number: 123,
-        CloudID: undefined,
-      });
     });
   });
 
@@ -399,7 +302,6 @@ describe('git-actions-utils', () => {
       });
 
       expect(result).toBe(true);
-      expect(mockGetGitIssue).not.toHaveBeenCalled();
       expect(mockRegisterGitPullRequest).toHaveBeenCalledTimes(2);
       expect(mockRegisterGitPullRequest).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -433,7 +335,6 @@ describe('git-actions-utils', () => {
       });
 
       expect(result).toBe(true);
-      expect(mockGetGitIssue).not.toHaveBeenCalled();
       expect(debugSpy).toHaveBeenCalledWith('No PRs to register for issue #123');
     });
 
@@ -490,7 +391,6 @@ describe('git-actions-utils', () => {
       });
 
       expect(result).toBe(true);
-      expect(mockGetGitIssue).not.toHaveBeenCalled();
       expect(mockUpdateGitIssueStatus).toHaveBeenCalledWith({
         Number: 123,
         RepoURL: 'https://github.com/test-org/test-repo',
@@ -543,62 +443,6 @@ describe('git-actions-utils', () => {
       expect(result).toBe(false);
       expect(warningSpy).toHaveBeenCalledWith(
         expect.stringContaining('Failed to update issue #123 status')
-      );
-    });
-  });
-
-  describe('updatePRStatus', () => {
-    it('should update PR status successfully without prior Get lookup', async () => {
-      const result = await updatePRStatus({
-        apiClient: mockApiClient,
-        orgName: 'test-org',
-        repo: 'test-repo',
-        issueNumber: 123,
-        pullRequestNumber: 456,
-        status: GitPullRequestStatus.Merged,
-        cloudId: 'test-cloud-id',
-      });
-
-      expect(result).toBe(true);
-      expect(mockGetGitIssue).not.toHaveBeenCalled();
-      expect(mockUpdateGitPullRequestStatus).toHaveBeenCalledWith({
-        IssueNumber: 123,
-        RepoURL: 'https://github.com/test-org/test-repo',
-        Number: 456,
-        Status: GitPullRequestStatus.Merged,
-      });
-    });
-
-    it('should return false when apiClient is not provided', async () => {
-      const result = await updatePRStatus({
-        orgName: 'test-org',
-        repo: 'test-repo',
-        issueNumber: 999,
-        pullRequestNumber: 456,
-        status: GitPullRequestStatus.Merged,
-        cloudId: 'test-cloud-id',
-      });
-
-      expect(result).toBe(false);
-      expect(mockUpdateGitPullRequestStatus).not.toHaveBeenCalled();
-    });
-
-    it('should handle API errors gracefully', async () => {
-      mockUpdateGitPullRequestStatus.mockRejectedValue(new Error('Update failed'));
-
-      const result = await updatePRStatus({
-        apiClient: mockApiClient,
-        orgName: 'test-org',
-        repo: 'test-repo',
-        issueNumber: 123,
-        pullRequestNumber: 456,
-        status: GitPullRequestStatus.Merged,
-        cloudId: 'test-cloud-id',
-      });
-
-      expect(result).toBe(false);
-      expect(warningSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Failed to update PR #456 status')
       );
     });
   });

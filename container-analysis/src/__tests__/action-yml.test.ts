@@ -100,3 +100,23 @@ describe('coding agent failure', () => {
     }
   });
 });
+
+describe('step scripts', () => {
+  it('runs scripts that the build copies into dist/assets', () => {
+    const actionDir = path.dirname(ACTION_YML);
+    const pkg = JSON.parse(fs.readFileSync(path.join(actionDir, 'package.json'), 'utf8')) as {
+      'assets-from': string;
+    };
+    const scripts = steps.flatMap(step =>
+      [...(step.run ?? '').matchAll(/"\$\{\{ github\.action_path \}\}\/([^"]+\.sh)"/g)].map(
+        match => match[1]!
+      )
+    );
+    expect(scripts.length).toBeGreaterThan(0);
+    for (const script of scripts) {
+      expect(script).toStartWith('dist/assets/');
+      const source = path.join(pkg['assets-from'], script.slice('dist/assets/'.length));
+      expect(fs.existsSync(path.resolve(actionDir, source))).toBe(true);
+    }
+  });
+});

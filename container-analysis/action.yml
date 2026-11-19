@@ -61,6 +61,50 @@ inputs:
       Left empty, the action uses docker if present and podman otherwise.
     required: false
     default: ''
+  create-ticket:
+    description: 'Ask Averlon to create a Jira or Linear ticket for each PR the agent opens in this run. Needs exactly one of a Jira or Linear integration in Averlon; otherwise the PR is registered without a ticket and a warning is logged.'
+    required: false
+    default: 'false'
+  ticket-labels:
+    description: 'Ticket labels (comma-separated)'
+    required: false
+    default: ''
+  ticket-components:
+    description: 'Ticket components (comma-separated). Jira only, and each component must exist in the Jira project of the integration.'
+    required: false
+    default: ''
+  ticket-priority:
+    description: 'Ticket priority. Defaults to the integration default.'
+    required: false
+    default: ''
+  ticket-parent:
+    description: 'Key of the parent ticket, for example an epic (PROJ-12) in Jira or a parent issue (ENG-34) in Linear. It must exist and the issue type must allow it as a parent.'
+    required: false
+    default: ''
+  ticket-prefix:
+    description: 'Text added in brackets before the ticket summary, for example "team-a" gives "[team-a] <summary>". At most 64 characters.'
+    required: false
+    default: ''
+  ticket-issue-type:
+    description: 'Ticket issue type, for example Task or Bug. Defaults to the integration default.'
+    required: false
+    default: ''
+  ticket-assignee:
+    description: 'Ticket assignee, by email. The user must be in the Jira or Linear workspace of the integration.'
+    required: false
+    default: ''
+  ticket-reporter:
+    description: 'Ticket reporter, by email. Jira only: the user must be in the Jira site of the integration and the project must let the integration set the reporter. Linear always uses the integration user.'
+    required: false
+    default: ''
+
+outputs:
+  base-image-status:
+    description: >-
+      Base image update of the Dockerfile: change-from (a new tag or digest in
+      the FROM), rebuild (the latest push of the same tag), up-to-date (no newer
+      base image), or none
+    value: ${{ steps.averlon.outputs.base-image-status }}
 
 runs:
   using: 'composite'
@@ -68,7 +112,7 @@ runs:
     - name: 'Prepare Coding Agent'
       id: model
       shell: bash
-      run: bash "${{ github.action_path }}/scripts/prepare-agent.sh"
+      run: bash "${{ github.action_path }}/dist/assets/prepare-agent.sh"
       env:
         MODEL: ${{ inputs.model }}
         USE_BEDROCK: ${{ inputs.use-bedrock }}
@@ -92,7 +136,7 @@ runs:
     - name: 'Create MCP Config'
       id: mcp-config
       shell: bash
-      run: bash "${{ github.action_path }}/scripts/create-mcp-config.sh"
+      run: bash "${{ github.action_path }}/dist/assets/create-mcp-config.sh"
       env:
         MCP_API_KEY: ${{ inputs.mcp-api-key || inputs.averlon-api-key }}
         MCP_API_SECRET: ${{ inputs.mcp-api-secret || inputs.averlon-api-secret }}
@@ -141,6 +185,15 @@ runs:
         GITHUB_TOKEN: ${{ inputs.github-token }}
         CODING_AGENT_OUTPUT: ${{ steps.codingagent.outputs.structured_output }}
         ALL_CODE_DEFECT_IDS: ${{ steps.averlon.outputs.code-defect-ids }}
+        CREATE_TICKET: ${{ inputs.create-ticket }}
+        TICKET_LABELS: ${{ inputs.ticket-labels }}
+        TICKET_COMPONENTS: ${{ inputs.ticket-components }}
+        TICKET_PRIORITY: ${{ inputs.ticket-priority }}
+        TICKET_PARENT: ${{ inputs.ticket-parent }}
+        TICKET_PREFIX: ${{ inputs.ticket-prefix }}
+        TICKET_ISSUE_TYPE: ${{ inputs.ticket-issue-type }}
+        TICKET_ASSIGNEE: ${{ inputs.ticket-assignee }}
+        TICKET_REPORTER: ${{ inputs.ticket-reporter }}
 
     - name: 'Verify Anthropic API key after agent failure'
       if: always() && steps.codingagent.outcome == 'failure' && inputs.use-bedrock != 'true'
