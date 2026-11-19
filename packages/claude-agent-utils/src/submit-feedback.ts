@@ -312,18 +312,29 @@ export function parseStructuredAgentOutput(output: string): ParsedStructuredOutp
   }
 }
 
+/** A PR registered in this run, with the values it was registered with. */
+export interface RegisteredAgentPR {
+  prNumber: number;
+  prUrl: string;
+  /** GitHub PR title; undefined when it could not be read. */
+  title?: string | undefined;
+  status?: GitPullRequestStatus | undefined;
+}
+
 export interface RegisteredAgentPRs {
   /** PR numbers handled in this run, for the bulk sync to skip. */
   handled: number[];
   /** ID of each registered PR row, by PR number. */
   prIdByNumber: Map<number, string>;
+  /** Every PR registered with an ID, in order, to ask for its ticket later. */
+  registered: RegisteredAgentPR[];
 }
 
 /**
  * Label every PR the agent opened and register it with Averlon. One run can
  * open several PRs (e.g. a runtime upgrade and a dependency upgrade); each one
  * needs the label so later runs find it. A failure on one PR does not stop the
- * others.
+ * others. No ticket is asked for here: see requestAgentPRTickets.
  */
 export async function labelAndRegisterAgentPRs(params: {
   octokit?: ReturnType<typeof github.getOctokit> | undefined;
@@ -333,12 +344,11 @@ export async function labelAndRegisterAgentPRs(params: {
   repo: string;
   cloudId: string;
   pullRequests: AgentPullRequest[];
-  /** Ticket options; set to ask Averlon for a ticket for each PR. */
-  ticket?: TicketRequest | undefined;
 }): Promise<RegisteredAgentPRs> {
-  const { octokit, apiClient, registration, orgName, repo, cloudId, pullRequests, ticket } = params;
+  const { octokit, apiClient, registration, orgName, repo, cloudId, pullRequests } = params;
   const handled: number[] = [];
   const prIdByNumber = new Map<number, string>();
+  const registered: RegisteredAgentPR[] = [];
   for (const { pr_number: prNumber, pr_url: prUrl } of pullRequests) {
     handled.push(prNumber);
     try {
@@ -367,12 +377,11 @@ export async function labelAndRegisterAgentPRs(params: {
         title: prTitle,
         cloudId,
         status: prStatus,
-        // the ticket summary is the GitHub PR title; Averlon adds the type name in front
-        ticket: ticket && prTitle ? { ...ticket, Summary: prTitle } : ticket,
       });
 
       if (id) {
         prIdByNumber.set(prNumber, id);
+        registered.push({ prNumber, prUrl, title: prTitle, status: prStatus });
         logInfo(`Registered PR #${prNumber} with Averlon source control`);
       }
     } catch (err) {
@@ -380,7 +389,45 @@ export async function labelAndRegisterAgentPRs(params: {
       logWarn(`Failed to register PR #${prNumber} with source control: ${msg}`);
     }
   }
-  return { handled, prIdByNumber };
+  return { handled, prIdByNumber, registered };
+}
+
+/**
+ * Ask Averlon for the ticket of each PR registered in this run, by registering
+ * it again with the ticket options. Averlon creates the ticket in the
+ * background and lists the code defects linked to the PR at that time, so this
+ * runs after submitDefectFeedback has linked them. Registering again sends the
+ * same values as the first registration, so none is lost; a PR that already
+ * has a ticket does not get another one.
+ */
+export async function requestAgentPRTickets(params: {
+  apiClient: ApiClient;
+  registration: AgentPrRegistration;
+  orgName: string;
+  repo: string;
+  cloudId: string;
+  prs: RegisteredAgentPR[];
+  ticket: TicketRequest;
+}): Promise<void> {
+  const { apiClient, registration, orgName, repo, cloudId, prs, ticket } = params;
+  for (const { prNumber, prUrl, title, status } of prs) {
+    const id = await registerAgentPR({
+      apiClient,
+      registration,
+      orgName,
+      repo,
+      prNumber,
+      prUrl,
+      title,
+      cloudId,
+      status,
+      // the ticket summary is the GitHub PR title; Averlon adds the type name in front
+      ticket: title ? { ...ticket, Summary: title } : ticket,
+    });
+    if (id) {
+      logInfo(`Requested a ticket for PR #${prNumber}`);
+    }
+  }
 }
 
 /**
@@ -604,21 +651,20 @@ async function main(registration: AgentPrRegistration): Promise<void> {
   const githubToken = process.env['GITHUB_TOKEN'] || '';
 
   // Register the PRs first: the feedback of a Fixed defect names the ID of its PR.
-  let registered: RegisteredAgentPRs = { handled: [], prIdByNumber: new Map() };
-  if (pullRequests.length > 0 && owner && repo) {
-    const { owner: scopedOwner, repo: scopedRepo } = githubActionsUtils.normalizeRepoScope(
-      owner,
-      repo
-    );
+  let registered: RegisteredAgentPRs = { handled: [], prIdByNumber: new Map(), registered: [] };
+  const prScope =
+    pullRequests.length > 0 && owner && repo
+      ? githubActionsUtils.normalizeRepoScope(owner, repo)
+      : undefined;
+  if (prScope) {
     registered = await labelAndRegisterAgentPRs({
       octokit: githubToken ? github.getOctokit(githubToken) : undefined,
       apiClient,
       registration,
-      orgName: scopedOwner,
-      repo: scopedRepo,
+      orgName: prScope.owner,
+      repo: prScope.repo,
       cloudId,
       pullRequests,
-      ticket: parseTicketOptions(),
     });
   }
 
@@ -630,6 +676,20 @@ async function main(registration: AgentPrRegistration): Promise<void> {
       prIdByNumber: registered.prIdByNumber,
     })
   );
+
+  // Ask for the tickets last, so each one lists the code defects of its PR.
+  const ticket = parseTicketOptions();
+  if (ticket && prScope && registered.registered.length > 0) {
+    await requestAgentPRTickets({
+      apiClient,
+      registration,
+      orgName: prScope.owner,
+      repo: prScope.repo,
+      cloudId,
+      prs: registered.registered,
+      ticket,
+    });
+  }
 
   if (githubToken && owner && repo) {
     try {

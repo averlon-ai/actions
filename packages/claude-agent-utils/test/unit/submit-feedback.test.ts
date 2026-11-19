@@ -12,6 +12,7 @@ import {
   mapPullRequestToGitStatus,
   syncLabeledAgentPRsToBackend,
   labelAndRegisterAgentPRs,
+  requestAgentPRTickets,
   submitDefectFeedback,
   prIdForEntry,
   logFeedbackSummary,
@@ -443,29 +444,7 @@ describe('labelAndRegisterAgentPRs', () => {
     );
   });
 
-  it('sends the ticket options with every PR when a ticket is requested', async () => {
-    const ticket = { Labels: ['security'], Priority: 'High' };
-    await labelAndRegisterAgentPRs({
-      apiClient: { registerGitPullRequest } as never,
-      registration,
-      orgName: 'o',
-      repo: 'r',
-      cloudId: '',
-      pullRequests: [
-        { pr_number: 1, pr_url: 'https://github.com/o/r/pull/1' },
-        { pr_number: 2, pr_url: 'https://github.com/o/r/pull/2' },
-      ],
-      ticket,
-    });
-    expect(registerGitPullRequest).toHaveBeenCalledTimes(2);
-    for (const prNumber of [1, 2]) {
-      expect(registerGitPullRequest).toHaveBeenCalledWith(
-        expect.objectContaining({ Number: prNumber, Ticket: ticket })
-      );
-    }
-  });
-
-  it('uses the GitHub PR title as the ticket summary', async () => {
+  it('sends no Ticket field and records each registered PR for its ticket', async () => {
     const octokit = {
       rest: {
         pulls: {
@@ -478,43 +457,8 @@ describe('labelAndRegisterAgentPRs', () => {
         issues: { addLabels: mock(() => Promise.resolve({})) },
       },
     } as never;
-    const ticket = { Prefix: 'siri' };
-    await labelAndRegisterAgentPRs({
+    const { registered } = await labelAndRegisterAgentPRs({
       octokit,
-      apiClient: { registerGitPullRequest } as never,
-      registration,
-      orgName: 'o',
-      repo: 'r',
-      cloudId: '',
-      pullRequests: [{ pr_number: 6, pr_url: 'https://github.com/o/r/pull/6' }],
-      ticket,
-    });
-    expect(registerGitPullRequest).toHaveBeenCalledWith(
-      expect.objectContaining({
-        Number: 6,
-        Ticket: { Prefix: 'siri', Summary: 'Bump zlib in api image' },
-      })
-    );
-    expect(ticket).toEqual({ Prefix: 'siri' });
-  });
-
-  it('sends no ticket summary when the PR title cannot be read', async () => {
-    await labelAndRegisterAgentPRs({
-      apiClient: { registerGitPullRequest } as never,
-      registration,
-      orgName: 'o',
-      repo: 'r',
-      cloudId: '',
-      pullRequests: [{ pr_number: 8, pr_url: 'https://github.com/o/r/pull/8' }],
-      ticket: { Priority: 'High' },
-    });
-    expect(registerGitPullRequest).toHaveBeenCalledWith(
-      expect.objectContaining({ Number: 8, Ticket: { Priority: 'High' } })
-    );
-  });
-
-  it('sends no Ticket field when no ticket is requested', async () => {
-    await labelAndRegisterAgentPRs({
       apiClient: { registerGitPullRequest } as never,
       registration,
       orgName: 'o',
@@ -524,9 +468,84 @@ describe('labelAndRegisterAgentPRs', () => {
     });
     const [request] = registerGitPullRequest.mock.calls[0] as unknown as [Record<string, unknown>];
     expect(request).not.toHaveProperty('Ticket');
+    expect(registered).toEqual([
+      {
+        prNumber: 3,
+        prUrl: 'https://github.com/o/r/pull/3',
+        title: 'Bump zlib in api image',
+        status: GitPullRequestStatus.Open,
+      },
+    ]);
   });
 
-  it('registers the PR without the ticket when Averlon rejects the ticket', async () => {
+  it('leaves a PR without an ID out of the PRs to ticket', async () => {
+    const failing = mock(() => Promise.reject(new Error('backend down')));
+    const { registered } = await labelAndRegisterAgentPRs({
+      apiClient: { registerGitPullRequest: failing } as never,
+      registration,
+      orgName: 'o',
+      repo: 'r',
+      cloudId: '',
+      pullRequests: [{ pr_number: 7, pr_url: 'https://github.com/o/r/pull/7' }],
+    });
+    expect(registered).toEqual([]);
+  });
+});
+
+describe('requestAgentPRTickets', () => {
+  const registerGitPullRequest = mock((req: { Number: number }) =>
+    Promise.resolve({ ID: `id-${req.Number}` })
+  );
+
+  beforeEach(() => {
+    registerGitPullRequest.mockClear();
+  });
+
+  it('registers every PR again with the ticket and its first registration values', async () => {
+    const ticket = { Labels: ['security'], Priority: 'High' };
+    await requestAgentPRTickets({
+      apiClient: { registerGitPullRequest } as never,
+      registration,
+      orgName: 'o',
+      repo: 'r',
+      cloudId: 'c',
+      prs: [
+        {
+          prNumber: 1,
+          prUrl: 'https://github.com/o/r/pull/1',
+          title: 'Bump zlib',
+          status: GitPullRequestStatus.Merged,
+        },
+        { prNumber: 2, prUrl: 'https://github.com/o/r/pull/2' },
+      ],
+      ticket,
+    });
+    expect(registerGitPullRequest).toHaveBeenCalledTimes(2);
+    expect(registerGitPullRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        CloudID: 'c',
+        Number: 1,
+        URL: 'https://github.com/o/r/pull/1',
+        Title: 'Bump zlib',
+        Status: GitPullRequestStatus.Merged,
+        Type: registration.type,
+        Labels: [registration.label],
+        Ticket: { ...ticket, Summary: 'Bump zlib' },
+      })
+    );
+    // No title: the prefix title, and no ticket summary.
+    expect(registerGitPullRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        Number: 2,
+        Title: 'Test Remediation - PR #2',
+        Status: GitPullRequestStatus.Open,
+        Ticket: ticket,
+      })
+    );
+    expect(ticket).toEqual({ Labels: ['security'], Priority: 'High' });
+  });
+
+  it('keeps the PR registered without the ticket when Averlon rejects the ticket', async () => {
     const rejected = new ApiRequestError(
       '/v1/git/pr',
       400,
@@ -536,13 +555,13 @@ describe('labelAndRegisterAgentPRs', () => {
     const register = mock((req: { Ticket?: unknown; Number: number }) =>
       req.Ticket ? Promise.reject(rejected) : Promise.resolve({ ID: `id-${req.Number}` })
     );
-    const { prIdByNumber } = await labelAndRegisterAgentPRs({
+    await requestAgentPRTickets({
       apiClient: { registerGitPullRequest: register } as never,
       registration,
       orgName: 'o',
       repo: 'r',
       cloudId: '',
-      pullRequests: [{ pr_number: 4, pr_url: 'https://github.com/o/r/pull/4' }],
+      prs: [{ prNumber: 4, prUrl: 'https://github.com/o/r/pull/4' }],
       ticket: { Priority: 'High' },
     });
     expect(register).toHaveBeenCalledTimes(2);
@@ -551,23 +570,27 @@ describe('labelAndRegisterAgentPRs', () => {
       [Record<string, unknown>],
     ];
     expect(retry[0]).not.toHaveProperty('Ticket');
-    expect(prIdByNumber).toEqual(new Map([[4, 'id-4']]));
   });
 
-  it('does not retry without the ticket on an error that is not a 400', async () => {
+  it('does not retry without the ticket on an error that is not a 400, and goes on', async () => {
     const down = new ApiRequestError('/v1/git/pr', 503, 'Service Unavailable', 'down');
-    const register = mock(() => Promise.reject(down));
-    const { prIdByNumber } = await labelAndRegisterAgentPRs({
+    const register = mock((req: { Number: number }) =>
+      req.Number === 5 ? Promise.reject(down) : Promise.resolve({ ID: `id-${req.Number}` })
+    );
+    await requestAgentPRTickets({
       apiClient: { registerGitPullRequest: register } as never,
       registration,
       orgName: 'o',
       repo: 'r',
       cloudId: '',
-      pullRequests: [{ pr_number: 5, pr_url: 'https://github.com/o/r/pull/5' }],
+      prs: [
+        { prNumber: 5, prUrl: 'https://github.com/o/r/pull/5' },
+        { prNumber: 6, prUrl: 'https://github.com/o/r/pull/6' },
+      ],
       ticket: {},
     });
-    expect(register).toHaveBeenCalledTimes(1);
-    expect(prIdByNumber.size).toBe(0);
+    expect(register).toHaveBeenCalledTimes(2);
+    expect(register).toHaveBeenCalledWith(expect.objectContaining({ Number: 6, Ticket: {} }));
   });
 });
 

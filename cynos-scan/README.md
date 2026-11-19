@@ -397,8 +397,8 @@ The engine, `@averlon-ai/cynos-scan-engine`, is pinned to an exact version in
 published publicly on npm, so installing it needs no token.
 
 The build leaves out the engine's `assets/image.json` (`assets-exclude`), so the action builds the
-scanner image on the runner from the engine's Dockerfile. With it, the engine would pull the
-release's image from its private registry instead, which a calling repository cannot read.
+scanner image on the runner from the engine's Dockerfile. The engine release also provides a
+public prebuilt image, but this action does not include that image pin.
 
 ## The knowledge base
 
