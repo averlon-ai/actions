@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Release notes no longer publish the release job's GitHub token. The notes were the release step's `body:` input, which GitHub evaluates before the step runs, so the installation example's `github-token: ${{ secrets.GITHUB_TOKEN }}` became the job's token in the notes of v2.1.0 and v2.1.1, and its `api-key` and `api-secret` lines would have published those secrets in a repository that set them. The token expired when its job ended. The notes are now written to a file (`scripts/release-notes.ts`) and passed as `body_path`, which GitHub does not evaluate, so the example shows the expressions a calling workflow writes.
+
 ## [2.1.1] - 2026-11-19
 
 ### Changed
