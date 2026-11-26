@@ -21,9 +21,12 @@ function releaseStepInputs(): Record<string, string> {
 
 describe('release-notes', () => {
   test('keeps the installation example expressions as text', () => {
-    const notes = releaseNotes('v1.2.3', '### Fixed\n- A fix', '| Action |');
+    // The version goes in through a variable: each release rewrites every literal
+    // `averlon-ai/actions/<action>@v<version>` in the repository (update-action-versions.ts).
+    const version = 'v1.2.3';
+    const notes = releaseNotes(version, '### Fixed\n- A fix', '| Action |');
 
-    expect(notes).toContain('- uses: averlon-ai/actions/iac-risk-analysis@v1.2.3');
+    expect(notes).toContain(`- uses: averlon-ai/actions/iac-risk-analysis@${version}`);
     expect(notes).toContain('github-token: ${{ secrets.GITHUB_TOKEN }}');
     expect(notes).toContain('api-key: ${{ secrets.AVERLON_API_KEY }}');
     expect(notes).toContain('repo-name: ${{ github.repository }}');

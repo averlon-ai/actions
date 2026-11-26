@@ -50,7 +50,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Run Averlon Container Analysis
-        uses: averlon-ai/actions/container-analysis@v2.1.1
+        uses: averlon-ai/actions/container-analysis@v2.2.0
         with:
           averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
           averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -82,7 +82,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Run Averlon Container Analysis
-        uses: averlon-ai/actions/container-analysis@v2.1.1
+        uses: averlon-ai/actions/container-analysis@v2.2.0
         with:
           averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
           averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -119,7 +119,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Run Averlon Container Analysis
-        uses: averlon-ai/actions/container-analysis@v2.1.1
+        uses: averlon-ai/actions/container-analysis@v2.2.0
         with:
           averlon-api-key: ${{ secrets.AVERLON_API_KEY }}
           averlon-api-secret: ${{ secrets.AVERLON_API_SECRET }}
@@ -239,7 +239,7 @@ jobs:
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
           aws-region: us-west-2
-      - uses: averlon-ai/actions/container-analysis@v2.1.1
+      - uses: averlon-ai/actions/container-analysis@v2.2.0
         with:
           use-bedrock: true
           model: us.anthropic.claude-opus-4-5-20251101-v1:0
