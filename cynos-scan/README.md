@@ -354,6 +354,22 @@ that pull request, exactly as its own `pull_request` event would scan it:
   the summary comment links the run. Do not make the pull request scan a required check: with no
   scan on push, it would wait on every later commit.
 
+## Telemetry
+
+A scan that calls the model reports its start and its finish to cynos, with the same key as the
+scan, so that a scan that fails or slows down is noticed without you reporting it. A report holds:
+
+- the run's outcome (completed, failed or cancelled) and duration;
+- the scan kind (full or diff), the runtime and the action's version;
+- each phase's status and duration, and whether the knowledge-base cache was a hit, a miss or
+  failed;
+- the number of changed (diff) or product (full) files;
+- on failure, the phase that failed, the kind of error and its message, with keys, the checkout's
+  path and other secrets removed.
+
+The repository is identified only by a hash of `<host>/<owner>/<repo>`. No code, findings or file
+names are sent. A mock scan or `dry-run` sends nothing.
+
 ## Limits
 
 | Limit                 | Where            | What happens                                                   |

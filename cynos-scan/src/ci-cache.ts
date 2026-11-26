@@ -34,9 +34,16 @@
  * Caches are scoped to the repository and readable by its own workflows only, the same audience
  * as the source the answers describe. Every failure is logged, never thrown: the cache saves
  * time, it never decides a scan.
+ *
+ * Telemetry still needs to tell a failure from a miss or a skip, and @actions/cache does not say:
+ * it logs a failed restore and answers undefined, as for a miss, and logs a failed save and
+ * answers -1, as for a save it skipped. So the store asks the cache again without downloading
+ * (a lookup): an entry a lookup finds but the restore did not bring back is a failed restore, and
+ * a save that answered -1 failed unless the cache mode forbids writes (checked first) or a lookup
+ * finds the commit's entry, saved by another run of the same commit.
  */
 import * as actionsCache from '@actions/cache';
-import type { KnowledgeBaseStore } from '@averlon-ai/cynos-scan-engine';
+import type { CacheStep, KnowledgeBaseStore } from '@averlon-ai/cynos-scan-engine';
 import { cpSync, existsSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -77,6 +84,16 @@ export function restorableRefs(
   return refs;
 }
 
+/**
+ * Whether the runner's cache mode (ACTIONS_CACHE_MODE) permits a save, as @actions/cache decides
+ * it: writes only with `write` or `write-only`, and an unset or unknown mode permits everything.
+ */
+export function cacheModeAllowsWrites(env: NodeJS.ProcessEnv = process.env): boolean {
+  const mode = (env['ACTIONS_CACHE_MODE'] ?? '').trim().toLowerCase();
+  if (!['none', 'read', 'write', 'write-only'].includes(mode)) return true;
+  return mode === 'write' || mode === 'write-only';
+}
+
 /** The fixed path of the entries: CACHE_DIRECTORY under RUNNER_TEMP (the system temp locally). */
 export function cachePath(env: NodeJS.ProcessEnv = process.env): string {
   return join(env['RUNNER_TEMP'] || tmpdir(), CACHE_DIRECTORY);
@@ -87,13 +104,18 @@ export class GitHubActionsCacheStore implements KnowledgeBaseStore {
   /**
    * @param entries Lists the repository's entries; without it, no ancestor's entry is preferred.
    * @param refs The refs whose entries this run can restore (restorableRefs).
+   * @param failed Told of each restore or save that failed: the store logs the failure and goes
+   *   on as on a miss, so without it the scan's telemetry would count a failed restore as a miss.
+   * @param env The runner's environment, for its cache mode.
    */
   constructor(
     private readonly log: (message: string) => void,
     private readonly path: string = cachePath(),
     private readonly client: CacheClient = actionsCache,
     private readonly entries?: CacheEntries,
-    private readonly refs: Set<string> = new Set()
+    private readonly refs: Set<string> = new Set(),
+    private readonly failed: (step: CacheStep) => void = () => {},
+    private readonly env: NodeJS.ProcessEnv = process.env
   ) {}
 
   /**
@@ -111,6 +133,7 @@ export class GitHubActionsCacheStore implements KnowledgeBaseStore {
       rmSync(this.path, { recursive: true, force: true });
     } catch (error) {
       this.log(`knowledge-base cache not restored: ${message(error)}`);
+      this.failed('cache_restore');
       return undefined;
     }
     const ancestor = await this.newestAncestor(inHistory);
@@ -146,32 +169,71 @@ export class GitHubActionsCacheStore implements KnowledgeBaseStore {
     await this.saveEntry(sha, restored);
   }
 
-  /** The Actions cache's restore into the fixed path, in the order the module comment lists. */
+  /**
+   * The Actions cache's restore into the fixed path, in the order the module comment lists. A
+   * lookup first tells a miss from a failed restore, which both answer undefined.
+   */
   private async restoreEntry(sha: string, preferred: string[]): Promise<string | undefined> {
     if (!this.client.isFeatureAvailable()) return undefined;
+    const primary = `${CI_CACHE_PREFIX}${sha}`;
+    const restoreKeys = [...preferred.map(s => `${CI_CACHE_PREFIX}${s}`), CI_CACHE_PREFIX];
     try {
-      const key = await this.client.restoreCache([this.path], `${CI_CACHE_PREFIX}${sha}`, [
-        ...preferred.map(s => `${CI_CACHE_PREFIX}${s}`),
-        CI_CACHE_PREFIX,
-      ]);
-      this.log(key ? `knowledge-base cache restored from ${key}` : 'no knowledge-base cache yet');
+      // A miss: no entry to restore, or a cache mode that forbids reads.
+      const found = await this.lookup(primary, restoreKeys);
+      if (!found) {
+        this.log('no knowledge-base cache yet');
+        return undefined;
+      }
+      // An entry the lookup found that the restore does not bring back failed to download or
+      // extract (@actions/cache logged why).
+      const key = await this.client.restoreCache([this.path], primary, restoreKeys);
+      if (!key) {
+        this.log(`knowledge-base cache not restored: ${found} was found but did not restore`);
+        this.failed('cache_restore');
+        return undefined;
+      }
+      this.log(`knowledge-base cache restored from ${key}`);
       return key;
     } catch (error) {
       this.log(`knowledge-base cache not restored: ${message(error)}`);
+      this.failed('cache_restore');
       return undefined;
     }
   }
 
-  /** The Actions cache's save of the fixed path; entries are immutable, so never its own key. */
+  /**
+   * The Actions cache's save of the fixed path; entries are immutable, so never its own key. A
+   * save answering -1 failed unless it was skipped: see the module comment.
+   */
   private async saveEntry(sha: string, restored: string | undefined): Promise<void> {
     const key = `${CI_CACHE_PREFIX}${sha}`;
     if (!this.client.isFeatureAvailable() || restored === key) return;
+    // A cache mode that forbids writes makes the save answer -1 without trying.
+    if (!cacheModeAllowsWrites(this.env)) {
+      this.log('knowledge-base cache not saved: the cache mode does not permit writes');
+      return;
+    }
     try {
-      await this.client.saveCache([this.path], key);
-      this.log(`knowledge-base cache saved as ${key}`);
+      if ((await this.client.saveCache([this.path], key)) !== -1) {
+        this.log(`knowledge-base cache saved as ${key}`);
+        return;
+      }
+      // Another run of the same commit reserved the key first: its entry is this one.
+      if (await this.lookup(key, [])) {
+        this.log(`knowledge-base cache not saved: another run saved ${key}`);
+        return;
+      }
+      this.log(`knowledge-base cache not saved as ${key} (@actions/cache logged why)`);
+      this.failed('cache_save');
     } catch (error) {
       this.log(`knowledge-base cache not saved: ${message(error)}`);
+      this.failed('cache_save');
     }
+  }
+
+  /** The key a restore would bring back, without downloading it; undefined if none. */
+  private lookup(primary: string, restoreKeys: string[]): Promise<string | undefined> {
+    return this.client.restoreCache([this.path], primary, restoreKeys, { lookupOnly: true });
   }
 
   /**
@@ -187,6 +249,7 @@ export class GitHubActionsCacheStore implements KnowledgeBaseStore {
       return true;
     } catch (error) {
       this.log(`knowledge-base cache not ${what}: ${message(error)}`);
+      this.failed(what === 'restored' ? 'cache_restore' : 'cache_save');
       return false;
     }
   }

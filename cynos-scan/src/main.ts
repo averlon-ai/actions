@@ -23,6 +23,8 @@ import {
   scanCheckout,
   text,
   type JsonObject,
+  type RunFinish,
+  type ScanTelemetry,
 } from '@averlon-ai/cynos-scan-engine';
 import { mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -73,6 +75,14 @@ import {
   type EventContext,
   type Target,
 } from './target';
+import {
+  actionTelemetry,
+  finishRun,
+  finishRunOnCancel,
+  scanFinish,
+  startRun,
+  stepFailure,
+} from './telemetry';
 import { octokitPulls, updateThreatModel } from './threat-model';
 import {
   octokitPullRequest,
@@ -315,6 +325,11 @@ export async function run(actionRoot = assetsDirectory()): Promise<void> {
   let success = false;
   let title = 'Scan could not complete.';
   let body = '';
+  // The scan's telemetry, and how its run ended: set once the scan starts (telemetry.ts).
+  let telemetry: ScanTelemetry | undefined;
+  let finish: RunFinish | undefined;
+  // Stops finishing the run as cancelled on the runner's SIGINT, once it has finished on its own.
+  let stopFinishingOnCancel: (() => void) | undefined;
   try {
     inputs = parseInputs(
       name => core.getInput(name),
@@ -409,6 +424,17 @@ export async function run(actionRoot = assetsDirectory()): Promise<void> {
     const rubricFile = checkoutFile(project, 'severity-rubric', inputs.severityRubric);
     const falsePositivesFile = checkoutFile(project, 'false-positives', inputs.falsePositives);
     const runName = `cynos-scan-${process.env['GITHUB_RUN_ID'] ?? process.pid}-${process.env['GITHUB_RUN_ATTEMPT'] ?? 1}`;
+    // The run's start and finish, reported to cynos: it listens to the phases and the cache, a
+    // cancelled job finishes the run as cancelled from its signal handler, and the post step
+    // finishes a run whose process died (telemetry.ts).
+    const scanKind = isDiff ? 'diff' : 'full';
+    const runTelemetry = actionTelemetry(inputs, {
+      kind: scanKind,
+      owner,
+      repo,
+      checkout: project,
+    });
+    telemetry = runTelemetry;
     // Jev's answers, the code graph and the last full scan's review, when the Actions cache has
     // them (ci-cache.ts); kept outside the stage, which is discarded.
     const cacheLog = (message: string): void => core.info(`knowledge base: ${message}`);
@@ -418,11 +444,15 @@ export async function run(actionRoot = assetsDirectory()): Promise<void> {
       cachePath(),
       actionsCache,
       cacheEntries(octokit, owner, repo),
-      restorableRefs(branch)
+      restorableRefs(branch),
+      step => runTelemetry.cacheFailed(step)
     );
+    // Listening before the run starts: from here a cancellation finishes it as cancelled.
+    stopFinishingOnCancel = finishRunOnCancel(runTelemetry);
+    await startRun(runTelemetry, scanKind);
     const scan = await scanCheckout(
       {
-        kind: isDiff ? 'diff' : 'full',
+        kind: scanKind,
         diffBase: target.diffBase,
         project,
         stage,
@@ -463,14 +493,16 @@ export async function run(actionRoot = assetsDirectory()): Promise<void> {
         log: core.info,
         warn: core.warning,
         error: core.error,
+        progress: event => runTelemetry.progress(event),
         containers: names => core.saveState('containers', JSON.stringify(names)),
         // A comment request restores but never saves: its run's cache entries would be scoped to
         // the default branch, where every later scan of every branch restores them, though they
         // describe a pull request's code. A pull_request run saves in the pull request's own scope.
-        knowledgeBaseStore:
+        knowledgeBaseStore: runTelemetry.measureStore(
           event.eventName === 'issue_comment'
             ? restoreOnly(knowledgeBaseStore, cacheLog)
-            : knowledgeBaseStore,
+            : knowledgeBaseStore
+        ),
         scanned: ({ outcome, scannerRun, estimatedCost, counts }) =>
           setOutputs({
             'scan-status': outcome.scanStatus,
@@ -485,6 +517,7 @@ export async function run(actionRoot = assetsDirectory()): Promise<void> {
           }),
       }
     );
+    finish = scanFinish(scan, value => redact(value, inputs));
     const { outcome, scannerRun, reports, findings, counts, sarif, estimatedCost } = scan;
     const available = resultsAvailable(reports, target.scannedSha);
     const leakClean = scan.leaked.length === 0;
@@ -649,7 +682,10 @@ export async function run(actionRoot = assetsDirectory()): Promise<void> {
     body = `<pre>${html(message)}</pre>`;
     core.setOutput('sarif-upload-ready', 'false');
     core.error(message);
+    finish = stepFailure(finish, message);
   } finally {
+    if (telemetry) await finishRun(telemetry, finish ?? { outcome: 'failed', errorKind: 'action' });
+    stopFinishingOnCancel?.();
     discardWorkspace(stage, keepReports);
     // The step summary is not masked like the log. Its fields are redacted before formatting;
     // this catches any key that still reached it, as written or HTML-escaped.
