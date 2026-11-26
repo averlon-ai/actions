@@ -16,14 +16,21 @@ import {
 const none = (): boolean => false;
 
 /**
- * A cache client that records its calls. A restore that hits writes `entry` into the restored
- * path, as @actions/cache extracts an entry where it was saved from.
+ * A cache client that records its restores and saves in `calls`, and its lookups (restores that
+ * only look, lookupOnly) in `lookups`. A restore that hits writes `entry` into the restored path,
+ * as @actions/cache extracts an entry where it was saved from.
  */
 function fakeCache(available: boolean, restored?: string, fail = false) {
   const calls: string[] = [];
+  const lookups: string[] = [];
   const client: CacheClient = {
     isFeatureAvailable: () => available,
-    restoreCache: async (paths, key, restoreKeys) => {
+    restoreCache: async (paths, key, restoreKeys, options) => {
+      if (options?.lookupOnly) {
+        lookups.push(`lookup ${paths.join()} ${key} ${restoreKeys?.join()}`);
+        if (fail) throw new Error('cache service down');
+        return restored;
+      }
       calls.push(`restore ${paths.join()} ${key} ${restoreKeys?.join()}`);
       if (fail) throw new Error('cache service down');
       if (restored) {
@@ -38,7 +45,7 @@ function fakeCache(available: boolean, restored?: string, fail = false) {
       return 1;
     },
   };
-  return { client, calls };
+  return { client, calls, lookups };
 }
 
 /**
@@ -56,9 +63,9 @@ function fakeStore(
   const path = join(root, 'cynos-scan-knowledge-base-cache');
   const dir = join(root, 'stage', 'knowledge-base-cache');
   const log: string[] = [];
-  const { client, calls } = fakeCache(available, restored, fail);
+  const { client, calls, lookups } = fakeCache(available, restored, fail);
   const store = new GitHubActionsCacheStore(m => log.push(m), path, client, entries, refs);
-  return { store, calls, log, path, dir };
+  return { store, calls, lookups, log, path, dir };
 }
 
 describe('GitHubActionsCacheStore', () => {
@@ -110,7 +117,7 @@ describe('GitHubActionsCacheStore', () => {
   });
 
   it('restores as before when the entries cannot be listed, and logs why', async () => {
-    const { store, calls, log, path, dir } = fakeStore(
+    const { store, lookups, log, path, dir } = fakeStore(
       true,
       undefined,
       false,
@@ -120,8 +127,8 @@ describe('GitHubActionsCacheStore', () => {
       new Set(['refs/heads/main'])
     );
     await store.restore(dir, 'head', ['base'], () => true);
-    expect(calls).toEqual([
-      `restore ${path} ${CI_CACHE_PREFIX}head ${CI_CACHE_PREFIX}base,${CI_CACHE_PREFIX}`,
+    expect(lookups).toEqual([
+      `lookup ${path} ${CI_CACHE_PREFIX}head ${CI_CACHE_PREFIX}base,${CI_CACHE_PREFIX}`,
     ]);
     expect(log[0]).toContain('Resource not accessible by integration');
   });

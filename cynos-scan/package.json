@@ -16,7 +16,7 @@
     "@actions/cache": "6.3.0",
     "@actions/core": "^3.0.0",
     "@actions/github": "^9.1.1",
-    "@averlon-ai/cynos-scan-engine": "0.3.0"
+    "@averlon-ai/cynos-scan-engine": "0.3.2"
   },
   "devDependencies": {
     "@types/bun": "1.2.17"

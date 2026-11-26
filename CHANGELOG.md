@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0] - 2026-11-26
+
+### Added
+
+- `cynos-scan` reports each scan's start and finish to Cynos (scan telemetry): its status, each phase's duration, the knowledge-base cache's hit or miss, and on failure the failed phase and error kind. The repository is sent only as a hash, and no code or findings are sent. See the action's README (Telemetry).
+
+### Changed
+
+- Update the Cynos scan engine to `@averlon-ai/cynos-scan-engine@0.3.2`: a native scan no longer ends by asking to patch its findings, a scan that resubmits an accepted draft no longer fails at the end, and a scan no longer slows to a crawl on long runs of one character in a remote URL, a C file or a minified line.
+
+### Fixed
+
+- Release notes no longer publish the release job's GitHub token. The notes were the release step's `body:` input, which GitHub evaluates, so the installation example's `${{ secrets.GITHUB_TOKEN }}` became the job's token in the notes of v2.1.0 and v2.1.1 (it expired when its job ended). The notes are now written to a file and passed as `body_path`, which GitHub does not evaluate.
+
 ## [2.1.1] - 2026-11-19
 
 ### Changed

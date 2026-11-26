@@ -10,6 +10,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- The action now reports each scan's start and finish to cynos (scan telemetry): status, each phase's duration, the knowledge-base cache's hit, miss or failure, and on failure the failed phase and error kind, with the repository as a hash and no code or findings. A cancelled or timed-out job's scan is reported as cancelled by the scan step when the runner signals it; the post step reports a scan step that died without being cancelled (killed, for example out of memory, or crashed) as failed with the kind `lost`. (README: Telemetry; engine 0.3.2).
+
 - New inputs `severity-rubric` and `false-positives`, repository-relative files: the rubric the scan grades severity by instead of upstream's default, and the findings your reviewers dismissed, each with a reason, its title and a location. The scan reads the dismissals as reviewer feedback and decides whether a new finding is one of them; a finding it still reports whose fingerprint a dismissal names gets no issue and no review comment, and the summary comment counts it (README: Severity rubric and false positives; engine 0.2.6).
 
 - The action now scans a pull request on a comment request: an `issue_comment` on an open pull request from its repository's owner, a member or a collaborator. It fetches the pull request and scans and comments on it as on its `pull_request` event (no forks; the checkout must be its head), and never treats the run as the default branch's, though GitHub runs it there: no `last-scan` starting point, no threat model, no knowledge-base cache save. `examples/cynos-scan-pr.yml` now scans a pull request once when it opens or is marked ready for review, and again on a `cynos scan` comment, instead of on every push (README: Comment requests).
@@ -20,6 +22,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Changed
 
+- Update the engine, `@averlon-ai/cynos-scan-engine`, from 0.3.0 to 0.3.2. It reports each scan's start and finish to cynos (scan telemetry, above); a native scan no longer ends by asking to patch its findings; the lead is told that a draft after the accepted one neither reopens the scan nor removes findings; and a scan no longer takes quadratic time on a remote URL, a C file or a minified line with long runs of one character. The action's inputs are unchanged.
 - Update the public `@averlon-ai/cynos-scan-engine` dependency from 0.2.0 to 0.3.0, including helper result saving and finding identity fixes. The action inputs are unchanged.
 
 - The action now installs its engine from npm as `@averlon-ai/cynos-scan-engine`, published publicly, instead of `@averlon-security/cynos-scan-engine` from GitHub Packages: building it needs no token, and the repository's workflows no longer grant `packages: read` for it. Callers see no change (engine 0.2.0).

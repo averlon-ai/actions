@@ -75,28 +75,13 @@ jobs:
             git push origin ${{ steps.get_version.outputs.VERSION }} --force
           fi
 
-      - name: Extract changelog
-        id: changelog
-        run: |
-          # Extract changelog using the dedicated script
-          CHANGELOG=$(bun scripts/extract-changelog.ts "${{ steps.get_version.outputs.VERSION }}")
-
-          # Write multiline output without breaking markdown formatting
-          {
-            echo "CHANGELOG<<EOF"
-            echo "${CHANGELOG}"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Generate action list
-        id: action_list
-        run: |
-          ACTION_LIST=$(./scripts/generate-action-list.sh)
-          {
-            echo "ACTION_LIST<<EOF"
-            echo "${ACTION_LIST}"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
+      # The notes go to the release step as a file, never as its `body:` input: GitHub evaluates
+      # every expression in a step's inputs, so the installation example's
+      # `${{ secrets.GITHUB_TOKEN }}` published the job's token (scripts/release-notes.ts).
+      - name: Write the release notes
+        env:
+          VERSION: ${{ steps.get_version.outputs.VERSION }}
+        run: bun scripts/release-notes.ts "$VERSION" > "$RUNNER_TEMP/release-notes.md"
 
       - name: Create Release
         uses: actions/create-release@0cb9c9b65d5d1901c1f53e5e66eaf4afd303e70e # v1
@@ -105,29 +90,6 @@ jobs:
         with:
           tag_name: ${{ steps.get_version.outputs.VERSION }}
           release_name: Release ${{ steps.get_version.outputs.VERSION }}
-          body: |
-            ## Changes
-            ${{ steps.changelog.outputs.CHANGELOG }}
-
-            ## Available Actions
-            ${{ steps.action_list.outputs.ACTION_LIST }}
-            _Generated from action metadata via `./scripts/generate-action-list.sh`._
-
-            ## Installation Example (iac-risk-analysis)
-            ```yaml
-            - uses: averlon-ai/actions/iac-risk-analysis@${{ steps.get_version.outputs.VERSION }}
-              with:
-                api-key: ${{ secrets.AVERLON_API_KEY }}
-                api-secret: ${{ secrets.AVERLON_API_SECRET }}
-                repo-name: ${{ github.repository }}
-                base-commit-hash: ${{ github.event.pull_request.base.sha }}
-                head-commit-hash: ${{ github.event.pull_request.head.sha }}
-                base-plan-path: './base-plan.json'
-                head-plan-path: './head-plan.json'
-                base-graph-path: './base-graph.dot'
-                head-graph-path: './head-graph.dot'
-                comment-on-pr: true
-                github-token: ${{ secrets.GITHUB_TOKEN }}
-            ```
+          body_path: ${{ runner.temp }}/release-notes.md
           draft: true
           prerelease: false
